@@ -23,10 +23,18 @@ def get_model_stats(model, relaxed_model):
     else:
         lp_val = 0 # O manejar error
 
-    # Calcular Gap: |IP - LP| / IP * 100 (evitando división por cero)
+    # Calcular Gap: (IP - LP )/ IP * 100 if MinArea (evitando división por cero)
+    # Si MaxArea, el gap es (LP - IP) / (Area(CH)-IP) * 100
     gap = 0.0
-    if ip_val != 0:
-        gap = abs(ip_val - lp_val) / abs(ip_val) * 100
+    if ip_val != 0 and model.ModelSense == GRB.MINIMIZE:
+        gap = (ip_val - lp_val) / ip_val * 100
+    
+    elif ip_val != 0 and model.ModelSense == GRB.MAXIMIZE:
+        # Asumimos que el área del casco convexo es accesible como atributo
+        area_ch = model._convex_hull_area if hasattr(model, '_convex_hull_area') else None
+        print(f"Convex Hull Area for gap calculation: {area_ch}")
+        if area_ch is not None and (area_ch - ip_val) != 0:
+            gap = (lp_val - ip_val) / (area_ch - ip_val) * 100
     
     return lp_val, gap, ip_val, time_s, nodes
 

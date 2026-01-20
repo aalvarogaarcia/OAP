@@ -494,9 +494,33 @@ def insertion_heuristic(points: NDArray[np.int64], CH: NDArray[np.int64], V: NDA
             
     return N
 
+def solve_benders_decomposition(points: NDArray[np.int64], ta, time_limit: int = 7200000):
+    # --- MODELO MAESTRO ---
+    m_master = gp.Model("Benders_Master")
+
+    x = { (i, j): m_master.addVar(vtype=GRB.BINARY, lb = 0, ub = 1, name=f"x_{i}_{j}") for i in N for j in N  if i != j }
+    f = {(i,j) : m_master.addVar(vtype=GRB.CONTINUOUS, name=f"f_{i}_{j}") for i in N for j in N if i != j }
+    z = {(i): m_master.addVar(vtype=GRB.CONTINUOUS, name=f"z_{i}") for i in V }
+    m_master.ModelSense = GRB.MAXIMIZE
+
+    # AÑADIR LAS RESTRICCIONES INICIALES DEL MAESTRO AQUÍ
+
+    # Restricciones de flujo
 
 
-def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool = False, time_limit: int = 7200000, maximize: bool = True, sum_constrain: bool = True) -> gp.Model:
+    # --- MODELO SUBPROBLEMA ---
+    m_sub = gp.Model("Benders_Subproblem")
+    m_sub.setParam('OutputFlag', 0)
+    y = { (i) : m_sub.addVar(vtype=GRB.CONTINUOUS, ub=1, lb=0, name=f"y_{i}") for i in V}
+    yp = { (i) : m_sub.addVar(vtype=GRB.CONTINUOUS, ub=1, lb=0, name=f"yp_{i}") for i in V}
+
+
+
+
+
+
+def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool = False, time_limit: int = 7200000, 
+                          maximize: bool = True, sum_constrain: bool = True, benders: bool = False) -> gp.Model:
     points = read_indexed_instance(instance_path)
     N = range(len(points))
     CH = compute_convex_hull(points)
@@ -510,7 +534,7 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
         print(f"Instance: {instance_path}")
 
     model = gp.Model("OAP_Simple")
-
+    model._convex_hull_area = compute_convex_hull_area(points)
     # Model building logic goes here
     if verbose:
         print("Building model... \nDefining variables...")
@@ -532,7 +556,7 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
     if maximize:
         model.setObjective(gp.quicksum(y[i] * at[i] for i in V), GRB.MAXIMIZE)
     else:
-        model.setObjective(gp.quicksum(y[i] * at[i] for i in V), GRB.MINIMIZE)
+        model.setObjective(model._convex_hull_area - gp.quicksum(y[i] * at[i] for i in V), GRB.MAXIMIZE)
 
     if verbose:
         print("Variables defined. \nAdding constraints...")

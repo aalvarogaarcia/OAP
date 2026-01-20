@@ -1,10 +1,12 @@
+from main import get_model_stats
 from src import *
 import glob
 import os
 import time
 
-points = np.array([[0, 0], [1, 2], [2, 1], [3, 3], [4, 0], [2, 4], [0, 4], [4, 4]])
-CH = compute_convex_hull(points)
-V = compute_triangles(points)
-
-insertion_heuristic(points, CH, V, sense=True)
+instance = "instance/euro-night-0000015.instance"
+model = build_and_solve_model(instance, verbose=True, plot=False, maximize=True, time_limit=600, sum_constrain=True, benders=True)
+model_lp = model.relax()
+model_lp.optimize()
+lp, gap, ip, elapsed_time, nodes = get_model_stats(model, model_lp)
+print(f"Resultados: LP={lp}, Gap={gap}%, IP={ip}, Time={elapsed_time}s, Nodes={nodes}")
