@@ -13,4 +13,8 @@ wheels/
 #Resources
 instance/
 outputs/
-
+*.lp
+*.instance
+*.sol
+*.log
+*.dot

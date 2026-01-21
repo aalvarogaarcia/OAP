@@ -39,7 +39,56 @@ def get_model_stats(model, relaxed_model):
     return lp_val, gap, ip_val, time_s, nodes
 
 
+def get_model_stats_cplex(model: Model, relaxed_model: Model):
+    """
+    Extrae estadísticas clave del modelo CPLEX y su relajación.
+    Retorna: (LP_Val, Gap, IP_Val, Time, Nodes)
+    """
 
+    # 1. Validar si el modelo principal (IP) tiene solución
+    # En docplex, 'model.solution' es None si no se encontró solución.
+    if model and model.solution:
+        ip_val = model.objective_value
+        
+        # El tiempo y los nodos se extraen de los detalles de la resolución
+        solve_details = model.get_solve_details()
+        time_s = solve_details.time  # Tiempo en segundos
+        nodes = solve_details.nb_nodes_processed
+    else:
+        return "-", "-", "-", "-", "-"
+
+    # 2. Validar si el modelo relajado (LP) tiene solución
+    if relaxed_model and relaxed_model.solution:
+        lp_val = relaxed_model.objective_value
+    else:
+        lp_val = 0 # O manejar error de relajación infactible
+
+    # 3. Calcular Gap
+    # (IP - LP )/ IP * 100 if MinArea (evitando división por cero)
+    # Si MaxArea, el gap es (LP - IP) / (Area(CH)-IP) * 100
+    gap = 0.0
+    
+    # Detectar sentido de optimización (Minimizar vs Maximizar)
+    is_minimization = model.objective_sense.is_minimize() 
+    
+    if ip_val != 0 and is_minimization:
+        # Gap estándar para minimización
+        gap = (ip_val - lp_val) / ip_val * 100
+    
+    elif ip_val != 0 and not is_minimization: # Maximización
+        # Asumimos que el área del casco convexo fue guardada en el atributo _convex_hull_area
+        area_ch = model._convex_hull_area if hasattr(model, '_convex_hull_area') else None
+        
+        # print(f"Convex Hull Area for gap calculation: {area_ch}")
+        
+        if area_ch is not None and (area_ch - ip_val) != 0:
+            # Fórmula específica para OAP (Area Poligonización)
+            gap = (lp_val - ip_val) / (area_ch - ip_val) * 100
+        else:
+            # Fallback a cálculo estándar si no hay Convex Hull info
+            gap = (lp_val - ip_val) / abs(ip_val) * 100
+    
+    return lp_val, gap, ip_val, time_s, nodes
 
 def main(dir_path="data", 
          ext="*.txt", 
@@ -53,6 +102,7 @@ def main(dir_path="data",
     if not sum_constrain:
         flag_suffix += "_nosum"
     flag_suffix += f"_tl{time_limit}" if time_limit != 7200000 else ""
+    flag_suffix += ext.replace("*", "").split(".")[0] if ext != "*.txt" else ""
     
     output_filename = f"outputs/LaTex/resultados_tabla{flag_suffix}.tex"
     
