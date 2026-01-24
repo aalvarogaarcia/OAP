@@ -1,94 +1,13 @@
-from src import *
+from models.gurobi import build_and_solve_model
+from utils.utils import *
+from utils.model_stats import get_model_stats
+import pandas as pd
 import glob
 import os
 import time
 from numbers import Real
 import argparse
 
-def get_model_stats(model, relaxed_model):
-    """
-    Extrae estadísticas clave del modelo y su relajación.
-    Retorna: (LP_Val, Gap, IP_Val, Time, Nodes)
-    """
-
-    if model and model.SolCount > 0:
-        ip_val = model.ObjVal
-        time_s = model.Runtime
-        nodes = model.NodeCount
-    else:
-        return "-", "-", "-", "-", "-"
-
-    if relaxed_model and relaxed_model.SolCount > 0:
-        lp_val = relaxed_model.ObjVal
-    else:
-        lp_val = 0 # O manejar error
-
-    # Calcular Gap: (IP - LP )/ IP * 100 if MinArea (evitando división por cero)
-    # Si MaxArea, el gap es (LP - IP) / (Area(CH)-IP) * 100
-    gap = 0.0
-    if ip_val != 0 and model.ModelSense == GRB.MINIMIZE:
-        gap = (ip_val - lp_val) / ip_val * 100
-    
-    elif ip_val != 0 and model.ModelSense == GRB.MAXIMIZE:
-        # Asumimos que el área del casco convexo es accesible como atributo
-        area_ch = model._convex_hull_area if hasattr(model, '_convex_hull_area') else None
-        print(f"Convex Hull Area for gap calculation: {area_ch}")
-        if area_ch is not None and (area_ch - ip_val) != 0:
-            gap = (lp_val - ip_val) / (area_ch - ip_val) * 100
-    
-    return lp_val, gap, ip_val, time_s, nodes
-
-
-def get_model_stats_cplex(model: Model, relaxed_model: Model):
-    """
-    Extrae estadísticas clave del modelo CPLEX y su relajación.
-    Retorna: (LP_Val, Gap, IP_Val, Time, Nodes)
-    """
-
-    # 1. Validar si el modelo principal (IP) tiene solución
-    # En docplex, 'model.solution' es None si no se encontró solución.
-    if model and model.solution:
-        ip_val = model.objective_value
-        
-        # El tiempo y los nodos se extraen de los detalles de la resolución
-        solve_details = model.get_solve_details()
-        time_s = solve_details.time  # Tiempo en segundos
-        nodes = solve_details.nb_nodes_processed
-    else:
-        return "-", "-", "-", "-", "-"
-
-    # 2. Validar si el modelo relajado (LP) tiene solución
-    if relaxed_model and relaxed_model.solution:
-        lp_val = relaxed_model.objective_value
-    else:
-        lp_val = 0 # O manejar error de relajación infactible
-
-    # 3. Calcular Gap
-    # (IP - LP )/ IP * 100 if MinArea (evitando división por cero)
-    # Si MaxArea, el gap es (LP - IP) / (Area(CH)-IP) * 100
-    gap = 0.0
-    
-    # Detectar sentido de optimización (Minimizar vs Maximizar)
-    is_minimization = model.objective_sense.is_minimize() 
-    
-    if ip_val != 0 and is_minimization:
-        # Gap estándar para minimización
-        gap = (ip_val - lp_val) / ip_val * 100
-    
-    elif ip_val != 0 and not is_minimization: # Maximización
-        # Asumimos que el área del casco convexo fue guardada en el atributo _convex_hull_area
-        area_ch = model._convex_hull_area if hasattr(model, '_convex_hull_area') else None
-        
-        # print(f"Convex Hull Area for gap calculation: {area_ch}")
-        
-        if area_ch is not None and (area_ch - ip_val) != 0:
-            # Fórmula específica para OAP (Area Poligonización)
-            gap = (lp_val - ip_val) / (area_ch - ip_val) * 100
-        else:
-            # Fallback a cálculo estándar si no hay Convex Hull info
-            gap = (lp_val - ip_val) / abs(ip_val) * 100
-    
-    return lp_val, gap, ip_val, time_s, nodes
 
 def main(dir_path="data", 
          ext="*.txt", 
@@ -105,10 +24,13 @@ def main(dir_path="data",
     flag_suffix += ext.replace("*", "").split(".")[0] if ext != "*.txt" else ""
     
     output_filename = f"outputs/LaTex/resultados_tabla{flag_suffix}.tex"
-    
+    output_excel_filename = f"outputs/Excel/resultados_tabla{flag_suffix}.xlsx"
+
+
     print(f"Iniciando proceso. Los resultados se guardarán en: {output_filename}")
     print(f"Flags: sum_constrain={sum_constrain}, time_limit={time_limit}")
 
+    data_list = []
     # 'w' abre el archivo para escritura (write). encoding='utf-8' es importante para LaTeX.
     with open(output_filename, "w", encoding="utf-8") as f:
         
@@ -236,6 +158,26 @@ def main(dir_path="data",
                 # Escribir la línea en el archivo
                 f.write(row_str + "\n")
 
+                new_row = {
+                    "Instance": instance_name,
+                    "Size": size_n,
+                    "Convex Hull": conv_hull_area,
+                    "Cols": cols,
+                    "Rows": rows,
+                    "Min LP Val": min_lp,
+                    "Min Gap (%)": min_gap,
+                    "Min IP Val": min_ip,
+                    "Min Time": min_time,
+                    "Min Nodes": min_nodes,
+                    "Max LP Val": max_lp,
+                    "Max Gap (%)": max_gap,
+                    "Max IP Val": max_ip,
+                    "Max Time": max_time,
+                    "Max Nodes": max_nodes
+                }
+                
+                
+
             else:
                 row_str = (
                     f"{instance_name} & {size_n} & {conv_hull_area_str} & {cols} & {rows} & "
@@ -244,6 +186,26 @@ def main(dir_path="data",
                 )
                 f.write(row_str + "\n")
 
+                new_row = {
+                    "Instance": instance_name,
+                    "Size": size_n,
+                    "Convex Hull": conv_hull_area,
+                    "Cols": cols,
+                    "Rows": rows,
+                    "Min LP Val": '-',
+                    "Min Gap (%)": '-',
+                    "Min IP Val": '-',
+                    "Min Time": min_time,
+                    "Min Nodes": min_nodes,
+                    "Max LP Val": '-',
+                    "Max Gap (%)": '-',
+                    "Max IP Val": '-',
+                    "Max Time": max_time,
+                    "Max Nodes": max_nodes
+                }
+
+            # 3. Añádelo a la lista
+            data_list.append(new_row)
         # 3. Escribir Footer de LaTeX al terminar el bucle
         f.write(r"""
 \bottomrule
@@ -255,7 +217,9 @@ def main(dir_path="data",
 
 \end{document}          
 """)
-
+    # 4. Crear DataFrame y exportar a Excel
+    df = pd.DataFrame(data_list)
+    df.to_excel(output_excel_filename, index=False)
     print(f"\n¡Éxito! Archivo '{output_filename}' generado correctamente.")
 
 if __name__ == "__main__":
@@ -292,7 +256,7 @@ Examples:
                        type=int,
                        default=7200000,
                        dest='time_limit',
-                       help='Time limit in milliseconds (default: 7200000 = 2 hours)')
+                       help='Time limit in seconds (default: 7200000 = 2 hours)')
     
     # Parse arguments
     args = parser.parse_args()
