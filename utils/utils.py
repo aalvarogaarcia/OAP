@@ -1,15 +1,14 @@
 # SIMPLIFIED OVER SIMPLIFIED PROBLEM
-from xml.parsers.expat import model
-from pyexpat import model
 import numpy as np
 from numpy.typing import NDArray
 from scipy.spatial import ConvexHull
 from itertools import combinations
 import time
-import glob
+import glob  
+import matplotlib.pyplot as plt
+import networkx as nx
 import gurobipy as gp
 from gurobipy import GRB
-from docplex.mp.model import Model
 
 def read_data(file_path):
     """Reads data from a file and returns it as a list of lines."""
@@ -424,7 +423,7 @@ def write_prefile(file_path:str):
     parts = base_name.split('-')
     seed = parts[-1] if parts else '0'
     
-    out_file = os.path.join(os.path.dirname(file_path), f"n{n_points}s{seed}.pre")
+    out_file = os.path.join("outputs", "Pre-files", f"{base_name.split(".")[0]}.pre")
     
     # Write .pre file
     with open(out_file, 'w') as f:
@@ -462,411 +461,40 @@ def write_prefile(file_path:str):
         f.write("Objetivo\tSolver\tModelo\tNombre\tn\tseg_cruzan_fort\trest_u_fort\tpos_u_fort\tfijar_var_0\tstatus\tTiempo\tArea\n")
 
 
-def insertion_heuristic(points: NDArray[np.int64], CH: NDArray[np.int64], V: NDArray[np.int64], sense: bool) -> list[int]:
-    """
-    Genera un polígono simple comenzando con la Envolvente Convexa (CH)
-    e insertando puntos restantes según un criterio (ej. mayor área añadida).
-    """
-    # Conjunto de puntos disponibles para insertar (los que no están en el CH)
-    N = CH
-    Nprime = np.array([i for i in range(len(points)) if i not in CH], dtype=np.int64)
-    Wa = np.abs(triangles_area(V, points))
-    ta = triangles_adjacency_list(V, points)
-    Vprime = [ta[N[i]][N[(i + 1) % len(N)]] for i in range(len(N))]
-    IV = incompatible_triangles(V, points)
-    Weight_Vij = [[Wa[t] for t in Vprime[i]] for i in range(len(N))]
 
+
+
+
+def is_colineal(p1: NDArray[np.int64], p2: NDArray[np.int64], p3: NDArray[np.int64]) -> bool:
+    """Checks if three points are collinear."""
+    return (p2[1] - p1[1]) * (p3[0] - p2[0]) == (p3[1] - p2[1]) * (p2[0] - p1[0])
+
+
+
+
+
+def plot_solution(model: gp.Model, title: str = "Solution"):
+    """Plots the solution of the model by drawing the tour."""
+
+    x = model._x_results
+    points = model._points_
     
+    G = nx.DiGraph()
+    G.add_edges_from(x)
     
-
+    plt.figure(figsize=(8, 8))
+    plt.title(title)
+    plt.scatter(points[:, 0], points[:, 1], color='blue')
     
-
-
-
-
-
-
-    while len(Nprime) > 0:
-        mejor_ganancia = -float('inf')
-        mejor_movimiento = None # Tupla: (indice_en_ruta, punto_a_insertar)
-        
-        
-
-            
-    return N
-
-def solve_benders_decomposition(points: NDArray[np.int64], ta, time_limit: int = 7200000):
-    # --- MODELO MAESTRO ---
-    m_master = gp.Model("Benders_Master")
-
-    x = { (i, j): m_master.addVar(vtype=GRB.BINARY, lb = 0, ub = 1, name=f"x_{i}_{j}") for i in N for j in N  if i != j }
-    f = {(i,j) : m_master.addVar(vtype=GRB.CONTINUOUS, name=f"f_{i}_{j}") for i in N for j in N if i != j }
-    z = {(i): m_master.addVar(vtype=GRB.CONTINUOUS, name=f"z_{i}") for i in V }
-    m_master.ModelSense = GRB.MAXIMIZE
-
-    # AÑADIR LAS RESTRICCIONES INICIALES DEL MAESTRO AQUÍ
-
-    # Restricciones de flujo
-
-
-    # --- MODELO SUBPROBLEMA ---
-    m_sub = gp.Model("Benders_Subproblem")
-    m_sub.setParam('OutputFlag', 0)
-    y = { (i) : m_sub.addVar(vtype=GRB.CONTINUOUS, ub=1, lb=0, name=f"y_{i}") for i in V}
-    yp = { (i) : m_sub.addVar(vtype=GRB.CONTINUOUS, ub=1, lb=0, name=f"yp_{i}") for i in V}
-
-
-
-
-
-
-def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool = False, time_limit: int = 7200000, 
-                          maximize: bool = True, sum_constrain: bool = True, benders: bool = False) -> gp.Model:
-    points = read_indexed_instance(instance_path)
-    N = range(len(points))
-    CH = compute_convex_hull(points)
-    triangles = compute_triangles(points)
-    V = range(len(triangles))
-    sc = compute_crossing_edges(triangles, points)
-    it = incompatible_triangles(triangles, points)
-    ta = triangles_adjacency_list(triangles, points)
-
-    if verbose:
-        print(f"Instance: {instance_path}")
-
-    model = gp.Model("OAP_Simple")
-    model._convex_hull_area = compute_convex_hull_area(points)
-    # Model building logic goes here
-    if verbose:
-        print("Building model... \nDefining variables...")
-
-    # Consideramos xij la variable de arcos dirigidos
-    x = { (i, j): model.addVar(vtype=GRB.BINARY, name=f"x_{i}_{j}") for i in N for j in N  if i != j }
-
-    # Consideramos f_ij la variable de subciclos
-    f = {(i,j) : model.addVar(vtype=GRB.CONTINUOUS, name=f"f_{i}_{j}") for i in N for j in N if i != j }
-
-    # Definimos y e yp variables para los triangulos
-    y = { (i) : model.addVar(vtype=GRB.CONTINUOUS, ub=1, lb=0, name=f"y_{i}") for i in V}
-    yp = { (i) : model.addVar(vtype=GRB.CONTINUOUS, ub=1, lb=0, name=f"yp_{i}") for i in V}
+    # Draw edges of the tour
+    for edge in G.edges():
+        pt1 = points[edge[0]]
+        pt2 = points[edge[1]]
+        plt.plot([pt1[0], pt2[0]], [pt1[1], pt2[1]], 'r-', alpha=0.5)
     
-    
-    
-    # Objective: Maximize total area of selected triangles
-    at = [np.abs(signed_area(points[tri[0]], points[tri[1]], points[tri[2]])) for tri in triangles]
-    if maximize:
-        model.setObjective(gp.quicksum(y[i] * at[i] for i in V), GRB.MAXIMIZE)
-    else:
-        model.setObjective(model._convex_hull_area - gp.quicksum(yp[i] * at[i] for i in V), GRB.MINIMIZE)
-
-    if verbose:
-        print("Variables defined. \nAdding constraints...")
-
-    # ----- CONSTRAINS -----
-
-    
-    # Resticiones de triangulos
-    if sum_constrain is not None:
-        model.addConstr(gp.quicksum(y[i] for i in V) == len(N)-2 , name="triangulos_internos_totales") #NONE
-        model.addConstr(gp.quicksum(yp[i] for i in V) == len(N)-len(CH) , name="triangulos_externos_totales") #NONE
-    
-
-
-    # Restriciones de arcos
-    for i in N:
-        model.addConstr((gp.quicksum(x[i,j] for j in N if j != i) == 1 ), name=f"Grado_salida_{i}") #(2)
-        model.addConstr((gp.quicksum(x[j,i] for j in N if j != i) == 1 ), name=f"Grado_entrada_{i}")
-
-
-    #      Restricciones de cruces
-    for k in range(len(sc)):
-        model.addConstr(x[sc[k][0], sc[k][1]] + x[sc[k][2], sc[k][3]] <= 1 , name=f"cruce_arcos_{k}") #(3)
-        model.addConstr(gp.quicksum(y[it] + yp[it] for it in ta[sc[k][0]][sc[k][1]]) + 
-                        gp.quicksum(y[it] + yp[it] for it in ta[sc[k][2]][sc[k][3]]) <= 1 , name=f"cruce_tris_{k}_y")
-
-
-    # --------------------------------------------------- #
-    # RESTRICCIONES DE PRUEBA - COMPROBANDO FUNCIONALIDAD #
-    # --------------------------------------------------- #
-
-
-    model.addConstr(gp.quicksum(np.abs(signed_area(points[triangles[t][0]], points[triangles[t][1]], points[triangles[t][2]])) * (y[t] + yp[t]) for t in V)
-                        == model._convex_hull_area , name=f"area_positiva") #(22)
-        
-    for i in N:
-        for j in N:
-            if i != j:
-                model.addConstr(gp.quicksum(y[t] + yp[t] for t in ta[i][j]) <= 1 , name=f"triangles_compatibility_{i}_{j}") #(4)
-
-    # --------------------------------------------------- #
-
-
-
-
-
-
-
-    # Restricciones de flujo \sim 3
-    for i in N:
-        if i != 0:
-            model.addConstr(gp.quicksum(f[j,i] for j in N if j != i) - gp.quicksum(f[i,j] for j in N if j != i) == 1, name=f"flujo_nodos_{i}") 
-        for j in N:
-            if i != j:
-                model.addConstr(f[i,j] <= (len(N)-1) * x[i,j] , name=f"flujo_arcos_{i}_{j}") 
-
-    
-    #   Restricciones de incompatibilidad de triangulos             (A PROBAR)
-    #[model.addConstrs( y[it[k,0]] + y[it[k,1]] <= 1 , name=f"incompatibilidad_tris_{k}") for k in range(len(it))]
-
-
-    # Restricciones de relacion entre triangulos y arcos envolvente convexa
-    for i in range(len(CH)):
-        model.addConstr(gp.quicksum(y[t] for t in ta[CH[i]][CH[(i + 1) % len(CH)]]) <= x[CH[i], CH[(i + 1) % len(CH)]] , name=f"CH_arcos_internos_{i}_{(i + 1) % len(CH)}")  #(19)
-        model.addConstr(gp.quicksum(yp[t] for t in ta[CH[i]][CH[(i + 1) % len(CH)]]) <= 1 - x[CH[(i + 1) % len(CH)], CH[i]] , name=f"CH_arcos_externos_{i}_{(i + 1) % len(CH)}") #(23)
-
-
-    #RESTRICCIONES DE RELACION ENTRE VARIABLES
-    for i in N:
-        for j in N:
-            if ((i not in CH) or (j not in CH)) and i!= j:
-                model.addConstr( gp.quicksum(y[t] for t in ta[i][j]) - gp.quicksum(y[t] for t in ta[j][i]) == x[i,j] - x[j,i] ) #(20)
-                model.addConstr( gp.quicksum(yp[t] for t in ta[i][j]) - gp.quicksum(yp[t] for t in ta[j][i]) == x[j,i] - x[i,j] ) #(24)
-
-
-
-    for i in N:
-        for j in N:
-            if ((i not in CH) or (j not in CH)) and i!= j:
-                model.addConstr( x[i,j] <= gp.quicksum(y[t] for t in ta[i][j]) ) #(21)
-                model.addConstr( 1-x[j,i] >= gp.quicksum(y[t] for t in ta[i][j]) ) #(21)
-
-    for i in N:
-        for j in N:
-            if ((i not in CH) or (j not in CH)) and i!= j:
-                model.addConstr( x[j,i] <= gp.quicksum(yp[t] for t in ta[i][j]) ) #(25)
-                model.addConstr( 1 - x[i,j] >= gp.quicksum(yp[t] for t in ta[i][j]) ) #(25)
-
-    if verbose:
-        print("Constraints added. \nOptimizing model...")
-    
-    model.setParam('TimeLimit', time_limit)
-    model.setParam('OutputFlag', 1 if verbose else 0)
-    model.optimize()
-    return model
-
-
-
-
-
-
-def build_and_solve_model_cplex(instance_path: str, verbose: bool = False, plot: bool = False, time_limit: int = 7200000, 
-                                maximize: bool = True, sum_constrain: bool = True, benders: bool = False):
-    
-    # --- Lectura de datos (Igual que tu código original) ---
-    points = read_indexed_instance(instance_path)
-    N = range(len(points))
-    CH = compute_convex_hull(points)
-    triangles = compute_triangles(points)
-    V = range(len(triangles))
-    sc = compute_crossing_edges(triangles, points)
-    it = incompatible_triangles(triangles, points)
-    ta = triangles_adjacency_list(triangles, points)
-
-    if verbose:
-        print(f"Instance: {instance_path}")
-
-    # Inicializar Modelo CPLEX
-    mdl = Model(name="OAP_Simple_CPLEX")
-    
-    # Guardamos el area igual que en tu objeto Gurobi (monkey-patching para mantener lógica)
-    mdl._convex_hull_area = compute_convex_hull_area(points)
-
-    if verbose:
-        print("Building model... \nDefining variables...")
-
-    # --- VARIABLES ---
-
-    # Consideramos xij la variable de arcos dirigidos
-    # Nota: CPLEX usa binary_var. Creamos el diccionario manualmente para replicar tu estructura exacta.
-    x = { (i, j): mdl.binary_var(name=f"x_{i}_{j}") for i in N for j in N if i != j }
-    # Consideramos f_ij la variable de subciclos
-    f = {(i,j) : mdl.continuous_var(name=f"f_{i}_{j}") for i in N for j in N if i != j }
-
-    # Definimos y e yp variables para los triangulos
-    # En docplex lb=0 es por defecto, pero especificamos ub=1
-    y = { (i) : mdl.continuous_var(lb=0, ub=1, name=f"y_{i}") for i in V}
-    yp = { (i) : mdl.continuous_var(lb=0, ub=1, name=f"yp_{i}") for i in V}
-
-    
-    # --- OBJETIVO ---
-    
-    at = [np.abs(signed_area(points[tri[0]], points[tri[1]], points[tri[2]])) for tri in triangles]
-    
-    # mdl.sum es el equivalente a gp.quicksum
-    objective_expr = mdl.sum(y[i] * at[i] for i in V)
-
-    if maximize:
-        mdl.maximize(objective_expr)
-    else:
-        mdl.minimize(mdl._convex_hull_area - mdl.sum(yp[i] * at[i] for i in V))
-
-    if verbose:
-        print("Variables defined. \nAdding constraints...")
-
-    # ----- CONSTRAINTS -----
-
-    # Restricciones de triangulos
-    if sum_constrain is not None:
-        mdl.add_constraint(mdl.sum(y[i] for i in V) == len(N)-2, ctname="triangulos_internos_totales")
-        mdl.add_constraint(mdl.sum(yp[i] for i in V) == len(N)-len(CH), ctname="triangulos_externos_totales")
-
-    # Restricciones de arcos
-    for i in N:
-        mdl.add_constraint(mdl.sum(x[i,j] for j in N if j != i) == 1, ctname=f"Grado_salida_{i}")
-        mdl.add_constraint(mdl.sum(x[j,i] for j in N if j != i) == 1, ctname=f"Grado_entrada_{i}")
-
-    # Restricciones de cruces
-    for k in range(len(sc)):
-        mdl.add_constraint(x[sc[k][0], sc[k][1]] + x[sc[k][2], sc[k][3]] <= 1, ctname=f"cruce_arcos_{k}")
-        
-        mdl.add_constraint(
-            mdl.sum(y[it] + yp[it] for it in ta[sc[k][0]][sc[k][1]]) + 
-            mdl.sum(y[it] + yp[it] for it in ta[sc[k][2]][sc[k][3]]) <= 1, 
-            ctname=f"cruce_tris_{k}_y"
-        )
-
-    """
-    # --------------------------------------------------- #
-    # RESTRICCIONES DE PRUEBA - COMPROBANDO FUNCIONALIDAD #
-    # --------------------------------------------------- #
-
-    mdl.add_constraint(
-        mdl.sum(np.abs(signed_area(points[triangles[t][0]], points[triangles[t][1]], points[triangles[t][2]])) * (y[t] + yp[t]) for t in V)
-        == mdl._convex_hull_area, 
-        ctname="area_positiva"
-    )
-        
-    for i in N:
-        for j in N:
-            if i != j:
-                mdl.add_constraint(mdl.sum(y[t] + yp[t] for t in ta[i][j]) <= 1, ctname=f"triangles_compatibility_{i}_{j}")
-    """
-    # --------------------------------------------------- #
-
-    # Restricciones de flujo
-    for i in N:
-        if i != 0:
-            mdl.add_constraint(
-                mdl.sum(f[j,i] for j in N if j != i) - mdl.sum(f[i,j] for j in N if j != i) == 1, 
-                ctname=f"flujo_nodos_{i}"
-            )
-        for j in N:
-            if i != j:
-                mdl.add_constraint(f[i,j] <= (len(N)-1) * x[i,j], ctname=f"flujo_arcos_{i}_{j}")
-
-    # Restricciones de relacion entre triangulos y arcos envolvente convexa
-    for i in range(len(CH)):
-        idx_next = (i + 1) % len(CH)
-        u, v = CH[i], CH[idx_next]
-        
-        mdl.add_constraint(mdl.sum(y[t] for t in ta[u][v]) <= x[u, v], ctname=f"CH_arcos_internos_{i}_{idx_next}")
-        mdl.add_constraint(mdl.sum(yp[t] for t in ta[u][v]) <= 1 - x[v, u], ctname=f"CH_arcos_externos_{i}_{idx_next}")
-
-    # RESTRICCIONES DE RELACION ENTRE VARIABLES
-    for i in N:
-        for j in N:
-            if ((i not in CH) or (j not in CH)) and i!= j:
-                # Ecuacion (20) y (24)
-                mdl.add_constraint(
-                    mdl.sum(y[t] for t in ta[i][j]) - mdl.sum(y[t] for t in ta[j][i]) == x[i,j] - x[j,i]
-                )
-                mdl.add_constraint(
-                    mdl.sum(yp[t] for t in ta[i][j]) - mdl.sum(yp[t] for t in ta[j][i]) == x[j,i] - x[i,j]
-                )
-
-    for i in N:
-        for j in N:
-            if ((i not in CH) or (j not in CH)) and i!= j:
-                # Ecuaciones (21) y (25)
-                mdl.add_constraint(x[i,j] <= mdl.sum(y[t] for t in ta[i][j]))
-                mdl.add_constraint(1-x[j,i] >= mdl.sum(y[t] for t in ta[i][j]))
-
-    for i in N:
-        for j in N:
-            if ((i not in CH) or (j not in CH)) and i!= j:
-                # Ecuaciones (25) duplicadas (según tu código original)
-                mdl.add_constraint(x[j,i] <= mdl.sum(yp[t] for t in ta[i][j]))
-                mdl.add_constraint(1 - x[i,j] >= mdl.sum(yp[t] for t in ta[i][j]))
-
-    if verbose:
-        print("Constraints added. \nOptimizing model...")
-    
-    # Parametros de CPLEX
-    # CPLEX usa segundos por defecto. 7200000ms = 7200s
-    mdl.set_time_limit(time_limit) 
-    
-    # Control de log
-    mdl.context.solver.log_output = True if verbose else False
-    
-    solution = mdl.solve()
-    
-    if verbose:
-        if solution:
-            print("Solution found!")
-            print(f"Objective value: {solution.objective_value}")
-        else:
-            print("No solution found within time limit.")
-
-    return mdl
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-if __name__ == "__main__":
-    for file in glob.glob("*/*.instance"):
-        start_time = time.time()
-        mod = build_and_solve_model(
-            instance_path=file,
-            verbose=True,
-            plot=False,
-            time_limit=7200000,
-            maximize=True
-        )
-        end_time = time.time()
-        print(f"Processed {file} in {end_time - start_time:.2f} seconds.")
-        print("--------------------------------------------------\n")
-        print("Results Summary:\n")
-        print(f"Instance: {file}")
-        print(f"Objective Value: {mod.ObjVal}")
-        print(f"Status: {mod.Status}")
-        print("--------------------------------------------------\n")
-        mod.write(f"{file}_solution.lp")
-        model_lp = mod.relax()
-        model_lp.setParam('OutputFlag', 1 if False else 0)
-        model_lp.optimize()
-        print("--------------------------------------------------\n")
-        print("LP Relaxation Results Summary:\n")
-        print(f"LP Status: {model_lp.Status}")
-        print(f"LP Relaxed Objective Value: {model_lp.ObjVal}")
-        print("--------------------------------------------------\n")
-    
+    plt.xlabel("X")
+    plt.ylabel("Y")
+    plt.axis('equal')
+    plt.grid(True)
+    plt.show()
 
