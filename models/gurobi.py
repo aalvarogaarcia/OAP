@@ -1,11 +1,44 @@
 
+from xml.parsers.expat import model
+from xml.parsers.expat import model
 from gurobipy import GRB
 import gurobipy as gp
 import numpy as np
+import os
 from utils.utils import *
 
 def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool = False, time_limit: int = 7200000, 
-                          maximize: bool = True, sum_constrain: bool = True, benders: bool = False, relaxed: bool = False) -> gp.Model:
+                          maximize: bool = True, sum_constrain: bool = True, relaxed: bool = False,
+                          obj: int = 2, **kwargs) -> gp.Model:
+    """
+    Docstring for build_and_solve_model
+    
+    :param instance_path: Where we can find the instance
+    :type instance_path: str
+    :param verbose: If we want to print information during the execution
+    :type verbose: bool
+    :param plot: If we want to plot the solution at the end
+    :type plot: bool
+    :param time_limit: Set a time limit for the optimization process
+    :type time_limit: int
+    :param maximize: If we want to maximize the objective function
+    :type maximize: bool
+    :param sum_constrain: If we want to add the sum of triangles constrain
+    :type sum_constrain: bool
+    :param relaxed: If we want to relax the integrality constraints
+    :type relaxed: bool
+    :param obj: Which objective function to use: 0 for Fekete, 1 for Internal Area, 2 for External Area, 3 for Diagonals
+    :type obj: int
+    :**kwargs: Additional keyword arguments
+    :type kwargs: dict
+
+
+    :return: Model built and solved
+    :rtype: gp.Model
+    
+    
+    """
+
     points = read_indexed_instance(instance_path)
     N = range(len(points))
     CH = compute_convex_hull(points)
@@ -14,7 +47,9 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
     sc = compute_crossing_edges(triangles, points)
     it = incompatible_triangles(triangles, points)
     ta = triangles_adjacency_list(triangles, points)
-    
+    mode= kwargs.get('mode', 0)
+
+
     for i in range(len(CH)):
         p1 = points[CH[i]]
         p2 = points[CH[(i + 1) % len(CH)]]
@@ -31,6 +66,22 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
 
     model = gp.Model("OAP_Simple")
     model._convex_hull_area = compute_convex_hull_area(points)
+    # Persist configuration metadata for downstream reporting
+    model._instance_name = os.path.splitext(os.path.basename(instance_path))[0]
+    model._sum_constrain = sum_constrain
+    model._obj = obj
+    model._maximize_flag = maximize
+    model._objective_desc = (
+        "Fekete (0)" if obj == 0 and mode == 0 else
+        "Fekete (1)" if obj == 0 and mode == 1 else
+        "Fekete (2)" if obj == 0 and mode == 2 else
+        "Fekete (3)" if obj == 0 and mode == 3 else
+        "Internal Area" if obj == 1 else
+        "External Area" if obj == 2 else
+        "Diagonals"
+    )
+
+
     # Model building logic goes here
     if verbose:
         print("Building model... \nDefining variables...")
@@ -38,17 +89,28 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
     # Consideramos xij la variable de arcos dirigidos
     x = { (i, j): model.addVar(vtype=GRB.BINARY, name=f"x_{i}_{j}") for i in N for j in N  if i != j }
 
-
+    remove_list = []
     for i in range(len(CH)):
         for j in range(i+2, len(CH)):
-            if i == 0 and j == len(CH) - 1:
+            if (i == 0 and j == len(CH) - 1):
                 continue
             model.remove(x[CH[i], CH[j]])
             model.remove(x[CH[j], CH[i]])
             x.pop((CH[i], CH[j]))
             x.pop((CH[j], CH[i]))
+            remove_list.append((CH[i], CH[j]))
+            remove_list.append((CH[j], CH[i]))
 
-    model.update()
+    # Remove clockwise oriented convex hull edges
+    for i in range(len(CH)):
+        j = (i + 1) % len(CH)
+        print(f"Removing clockwise CH edge: ({CH[j]}, {CH[i]})")
+        if (CH[j], CH[i]) in x.keys():
+            model.remove(x[CH[j], CH[i]])
+            x.pop((CH[j], CH[i]))
+            remove_list.append((CH[j], CH[i]))  
+    
+    
     # Consideramos f_ij la variable de subciclos
     f = {(i,j) : model.addVar(vtype=GRB.CONTINUOUS, name=f"f_{i}_{j}") for i in N for j in N if i != j }
 
@@ -57,13 +119,91 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
     yp = { (i) : model.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"yp_{i}") for i in V}
     
     
+    # Definimos zij variables para diagonales
+    if obj == 3:
+
+        if mode == 0:
+            z = { (i,j) : model.addVar(vtype=GRB.CONTINUOUS, name=f"z_{i}_{j}") for i in N for j in N  if i != j and ((i not in CH) or (j not in CH)) }
+            for i,j in z.keys():
+                if i < j and (j,i) in z.keys():
+                    model.addConstr( z[i,j] == z[j,i] , name=f"diagonal_selection_{i}_{j}")
+
+            for i,j in z.keys():
+                model.addConstr(z[i,j] == gp.quicksum(y[t] for t in ta[i][j]) - x[i,j] , name=f"diagonal_triangle_relation_{i}_{j}") #Equivalente a (20)
+
+        elif mode == 1:
+            zp = { (i,j) : model.addVar(vtype=GRB.CONTINUOUS, name=f"zp_{i}_{j}") for i in N for j in N  if i != j and ((i not in CH) or (j not in CH)) }
+            for i,j in zp.keys():
+                if i < j and (j,i) in zp.keys():
+                    model.addConstr( zp[i,j] == zp[j,i] , name=f"diagonal_selection_{i}_{j}")
+
+            for i,j in zp.keys():
+                model.addConstr(zp[i,j] == gp.quicksum(yp[t] for t in ta[i][j]) - x[i,j] , name=f"diagonal_triangle_relation_{i}_{j}") #Equivalente a (24)
+
+
     
-    # Objective: Maximize total area of selected triangles
+
     at = [np.abs(signed_area(points[tri[0]], points[tri[1]], points[tri[2]])) for tri in triangles]
+
+    # ----- OBJECTIVE FUNCTION -----
+    
     if maximize:
-        model.setObjective(gp.quicksum(y[i] * at[i] for i in V), GRB.MAXIMIZE)
+        optimizer = GRB.MAXIMIZE
     else:
-        model.setObjective(model._convex_hull_area - gp.quicksum(yp[i] * at[i] for i in V), GRB.MINIMIZE)
+        optimizer = GRB.MINIMIZE
+    
+
+
+
+    
+    if obj == 0:
+        if verbose:
+            print(f"Using Fekete objective function with mode {mode}")
+        c = cost_function_area(points, x.keys(), mode=mode)
+
+        model.setObjective(gp.quicksum(c[i] * x[i] for i in x.keys()), optimizer)
+        
+        
+    elif obj == 1:
+        model.setObjective(gp.quicksum(y[i] * at[i] for i in V), optimizer)
+
+    elif obj == 2:
+        model.setObjective(model._convex_hull_area - gp.quicksum(yp[i] * at[i] for i in V), optimizer)
+        
+        
+    elif obj == 3:
+        if verbose:
+            print("Using Diagonals objective function")
+        
+        signed_at = [(signed_area(points[tri[0]], points[tri[1]], points[tri[2]])) for tri in triangles]
+        d = {(i,j):np.min([(signed_at[t]) for t in ta[i][j]]) for i,j in x.keys()  }
+        
+        td = {}
+        for idx, tri in enumerate(triangles):
+            print(tri)
+            td[tuple(tri)] = 3*signed_at[idx] - d[(tri[0]), (tri[1])] - d[(tri[1]), (tri[2])] - d[(tri[2]), (tri[0])]
+
+        if mode == 0:
+            sum_x = gp.quicksum(d[i,j] * x[i,j] for i, j in x.keys())
+            sum_z = gp.quicksum(d[i,j] * z[i,j] for i, j in z.keys())
+        elif mode == 1:
+            sum_z = gp.quicksum(d[i,j] * (x[i,j] + zp[i,j]) for i, j in zp.keys())
+        else:
+            print("Mode not implemented for Diagonals objective") 
+        sum_td = 3 * gp.quicksum(td[i, j, k] for i, j, k in td.keys())
+
+        model.setObjective(1/3*(sum_x + sum_z + sum_td) , optimizer)
+            
+            
+            
+            
+
+    else:
+        print("Objective function not implemented")
+        quit()
+    # ------------------------------ #
+
+
 
     if verbose:
         print("Variables defined. \nAdding constraints...")
@@ -131,15 +271,20 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
     for i in range(len(CH)):
         if (CH[i], CH[(i + 1) % len(CH)]) in x.keys():
             model.addConstr(gp.quicksum(y[t] for t in ta[CH[i]][CH[(i + 1) % len(CH)]]) <= x[CH[i], CH[(i + 1) % len(CH)]] , name=f"CH_arcos_internos_{i}_{(i + 1) % len(CH)}")  #(19)
-            model.addConstr(gp.quicksum(yp[t] for t in ta[CH[i]][CH[(i + 1) % len(CH)]]) <= 1 - x[CH[(i + 1) % len(CH)], CH[i]] , name=f"CH_arcos_externos_{i}_{(i + 1) % len(CH)}") #(23)
+            model.addConstr(gp.quicksum(yp[t] for t in ta[CH[i]][CH[(i + 1) % len(CH)]]) <= 1 - x[CH[i], CH[(i + 1) % len(CH)]] , name=f"CH_arcos_externos_{i}_{(i + 1) % len(CH)}") #(23)
 
 
     #RESTRICCIONES DE RELACION ENTRE VARIABLES
     for i in N:
         for j in N:
-            if ((i not in CH) or (j not in CH)) and i < j:
-                model.addConstr( gp.quicksum(y[t] for t in ta[i][j]) - gp.quicksum(y[t] for t in ta[j][i]) == x[i,j] - x[j,i] ) #(20)
-                model.addConstr( gp.quicksum(yp[t] for t in ta[i][j]) - gp.quicksum(yp[t] for t in ta[j][i]) == x[j,i] - x[i,j] ) #(24)
+            if ((i not in CH) or (j not in CH)) and i < j :
+                if obj == 3 and mode == 0:
+                    model.addConstr( gp.quicksum(yp[t] for t in ta[i][j]) - gp.quicksum(yp[t] for t in ta[j][i]) == x[j,i] - x[i,j] ) #(24)
+                elif obj == 3 and mode == 1:
+                    model.addConstr( gp.quicksum(y[t] for t in ta[i][j]) - gp.quicksum(y[t] for t in ta[j][i]) == x[i,j] - x[j,i] ) #(20)
+                else:
+                    model.addConstr( gp.quicksum(y[t] for t in ta[i][j]) - gp.quicksum(y[t] for t in ta[j][i]) == x[i,j] - x[j,i] ) #(20)
+                    model.addConstr( gp.quicksum(yp[t] for t in ta[i][j]) - gp.quicksum(yp[t] for t in ta[j][i]) == x[j,i] - x[i,j] ) #(24)
 
 
 
@@ -148,6 +293,8 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
             if ((i not in CH) or (j not in CH)) and i < j:
                 model.addConstr( x[i,j] <= gp.quicksum(y[t] for t in ta[i][j]) ) #(21)
                 model.addConstr( 1-x[j,i] >= gp.quicksum(y[t] for t in ta[i][j]) ) #(21)
+
+
 
     for i in N:
         for j in N:
@@ -160,13 +307,13 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
     
     model.setParam('OutputFlag', 1 if verbose else 0)
     model.setParam('TimeLimit', time_limit)
-    
+    model.update()
     if relaxed:
         model.relax()
     model.optimize()
 
+
     model._x_results = []
-    
     for x_vars in model.getAttr('X', x).keys():
          if model.getAttr('X', x)[x_vars] == 1:
             model._x_results.append(x_vars)

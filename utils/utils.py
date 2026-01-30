@@ -149,6 +149,25 @@ def compute_triangles(points: NDArray[np.int64]) -> NDArray[np.int64]:
             tri_idx = np.array([i, k, j], dtype=np.int64)"""
 
         tri_idx = np.array([i, j, k], dtype=np.int64)
+        
+        # Check if triangle has a convex hull edge oriented clockwise and adjust
+        # Hull edges are oriented CCW: hull[i] -> hull[(i+1) % len(hull)]
+        for h_idx in range(len(hull)):
+            hull_edge_ccw = (hull[h_idx], hull[(h_idx + 1) % len(hull)])
+            hull_edge_cw = (hull[(h_idx + 1) % len(hull)], hull[h_idx])
+            
+            # Check all three edges of the triangle
+            tri_edges_directed = [
+                (tri_idx[0], tri_idx[1]),
+                (tri_idx[1], tri_idx[2]),
+                (tri_idx[2], tri_idx[0])
+            ]
+            
+            for edge_pos, (v1, v2) in enumerate(tri_edges_directed):
+                if (v1, v2) == hull_edge_cw:
+                    # Found a hull edge oriented clockwise in the triangle - flip triangle
+                    tri_idx = np.array([tri_idx[0], tri_idx[2], tri_idx[1]], dtype=np.int64)
+                    break
 
         # Build triangle edges (undirected, sorted)
         tri_edges = np.array([
@@ -366,6 +385,46 @@ def incompatible_triangles(triangles: NDArray[np.int64], points: NDArray[np.int6
 def signed_area(p1, p2, p3):
     return 0.5 * ((p2[0] - p1[0]) * (p3[1] - p1[1]) - (p2[1] - p1[1]) * (p3[0] - p1[0]))
 
+def cost_function_area(points: NDArray[np.int64], x_array: NDArray[np.int64], mode:int = 0) -> float:
+    """Calculates the cost function based on points and possible selected edges."""
+    c = {}
+    if mode == 0:
+        max_val = np.max(points) if len(points) > 0 else 0
+        r = np.array([max_val + 1, max_val + 1])
+        for i, j in x_array:
+            print((i, j))
+            p1 = points[i]
+            p2 = points[j]
+            area = np.abs(signed_area(r, p1, p2))
+            c[(i, j)] = area
+
+    elif mode == 1:
+        for i, j in x_array:
+            p1 = points[i]
+            p2 = points[j]
+            area = (p1[0]*p2[1] - p2[0]*p1[1])/2
+            c[(i, j)] = area
+    
+    elif mode == 2:
+        for i, j in x_array:
+            p1 = points[i]
+            p2 = points[j]
+            area = ((p1[0]+p2[0]) * (p1[1]-p2[1]))/2
+            c[(i, j)] = area
+
+    elif mode == 3:
+        for i, j in x_array:
+            p1 = points[i]
+            p2 = points[j]
+            area =  ((p1[1]+p2[1]) * (p1[0]-p2[0]))/2
+            c[(i, j)] = area
+        
+    else:
+        print("Cost function mode not implemented")
+        quit()
+
+    return c
+
 def triangles_area(triangles: NDArray[np.int64], points) -> float:
     # Calculate signed area for each triangle
     triangle_areas = []
@@ -393,6 +452,27 @@ def triangles_adjacency_list(triangles: NDArray[np.int64], p: NDArray) -> dict[i
             ta_arc[j][i].append(id)
             ta_arc[k][j].append(id)
             ta_arc[i][k].append(id)
+    return ta_arc
+
+def minimal_triangle_adjency_list(triangles: NDArray[np.int64], p: NDArray) -> dict[int, list[int]]:
+    ta_arc = {}
+
+    for id, t in enumerate(triangles):
+        i, j, k = t[0], t[1], t[2]
+        if signed_area(p[i], p[j], p[k]) > 0:
+            edge1 = (i, j)
+            edge2 = (j, k)
+            edge3 = (k, i)
+        else:
+            edge1 = (j, i)
+            edge2 = (k, j)
+            edge3 = (i, k)
+        
+        for edge in [edge1, edge2, edge3]:
+            if edge not in ta_arc:
+                ta_arc[edge] = []
+            ta_arc[edge].append(id)
+    
     return ta_arc
 
 
@@ -478,7 +558,7 @@ def plot_solution(model: gp.Model, title: str = "Solution"):
 
     x = model._x_results
     points = model._points_
-    
+
     G = nx.DiGraph()
     G.add_edges_from(x)
     
@@ -490,8 +570,31 @@ def plot_solution(model: gp.Model, title: str = "Solution"):
     for edge in G.edges():
         pt1 = points[edge[0]]
         pt2 = points[edge[1]]
-        plt.plot([pt1[0], pt2[0]], [pt1[1], pt2[1]], 'r-', alpha=0.5)
+        plt.plot([pt1[0], pt2[0]], [pt1[1], pt2[1]], 'r-', alpha=0.7)
+
+    #Show convex hull
+    hull = compute_convex_hull(points)
+    hull_set = set(hull)
+    for i in range(len(hull)):
+        pt1 = points[hull[i]]
+        pt2 = points[hull[(i + 1) % len(hull)]]
+        plt.plot([pt1[0], pt2[0]], [pt1[1], pt2[1]], 'g-.', alpha=0.5)
     
+    # Label all points with their indices
+    for i, pt in enumerate(points):
+        if i in hull_set:
+            # Convex hull points in red and bold
+            plt.annotate(str(i), (pt[0], pt[1]), 
+                        textcoords="offset points", xytext=(5, 5),
+                        fontsize=10, color='red', fontweight='bold',
+                        bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.7))
+        else:
+            # Regular points in black
+            plt.annotate(str(i), (pt[0], pt[1]), 
+                        textcoords="offset points", xytext=(5, 5),
+                        fontsize=9, color='black',
+                        bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.6))
+
     plt.xlabel("X")
     plt.ylabel("Y")
     plt.axis('equal')

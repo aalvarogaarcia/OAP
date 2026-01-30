@@ -12,7 +12,9 @@ import argparse
 def main(dir_path="data", 
          ext="*.txt", 
          sum_constrain=True,
-         time_limit=7200000):
+         time_limit=7200000,
+         obj=None,
+         mode=0):
     files = glob.glob(os.path.join(dir_path, ext))
     files.sort() # Ordenar para que la tabla salga ordenada
     
@@ -20,8 +22,10 @@ def main(dir_path="data",
     flag_suffix = ""
     if not sum_constrain:
         flag_suffix += "_nosum"
-    flag_suffix += f"_tl{time_limit}" if time_limit != 7200000 else ""
+    flag_suffix += f"_tl{time_limit}" if time_limit != 7200 else ""
     flag_suffix += ext.replace("*", "").split(".")[0] if ext != "*.txt" else ""
+    if obj is not None:
+        flag_suffix += f"_obj{obj}_mode{mode}"
     
     output_filename = f"outputs/LaTex/resultados_tabla{flag_suffix}.tex"
     output_excel_filename = f"outputs/Excel/resultados_tabla{flag_suffix}.xlsx"
@@ -116,33 +120,52 @@ def main(dir_path="data",
             conv_hull_area_str = f"{conv_hull_area:.2f}" if isinstance(conv_hull_area, Real) else str(conv_hull_area)
 
             # --- MAXIMIZATION ---
-            modMax = build_and_solve_model(instance_path=file, 
+            if obj is not None:
+                modMax = build_and_solve_model(instance_path=file, 
+                                              verbose=False, 
+                                              plot=False, 
+                                              time_limit=time_limit, 
+                                              maximize=True,
+                                              sum_constrain=sum_constrain,
+                                              obj = obj,
+                                              mode = mode)
+            else:
+                modMax = build_and_solve_model(instance_path=file, 
                                           verbose=False, 
                                           plot=False, 
                                           time_limit=time_limit, 
                                           maximize=True,
-                                          sum_constrain=sum_constrain)
-            modMax_relax = modMax.relax()
-            modMax_relax.optimize() 
+                                          sum_constrain=sum_constrain,
+                                          obj = 1,
+                                          mode = mode)
 
-            max_lp, max_gap, max_ip, max_time, max_nodes = get_model_stats(modMax, modMax_relax)
+            max_lp, max_gap, max_ip, max_time, max_nodes = get_model_stats(modMax)
             print(f"  Resultados MAXAREA: LP={max_lp}, Gap={max_gap}%, IP={max_ip}, Time={max_time}s, Nodes={max_nodes}")
             # Datos estructurales
             cols = modMax.NumVars
             rows = modMax.NumConstrs
             
             # --- MINIMIZATION ---
-            modMin = build_and_solve_model(instance_path=file, 
+            if obj is not None:
+                modMin = build_and_solve_model(instance_path=file, 
+                                              verbose=False, 
+                                              plot=False, 
+                                              time_limit=time_limit, 
+                                              maximize=False,
+                                              sum_constrain=sum_constrain,
+                                              obj = obj,
+                                              mode = mode)
+            else:
+                modMin = build_and_solve_model(instance_path=file, 
                                           verbose=False, 
                                           plot=False, 
                                           time_limit=time_limit, 
                                           maximize=False,
-                                          sum_constrain=sum_constrain)
-            
-            modMin_relax = modMin.relax()
-            modMin_relax.optimize()
+                                          sum_constrain=sum_constrain,
+                                          obj = 2,
+                                          mode = mode)
 
-            min_lp, min_gap, min_ip, min_time, min_nodes = get_model_stats(modMin, modMin_relax)
+            min_lp, min_gap, min_ip, min_time, min_nodes = get_model_stats(modMin)
             print(f"  Resultados MINAREA: LP={min_lp}, Gap={min_gap}%, IP={min_ip}, Time={min_time}s, Nodes={min_nodes}")
 
             # --- CREAR LA LÍNEA DE DATOS ---
@@ -160,6 +183,7 @@ def main(dir_path="data",
 
                 new_row = {
                     "Instance": instance_name,
+                    "Objective function": obj,
                     "Size": size_n,
                     "Convex Hull": conv_hull_area,
                     "Cols": cols,
@@ -167,6 +191,60 @@ def main(dir_path="data",
                     "Min LP Val": min_lp,
                     "Min Gap (%)": min_gap,
                     "Min IP Val": min_ip,
+                    "Min Time": min_time,
+                    "Min Nodes": min_nodes,
+                    "Max LP Val": max_lp,
+                    "Max Gap (%)": max_gap,
+                    "Max IP Val": max_ip,
+                    "Max Time": max_time,
+                    "Max Nodes": max_nodes
+                }
+
+            elif modMin.Status == 2 and modMax.Status != 2:
+                row_str = (
+                    f"{instance_name} & {size_n} & {conv_hull_area_str} & {cols} & {rows} & "
+                    f"{min_lp:.2f} & {min_gap:.2f} & {min_ip:.2f} & {min_time:.2f} & {min_nodes} & "
+                    f"- & - & - & {max_time:.2f} & {max_nodes} \\\\"
+                )
+                f.write(row_str + "\n")
+
+                new_row = {
+                    "Instance": instance_name,
+                    "Objective function": obj,
+                    "Size": size_n,
+                    "Convex Hull": conv_hull_area,
+                    "Cols": cols,
+                    "Rows": rows,
+                    "Min LP Val": min_lp,
+                    "Min Gap (%)": min_gap,
+                    "Min IP Val": min_ip,
+                    "Min Time": min_time,
+                    "Min Nodes": min_nodes,
+                    "Max LP Val": '-',
+                    "Max Gap (%)": '-',
+                    "Max IP Val": '-',
+                    "Max Time": max_time,
+                    "Max Nodes": max_nodes
+                }
+
+            elif modMin.Status != 2 and modMax.Status == 2:
+                row_str = (
+                    f"{instance_name} & {size_n} & {conv_hull_area_str} & {cols} & {rows} & "
+                    f"- & - & - & {min_time:.2f} & {min_nodes} & "
+                    f"{max_lp:.2f} & {max_gap:.2f} & {max_ip:.2f} & {max_time:.2f} & {max_nodes} \\\\"
+                )
+                f.write(row_str + "\n")
+
+                new_row = {
+                    "Instance": instance_name,
+                    "Objective function": obj,
+                    "Size": size_n,
+                    "Convex Hull": conv_hull_area,
+                    "Cols": cols,
+                    "Rows": rows,
+                    "Min LP Val": '-',
+                    "Min Gap (%)": '-',
+                    "Min IP Val": '-',
                     "Min Time": min_time,
                     "Min Nodes": min_nodes,
                     "Max LP Val": max_lp,
@@ -188,6 +266,7 @@ def main(dir_path="data",
 
                 new_row = {
                     "Instance": instance_name,
+                    "Objective function": obj,
                     "Size": size_n,
                     "Convex Hull": conv_hull_area,
                     "Cols": cols,
@@ -254,9 +333,25 @@ Examples:
     
     parser.add_argument('--time-limit',
                        type=int,
-                       default=7200000,
+                       default=7200,
                        dest='time_limit',
-                       help='Time limit in seconds (default: 7200000 = 2 hours)')
+                       help='Time limit in seconds (default: 7200 = 2 hours)')
+    
+    parser.add_argument('--obj',
+                       type=int,
+                       default= None,
+                       dest='obj',
+                       help='Objective function type (default: 2)' \
+                       ': 0=FEKETE, 1=INTERNALAREA, 2=EXTERNALAREA, 3=DIAGONAL)')
+    
+    parser.add_argument('--mode',
+                       type=int,
+                       default=None,
+                       dest='mode',
+                       help="Mode for objective function (default: 0)"\
+                        "\nFEKETE: 0=Standard, 1=Trapeze, 2=Polygons, 3 = Polygons prime"\
+                        "\nINTERNALAREA/EXTERNALAREA: 0=Standard"\
+                        "\nDIAGONAL: 0=Internal, 1=External (Not implemented yet)")
     
     # Parse arguments
     args = parser.parse_args()
@@ -265,4 +360,6 @@ Examples:
     main(dir_path=args.dir_path,
          ext=args.ext,
          sum_constrain=args.sum_constrain,
-         time_limit=args.time_limit)
+         time_limit=args.time_limit,
+         obj=args.obj,
+         mode=args.mode)
