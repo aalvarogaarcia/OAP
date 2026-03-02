@@ -136,8 +136,7 @@ def main(dir_path="data",
                                           time_limit=time_limit, 
                                           maximize=True,
                                           sum_constrain=sum_constrain,
-                                          obj = 1,
-                                          mode = mode)
+                                          obj = 1)
 
             max_lp, max_gap, max_ip, max_time, max_nodes = get_model_stats(modMax)
             print(f"  Resultados MAXAREA: LP={max_lp}, Gap={max_gap}%, IP={max_ip}, Time={max_time}s, Nodes={max_nodes}")
@@ -162,8 +161,8 @@ def main(dir_path="data",
                                           time_limit=time_limit, 
                                           maximize=False,
                                           sum_constrain=sum_constrain,
-                                          obj = 2,
-                                          mode = mode)
+                                          obj = 2
+                                          )
 
             min_lp, min_gap, min_ip, min_time, min_nodes = get_model_stats(modMin)
             print(f"  Resultados MINAREA: LP={min_lp}, Gap={min_gap}%, IP={min_ip}, Time={min_time}s, Nodes={min_nodes}")
@@ -335,7 +334,7 @@ Examples:
                        type=int,
                        default=7200,
                        dest='time_limit',
-                       help='Time limit in seconds (default: 7200 = 2 hours)')
+                       help='Time limit in seconds (default: 7200)')
     
     parser.add_argument('--obj',
                        type=int,

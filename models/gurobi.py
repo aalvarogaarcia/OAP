@@ -44,8 +44,6 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
     CH = compute_convex_hull(points)
     triangles = compute_triangles(points)
     V = range(len(triangles))
-    sc = compute_crossing_edges(triangles, points)
-    it = incompatible_triangles(triangles, points)
     ta = triangles_adjacency_list(triangles, points)
     mode= kwargs.get('mode', 0)
 
@@ -89,34 +87,41 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
     # Consideramos xij la variable de arcos dirigidos
     x = { (i, j): model.addVar(vtype=GRB.BINARY, name=f"x_{i}_{j}") for i in N for j in N  if i != j }
 
-    remove_list = []
+    
+
+    
+    
+    # Consideramos f_ij la variable de subciclos
+    f = {(i,j) : model.addVar(vtype=GRB.CONTINUOUS, lb = 0, name=f"f_{i}_{j}") for i in N for j in N if i != j }
+    
     for i in range(len(CH)):
         for j in range(i+2, len(CH)):
             if (i == 0 and j == len(CH) - 1):
                 continue
             model.remove(x[CH[i], CH[j]])
             model.remove(x[CH[j], CH[i]])
+            model.remove(f[CH[i], CH[j]])
+            model.remove(f[CH[j], CH[i]])
+            f.pop((CH[i], CH[j]))
+            f.pop((CH[j], CH[i]))
             x.pop((CH[i], CH[j]))
             x.pop((CH[j], CH[i]))
-            remove_list.append((CH[i], CH[j]))
-            remove_list.append((CH[j], CH[i]))
 
+    
     # Remove clockwise oriented convex hull edges
     for i in range(len(CH)):
         j = (i + 1) % len(CH)
-        print(f"Removing clockwise CH edge: ({CH[j]}, {CH[i]})")
+        #print(f"Removing clockwise CH edge: ({CH[j]}, {CH[i]})")
         if (CH[j], CH[i]) in x.keys():
             model.remove(x[CH[j], CH[i]])
+            model.remove(f[CH[j], CH[i]])
+            f.pop((CH[j], CH[i]))
             x.pop((CH[j], CH[i]))
-            remove_list.append((CH[j], CH[i]))  
+      
     
-    
-    # Consideramos f_ij la variable de subciclos
-    f = {(i,j) : model.addVar(vtype=GRB.CONTINUOUS, name=f"f_{i}_{j}") for i in N for j in N if i != j }
-
     # Definimos y e yp variables para los triangulos
-    y = { (i) : model.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"y_{i}") for i in V}
-    yp = { (i) : model.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"yp_{i}") for i in V}
+    y = { (i) : model.addVar(vtype=GRB.CONTINUOUS, lb = 0, name=f"y_{i}") for i in V}
+    yp = { (i) : model.addVar(vtype=GRB.CONTINUOUS, lb = 0, name=f"yp_{i}") for i in V}
     
     
     # Definimos zij variables para diagonales
@@ -201,8 +206,6 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
     else:
         print("Objective function not implemented")
         quit()
-    # ------------------------------ #
-
 
 
     if verbose:
@@ -226,52 +229,27 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
         model.addConstr((gp.quicksum(x[j,i] for j in N if j != i and (j,i) in x.keys()) == 1 ), name=f"Grado_entrada_{i}")
 
 
-    """ #      Restricciones de cruces
-    for k in range(len(sc)):
-        model.addConstr(x[sc[k][0], sc[k][1]] + x[sc[k][2], sc[k][3]] <= 1 , name=f"cruce_arcos_{k}") #(3)"""
-    """model.addConstr(gp.quicksum(y[it] + yp[it] for it in ta[sc[k][0]][sc[k][1]]) + 
-                        gp.quicksum(y[it] + yp[it] for it in ta[sc[k][2]][sc[k][3]]) <= 1 , name=f"cruce_tris_{k}_y")"""
-
-
-    # --------------------------------------------------- #
-    # RESTRICCIONES DE PRUEBA - COMPROBANDO FUNCIONALIDAD #
-    # --------------------------------------------------- #
-
-    """if sum_constrain:
-    model.addConstr(gp.quicksum(np.abs(signed_area(points[triangles[t][0]], points[triangles[t][1]], points[triangles[t][2]])) * (y[t] + yp[t]) for t in V)
-                        == model._convex_hull_area , name=f"area_positiva") #(22)
-        
-    for i in N:
-        for j in N:
-            if i != j:
-                model.addConstr(gp.quicksum(y[t] + yp[t] for t in ta[i][j]) <= 1 , name=f"triangles_compatibility_{i}_{j}") #(4)"""
-
-    # --------------------------------------------------- #
-
-
-
-
-
-
-
     # Restricciones de flujo \sim 3
     for i in N:
         if i != 0:
-            model.addConstr(gp.quicksum(f[j,i] for j in N if j != i) - gp.quicksum(f[i,j] for j in N if j != i) == 1, name=f"flujo_nodos_{i}") 
+            model.addConstr(gp.quicksum(f[j,i] for j in N if j != i and (j,i) in f.keys()) - gp.quicksum(f[i,j] for j in N if j != i and (i,j) in f.keys()) == 1, name=f"flujo_nodos_{i}") 
         for j in N:
-            if (i,j) in x.keys():
+            if i != j and (i,j) in f.keys():
                 model.addConstr(f[i,j] <= (len(N)-1) * x[i,j] , name=f"flujo_arcos_{i}_{j}") 
 
-    
-    #   Restricciones de incompatibilidad de triangulos             (A PROBAR)
-    #[model.addConstrs( y[it[k,0]] + y[it[k,1]] <= 1 , name=f"incompatibilidad_tris_{k}") for k in range(len(it))]
-
+    # RESTRICCION RAMOS ET AL.(2022B) )(8)
+#    for i in N:
+#        for j in ta[i]:
+#            model.addConstr(gp.quicksum(y[t] for t in j) >= 1 , name=f"Ramos_et_al_{i}")
 
     # Restricciones de relacion entre triangulos y arcos envolvente convexa
     for i in range(len(CH)):
-        if (CH[i], CH[(i + 1) % len(CH)]) in x.keys():
-            model.addConstr(gp.quicksum(y[t] for t in ta[CH[i]][CH[(i + 1) % len(CH)]]) <= x[CH[i], CH[(i + 1) % len(CH)]] , name=f"CH_arcos_internos_{i}_{(i + 1) % len(CH)}")  #(19)
-            model.addConstr(gp.quicksum(yp[t] for t in ta[CH[i]][CH[(i + 1) % len(CH)]]) <= 1 - x[CH[i], CH[(i + 1) % len(CH)]] , name=f"CH_arcos_externos_{i}_{(i + 1) % len(CH)}") #(23)
+        a = CH[i]
+        b = CH[(i + 1) % len(CH)]
+        #print(a,b)
+        if (a,b) in x.keys():
+            model.addConstr(gp.quicksum(y[t] for t in ta[a][b]) == x[a, b] , name=f"CH_arcos_internos_{a}_{b}")  #(19)
+            model.addConstr(gp.quicksum(yp[t] for t in ta[a][b]) == 1 - x[a, b] , name=f"CH_arcos_externos_{a}_{b}") #(23)
 
 
     #RESTRICCIONES DE RELACION ENTRE VARIABLES
@@ -290,7 +268,7 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
 
     for i in N:
         for j in N:
-            if ((i not in CH) or (j not in CH)) and i < j:
+            if ((i not in CH) or (j not in CH)) and i != j and (i,j) in x.keys():
                 model.addConstr( x[i,j] <= gp.quicksum(y[t] for t in ta[i][j]) ) #(21)
                 model.addConstr( 1-x[j,i] >= gp.quicksum(y[t] for t in ta[i][j]) ) #(21)
 
@@ -298,7 +276,7 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
 
     for i in N:
         for j in N:
-            if ((i not in CH) or (j not in CH)) and i < j:
+            if ((i not in CH) or (j not in CH)) and i !=j and (i,j) in x.keys():
                 model.addConstr( x[j,i] <= gp.quicksum(yp[t] for t in ta[i][j]) ) #(25)
                 model.addConstr( 1 - x[i,j] >= gp.quicksum(yp[t] for t in ta[i][j]) ) #(25)
 
@@ -314,9 +292,10 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
 
 
     model._x_results = []
-    for x_vars in model.getAttr('X', x).keys():
-         if model.getAttr('X', x)[x_vars] == 1:
-            model._x_results.append(x_vars)
+    if model.SolCount > 0:
+        for x_vars in model.getAttr('X', x).keys():
+            if model.getAttr('X', x)[x_vars] > 0.5:
+                model._x_results.append(x_vars)
 
     model._points_ = points
 
@@ -324,5 +303,3 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
         plot_solution(model, title="Optimal Tour" if model.Status == GRB.OPTIMAL else "Best Found Tour")
 
     return model
-
-

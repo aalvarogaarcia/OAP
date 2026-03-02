@@ -9,6 +9,9 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import gurobipy as gp
 from gurobipy import GRB
+import json
+import os
+
 
 def read_data(file_path):
     """Reads data from a file and returns it as a list of lines."""
@@ -392,10 +395,9 @@ def cost_function_area(points: NDArray[np.int64], x_array: NDArray[np.int64], mo
         max_val = np.max(points) if len(points) > 0 else 0
         r = np.array([max_val + 1, max_val + 1])
         for i, j in x_array:
-            print((i, j))
             p1 = points[i]
             p2 = points[j]
-            area = np.abs(signed_area(r, p1, p2))
+            area = (signed_area(r, p1, p2))
             c[(i, j)] = area
 
     elif mode == 1:
@@ -601,3 +603,49 @@ def plot_solution(model: gp.Model, title: str = "Solution"):
     plt.grid(True)
     plt.show()
 
+
+def log_farkas_ray(filepath: str, iteration: int, node_depth: int, subproblem_type: str, 
+                   x_sol: dict, v_components: dict, violation_value: float, tolerance: float = 1e-5):
+    """
+    Registra la información de un rayo de Farkas y la solución candidata en un archivo JSONL.
+    
+    Args:
+        filepath: Ruta del archivo .jsonl donde se guardará el log.
+        iteration: Número de iteración o contador de cortes.
+        node_depth: Profundidad del árbol de exploración (0 para nodo raíz/soluciones enteras).
+        subproblem_type: 'Y' o 'Y_prime'.
+        x_sol: Diccionario con los valores de la solución maestra actual.
+        v_components: Diccionario con los componentes del rayo (alpha, beta, etc.).
+        violation_value: El valor numérico de la violación del corte.
+        tolerance: Valor por debajo del cual se considera que una variable es 0.
+    """
+    # 1. Filtrar x_sol: Guardar solo los arcos activos para no saturar el log
+    active_x = {
+        f"{i}_{j}": round(val, 4) 
+        for (i, j), val in x_sol.items() 
+        if abs(val) > tolerance
+    }
+    
+    # 2. Estructurar los componentes del rayo
+    ray_data = {}
+    for comp_name, values in v_components.items():
+        if values:  # Solo procesamos si el diccionario no está vacío
+            # Convertimos las tuplas (i, j) a strings "i_j" porque JSON no soporta tuplas como keys
+            ray_data[comp_name] = {f"{k[0]}_{k[1]}": round(v, 4) for k, v in values.items()}
+            
+    # 3. Crear el registro consolidado
+    registro = {
+        "iteration": iteration,
+        "node_depth": node_depth,
+        "subproblem": subproblem_type,
+        "violation": round(violation_value, 6),
+        "active_x": active_x,
+        "ray_components": ray_data
+    }
+    
+    # 4. Asegurar que el directorio existe
+    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    
+    # 5. Escribir en formato JSON Lines (append mode)
+    with open(filepath, 'a') as f:
+        f.write(json.dumps(registro) + '\n')
