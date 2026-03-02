@@ -1,1 +1,0 @@
-Objetivo	Solver	Modelo	Nombre	n	direct	cruzan	y_bin	num_tri	status	Tiempo	Area	Error
