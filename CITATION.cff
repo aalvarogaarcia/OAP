@@ -1,48 +1,43 @@
 cff-version: 1.2.0
 message: "If you use this software in your research, please cite it as follows."
 authors:
-
-family-names: "García"
-given-names: "Álvaro"
-orcid: "https://orcid.org/0009-0001-1527-7833bv"
+  - family-names: "García"
+    given-names: "Álvaro"
+    orcid: "https://orcid.org/0009-0001-1527-7833"
 title: "Optimal Area Polygonization (OAP) - MILP Framework"
 version: 0.1.0-alpha
 date-released: 2024-05-20
 url: "https://github.com/aalvarogaarcia/OAP"
 repository-code: "https://github.com/aalvarogaarcia/OAP"
 abstract: >-
-A research-oriented framework for solving the Minimum and Maximum Area Polygonization problems.
-The project implements compact MILP formulations and a custom Benders Decomposition approach
-using Gurobi, specifically designed to handle the non-self-intersection and connectivity
-constraints of simple polygons.
+  A research-oriented framework for solving the Minimum and Maximum Area Polygonization problems.
+  The project implements compact MILP formulations and a custom Benders Decomposition approach
+  using Gurobi, specifically designed to handle the non-self-intersection and connectivity
+  constraints of simple polygons.
 keywords:
-
-Mixed-Integer Linear Programming
-
-Benders Decomposition
-
-Computational Geometry
-
-Optimal Area Polygonization
-
-Gurobi
-
-Farkas Rays
+  - "Mixed-Integer Linear Programming"
+  - "Benders Decomposition"
+  - "Computational Geometry"
+  - "Optimal Area Polygonization"
+  - "Gurobi"
+  - "Farkas Rays"
 preferred-citation:
-type: article
-authors:
-
-family-names: "Hernández-Pérez"
-given-names: "Hipólito"
-
-family-names: "Riera-Ledesma"
-given-names: "Jorge"
-
-family-names: "Rodríguez-Martín"
-given-names: "Inmaculada"
-
-family-names: "Salazar-González"
-given-names: "Juan-José"
-title: "Optimal area polygonisation problems: Mixed integer linear programming models"
-journal: "European Journal of Operational Research"
-year: 2023
+  type: article
+  authors:
+    - family-names: "Hernández-Pérez"
+      given-names: "Hipólito"
+    - family-names: "Riera-Ledesma"
+      given-names: "Jorge"
+    - family-names: "Rodríguez-Martín"
+      given-names: "Inmaculada"
+    - family-names: "Salazar-González"
+      given-names: "Juan-José"
+  title: "Optimal area polygonisation problems: Mixed integer linear programming models"
+  journal: "European Journal of Operational Research"
+  year: 2026
+  volume: 329
+  issue: 3
+  start: 767 # page start
+  end: 777   # page end
+  doi: "10.1016/j.ejor.2025.08.023"
+  issn: "0377-2217"
