@@ -603,9 +603,27 @@ def plot_solution(model: gp.Model, title: str = "Solution"):
     plt.grid(True)
     plt.show()
 
+def serialize_expr(expr):
+    """Convierte una expresión lineal de Gurobi en un diccionario serializable."""
+    if expr is None:
+        return None
+    
+    # Creamos un diccionario: {"nombre_variable": coeficiente}
+    # Por ejemplo: {"x_0_1": 1.0, "x_2_3": -1.0}
+    coeffs = {}
+    for i in range(expr.size()):
+        var = expr.getVar(i)
+        coeff = expr.getCoeff(i)
+        if abs(coeff) > 1e-6:
+            coeffs[var.VarName] = round(coeff, 4)
+    
+    return {
+        "coeffs": coeffs,
+        "constant": round(expr.getConstant(), 4)
+    }
 
 def log_farkas_ray(filepath: str, iteration: int, node_depth: int, subproblem_type: str, 
-                   x_sol: dict, v_components: dict, violation_value: float, tolerance: float = 1e-5):
+                   x_sol: dict, v_components: dict, violation_value: float, tolerance: float = 1e-5, cut_expr: str = None):
     """
     Registra la información de un rayo de Farkas y la solución candidata en un archivo JSONL.
     
@@ -618,6 +636,7 @@ def log_farkas_ray(filepath: str, iteration: int, node_depth: int, subproblem_ty
         v_components: Diccionario con los componentes del rayo (alpha, beta, etc.).
         violation_value: El valor numérico de la violación del corte.
         tolerance: Valor por debajo del cual se considera que una variable es 0.
+        cut_expr: Expresión del corte generado (para debugging o análisis).
     """
     # 1. Filtrar x_sol: Guardar solo los arcos activos para no saturar el log
     active_x = {
@@ -633,6 +652,8 @@ def log_farkas_ray(filepath: str, iteration: int, node_depth: int, subproblem_ty
             # Convertimos las tuplas (i, j) a strings "i_j" porque JSON no soporta tuplas como keys
             ray_data[comp_name] = {f"{k[0]}_{k[1]}": round(v, 4) for k, v in values.items()}
             
+    serialized_cut = serialize_expr(cut_expr) if cut_expr else None
+
     # 3. Crear el registro consolidado
     registro = {
         "iteration": iteration,
@@ -640,7 +661,8 @@ def log_farkas_ray(filepath: str, iteration: int, node_depth: int, subproblem_ty
         "subproblem": subproblem_type,
         "violation": round(violation_value, 6),
         "active_x": active_x,
-        "ray_components": ray_data
+        "ray_components": ray_data,
+        "cut_expr": serialized_cut
     }
     
     # 4. Asegurar que el directorio existe
@@ -649,3 +671,21 @@ def log_farkas_ray(filepath: str, iteration: int, node_depth: int, subproblem_ty
     # 5. Escribir en formato JSON Lines (append mode)
     with open(filepath, 'a') as f:
         f.write(json.dumps(registro) + '\n')
+
+
+
+def format_cut_string(cut_expr):
+    """Convierte el log entry en algo como '1.0 <= x_0_1 + x_2_1'"""
+    const = cut_expr.get('constant', 0.0)
+    coeffs = cut_expr.get('coeffs', {})
+    
+    # Siguiendo la lógica: const <= sum(-coeff * x)
+    parts = []
+    for var, val in coeffs.items():
+        if val < 0:
+            parts.append(f"{abs(val)}*{var}" if abs(val) != 1 else var)
+        elif val > 0:
+            parts.append(f"- {val}*{var}" if val != 1 else f"- {var}")
+            
+    formula = " + ".join(parts).replace("+ -", "- ")
+    return f"Corte Lógico: {const} <= {formula}"

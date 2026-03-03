@@ -4,6 +4,7 @@ from gurobipy import GRB
 import gurobipy as gp
 import numpy as np
 import os
+from utils.model_stats import get_tour
 from utils.utils import *
 
 
@@ -109,7 +110,20 @@ def benders_callback(model, where):
     if where == GRB.Callback.MIPSOL:
         # 1. Obtener la solución actual del Maestro (x barra)
         x_sol = model.cbGetSolution(model._x)
+
+        x_results= []
+        for x_vars in x_sol.keys():
+            if x_sol[x_vars] > 0.5:
+                x_results.append(x_vars)
         
+        if model._iteration == 4:
+            print(x_results)
+
+        
+        G = nx.DiGraph()
+        G.add_edges_from(x_results)
+        tour = sorted(nx.simple_cycles(G))
+
         # Recuperar los submodelos y diccionarios de restricciones 
         # (Asegúrate de haberlos guardado en el 'model' maestro antes de optimizar)
         sub_y = model._sub_y
@@ -120,6 +134,11 @@ def benders_callback(model, where):
         if hasattr(model, '_iteration'):
             model._iteration += 1
         
+        print("\n=== Iteración: {} ===".format(model._iteration))
+        print("--- Tour obtenido ---")
+        print(tour)
+        print("-" * 30, "\n")
+
         # ==========================================
         # 2. ACTUALIZAR RHS PARA EL SUBPROBLEMA Y
         # ==========================================
@@ -206,7 +225,7 @@ def benders_callback(model, where):
                     cut_y_val += farkas * (1 - x_sol[j, i])
             
             # --- Análisis por consola ---
-            print("\n" + "="*50)
+            print("\n" + "-"*30)
             print("RAYO DE FARKAS DETECTADO EN SUBPROBLEMA Y")
             print("Valor numérico de la violación (v^T * b(x_bar)): ", cut_y_val)
             for comp, values in v_components_y.items():
@@ -214,10 +233,11 @@ def benders_callback(model, where):
                     print(f"Componente {comp}:")
                     for k, v in values.items():
                         print(f"  {k}: {v:.4f}")
-            print("="*50 + "\n")
+            print("-"*30 + "\n")
            
             # --- NUEVO: Guardar en el log estructurado ---
             if getattr(model, '_save_cuts', False):
+                # 1. Obtener trazabilidad detallada        
                 log_farkas_ray(
                     filepath=model._farkas_log_path,
                     iteration=model._iteration,
@@ -226,10 +246,10 @@ def benders_callback(model, where):
                     x_sol=x_sol,
                     v_components=v_components_y,
                     violation_value=cut_y_val,
-                    tolerance=TOL
+                    tolerance=TOL,
+                    cut_expr = cut_y_expr,
                 )
 
-            # --- Añadir el corte al maestro de forma segura ---
             # --- Añadir el corte al maestro de forma segura ---
             # Si el valor evaluado es positivo, el hiperplano debe forzarse hacia <= 0
             if cut_y_val > TOL:
@@ -297,7 +317,8 @@ def benders_callback(model, where):
                     x_sol=x_sol,
                     v_components=v_components_yp,
                     violation_value=cut_yp_val,
-                    tolerance=TOL
+                    tolerance=TOL,
+                    cut_expr = cut_yp_expr
                 )
 
             # --- Añadir el corte al maestro de forma segura ---
@@ -461,7 +482,8 @@ def benders_callback(model, where):
 
 
 def build_master_problem(instance_path: str, verbose: bool = False, plot: bool = False, 
-                         time_limit: int = 7200, maximize: bool = True, save_cuts: bool = False) -> gp.Model:
+                         time_limit: int = 7200, maximize: bool = True, save_cuts: bool = False,
+                         crosses_constrain: bool = True) -> gp.Model:
     """
     Construye y resuelve el Problema Maestro (PM) usando Descomposición de Benders.
     """
@@ -470,6 +492,8 @@ def build_master_problem(instance_path: str, verbose: bool = False, plot: bool =
     points = read_indexed_instance(instance_path)
     N = range(len(points))
     CH = compute_convex_hull(points)
+    triangles = compute_triangles(points)
+    crossing = compute_crossing_edges(triangles, points)
 
     model = gp.Model("Master Problem - Benders Decomposition")
     model.setParam('TimeLimit', time_limit)
@@ -562,6 +586,20 @@ def build_master_problem(instance_path: str, verbose: bool = False, plot: bool =
     for i, j in x.keys():
         model.addConstr(f[i, j] <= M * x[i, j], name=f"flow_capacity_{i}_{j}")
 
+    # 3. Restricciones de Cruce (Bloque A1)
+    # Evitan que se crucen aristas en la solución
+    if crosses_constrain:
+        for cross in crossing:
+            i, j, k, l = cross
+            
+            exists_edge_1 = (i, j) in x and (j, i) in x
+            exists_edge_2 = (k, l) in x and (l, k) in x
+            
+            if exists_edge_1 and exists_edge_2:
+                model.addConstr(
+                    x[i, j] + x[j, i] + x[k, l] + x[l, k] <= 1, 
+                    name=f"crossing_{i}_{j}_{k}_{l}"
+                )
 
     # --- Construcción del Subproblema ---
     sub_y, sub_yp, constrs_y, constrs_yp = build_subproblems(points, N, CH, x.keys())
@@ -580,7 +618,10 @@ def build_master_problem(instance_path: str, verbose: bool = False, plot: bool =
         model._iteration = 0
         
         # NUEVO: Ruta para el log de rayos de Farkas
-        model._farkas_log_path = f"outputs/Others/Benders/{model._instance_name}/farkas_log.jsonl"
+        if crosses_constrain:
+            model._farkas_log_path = f"outputs/Others/Benders/{model._instance_name}-Crosses/farkas_log.jsonl"
+        else:
+            model._farkas_log_path = f"outputs/Others/Benders/{model._instance_name}/farkas_log.jsonl"
         # Limpiar el archivo si ya existe de una corrida anterior
         if os.path.exists(model._farkas_log_path):
             os.remove(model._farkas_log_path)

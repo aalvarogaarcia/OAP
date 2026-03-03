@@ -9,14 +9,14 @@ import time
 import networkx as nx
 
 
-instance = "instance/stars-0000015.instance"
+instance = "instance/london-0000015.instance"
 
 
-model_compact = build_and_solve_model(instance, verbose=False, plot=True, maximize=True, time_limit=100,
-                                sum_constrain=False, obj = 0, mode = 1 )
+model_compact = build_and_solve_model(instance, verbose=False, plot=True, maximize=False, time_limit=100,
+                                sum_constrain=False, obj = 1, mode = 1, subtour = 0)
 
 
-#model = build_master_problem(instance, verbose=True, plot=True, maximize=True, time_limit=100, save_cuts=True)
+#model = build_master_problem(instance, verbose=True, plot=True, maximize=False, time_limit=300, save_cuts=True, crosses_constrain=False)
 #
 #lp, gap, ip, elapsed_time, nodes = get_model_stats(model)
 #
@@ -49,14 +49,18 @@ model_compact = build_and_solve_model(instance, verbose=False, plot=True, maximi
 #
 #farkas_log = load_farkas_logs(model._farkas_log_path)
 #
-#PDF_PATH = f"outputs/Others/Benders/{instance.split('/')[-1].split('.')[0]}/Farkas_Analysis_Report.pdf"
+#if "crosses" in model._farkas_log_path.lower():
+#    PDF_PATH = f"outputs/Others/Benders/{instance.split('/')[-1].split('.')[0]}-Crosses/Farkas_Analysis_Report.pdf"
+#else:
+#    PDF_PATH = f"outputs/Others/Benders/{instance.split('/')[-1].split('.')[0]}/Farkas_Analysis_Report.pdf"
 #
 #generate_post_mortem_report(model._farkas_log_path, 
 #                            PDF_PATH, 
-#                            points=model._points_)
-#
-#
-#
+#                            points=model._points_,
+#                            n=len(model._points_))
+
+
+
 
 lp, gap, ip, elapsed_time, nodes = get_model_stats(model_compact)
 

@@ -2,6 +2,11 @@ import json
 import networkx as nx
 import matplotlib.pyplot as plt
 import os
+import seaborn as sns
+import numpy as np
+import plotly.graph_objects as go
+
+
 
 def load_farkas_logs(filepath: str):
     """Carga el historial de rayos de Farkas desde un archivo .jsonl."""
@@ -101,5 +106,107 @@ def plot_farkas_ray_network(log_entry: dict, points: dict = None, save_path: str
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         plt.savefig(save_path, bbox_inches='tight', dpi=300)
         plt.close()
-    elif show_plot:  # <--- NUEVO PARÁMETRO
+    elif show_plot:
         plt.show()
+
+
+
+
+
+def plot_cut_heatmap(log_entry: dict, num_nodes: int, save_path: str = None, show_plot: bool = False):
+    cut_data = log_entry.get("cut_expr")
+    if not cut_data: return
+
+    # Crear matriz vacía
+    adj_matrix = np.zeros((num_nodes, num_nodes))
+    
+    for var_name, coeff in cut_data["coeffs"].items():
+        # Extraer i, j del nombre de la variable (ej: x_0_1)
+        try:
+            parts = var_name.split('_')
+            i, j = int(parts[1]), int(parts[2])
+            adj_matrix[i, j] = coeff
+        except: continue
+
+    plt.figure(figsize=(6, 5))
+    sns.heatmap(adj_matrix, annot=True, cmap="RdBu", center=0)
+    plt.title(f"Estructura del Corte - Iteración {log_entry['iteration']}")
+    plt.xlabel("Nodo Destino (j)")
+    plt.ylabel("Nodo Origen (i)")
+    # Guardar o mostrar
+
+    if save_path:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        plt.savefig(save_path, bbox_inches='tight', dpi=300)
+        plt.close()
+    elif show_plot: 
+        plt.show()
+
+
+def plot_cut_weights(log_entry: dict, save_path: str = None, show_plot: bool = False):
+    """Dibuja un gráfico de barras con los pesos (coeficientes) del corte."""
+    cut_data = log_entry.get("cut_expr")
+    if not cut_data or not cut_data["coeffs"]:
+        print("No hay datos de expresión en este registro.")
+        return
+
+    coeffs = cut_data["coeffs"]
+    # Ordenar por magnitud del coeficiente
+    sorted_coeffs = dict(sorted(coeffs.items(), key=lambda item: abs(item[1]), reverse=True))
+    
+    names = list(sorted_coeffs.keys())
+    values = list(sorted_coeffs.values())
+
+    plt.figure(figsize=(10, 5))
+    colors = ['red' if v < 0 else 'blue' for v in values]
+    plt.bar(names, values, color=colors)
+    plt.xticks(rotation=45, ha='right')
+    plt.title(f"Pesos del Corte - Iteración {log_entry['iteration']} ({log_entry['subproblem']})")
+    plt.ylabel("Coeficiente en el Maestro")
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    plt.tight_layout()
+    if save_path:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        plt.savefig(save_path, bbox_inches='tight', dpi=300)
+        plt.close()
+    elif show_plot:  
+        plt.show()
+
+
+
+
+
+
+
+
+
+def plot_sankey_traceability(log_entry: dict, save_path: str = None, show_plot: bool = False):
+    trace = log_entry.get("traceability")
+    
+    sources = [] # Componentes Duales
+    targets = [] # Variables x_ij
+    values = []  # Pesos
+    
+    for x_var, info in trace.items():
+        sources.append(info["source_component"])
+        targets.append(x_var)
+        values.append(abs(info["dual_value"]))
+        
+    # Plotly necesita índices numéricos para el Sankey
+    nodes = list(set(sources + targets))
+    source_idx = [nodes.index(s) for s in sources]
+    target_idx = [nodes.index(t) for t in targets]
+    
+    fig = go.Figure(data=[go.Sankey(
+        node = dict(label = nodes, pad=15, thickness=20),
+        link = dict(source = source_idx, target = target_idx, value = values)
+    )])
+    
+    fig.update_layout(title_text="Trazabilidad: Del Subproblema al Maestro", font_size=12)
+    if save_path:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        fig.write_image(save_path)
+    elif show_plot:
+        fig.show()
+
+

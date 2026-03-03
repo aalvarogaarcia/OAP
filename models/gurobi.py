@@ -9,7 +9,7 @@ from utils.utils import *
 
 def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool = False, time_limit: int = 7200000, 
                           maximize: bool = True, sum_constrain: bool = True, relaxed: bool = False,
-                          obj: int = 2, **kwargs) -> gp.Model:
+                          obj: int = 2, subtour: int = 0, **kwargs) -> gp.Model:
     """
     Docstring for build_and_solve_model
     
@@ -29,6 +29,8 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
     :type relaxed: bool
     :param obj: Which objective function to use: 0 for Fekete, 1 for Internal Area, 2 for External Area, 3 for Diagonals
     :type obj: int
+    :param subtour: Which subtour elimination constraints we want to add: 0 for flow, 1 for MTZ, 2 for MCF
+    :type subtour: int
     :**kwargs: Additional keyword arguments
     :type kwargs: dict
 
@@ -78,6 +80,12 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
         "External Area" if obj == 2 else
         "Diagonals"
     )
+    model._subtour_method = (
+        "Flow" if subtour == 0 else
+        "MTZ" if subtour == 1 else
+        "MCF" if subtour == 2 else
+        "Unknown"
+    )
 
 
     # Model building logic goes here
@@ -92,32 +100,86 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
     
     
     # Consideramos f_ij la variable de subciclos
-    f = {(i,j) : model.addVar(vtype=GRB.CONTINUOUS, lb = 0, name=f"f_{i}_{j}") for i in N for j in N if i != j }
+    if subtour == 0:
+        f = {(i,j) : model.addVar(vtype=GRB.CONTINUOUS, lb = 0, name=f"f_{i}_{j}") for i in N for j in N if i != j }
+        
+        for i in range(len(CH)):
+            for j in range(i+2, len(CH)):
+                if (i == 0 and j == len(CH) - 1):
+                    continue
+                model.remove(x[CH[i], CH[j]])
+                model.remove(x[CH[j], CH[i]])
+                model.remove(f[CH[i], CH[j]])
+                model.remove(f[CH[j], CH[i]])
+                f.pop((CH[i], CH[j]))
+                f.pop((CH[j], CH[i]))
+                x.pop((CH[i], CH[j]))
+                x.pop((CH[j], CH[i]))
+
+        
+        # Remove clockwise oriented convex hull edges
+        for i in range(len(CH)):
+            j = (i + 1) % len(CH)
+            #print(f"Removing clockwise CH edge: ({CH[j]}, {CH[i]})")
+            if (CH[j], CH[i]) in x.keys():
+                model.remove(x[CH[j], CH[i]])
+                model.remove(f[CH[j], CH[i]])
+                f.pop((CH[j], CH[i]))
+                x.pop((CH[j], CH[i]))
     
-    for i in range(len(CH)):
-        for j in range(i+2, len(CH)):
-            if (i == 0 and j == len(CH) - 1):
-                continue
-            model.remove(x[CH[i], CH[j]])
-            model.remove(x[CH[j], CH[i]])
-            model.remove(f[CH[i], CH[j]])
-            model.remove(f[CH[j], CH[i]])
-            f.pop((CH[i], CH[j]))
-            f.pop((CH[j], CH[i]))
-            x.pop((CH[i], CH[j]))
-            x.pop((CH[j], CH[i]))
 
     
-    # Remove clockwise oriented convex hull edges
-    for i in range(len(CH)):
-        j = (i + 1) % len(CH)
-        #print(f"Removing clockwise CH edge: ({CH[j]}, {CH[i]})")
-        if (CH[j], CH[i]) in x.keys():
+    # Consideramos u_i variables para MTZ (Variables de posición en el tour)
+    elif subtour == 1:
+        u = {i: model.addVar(vtype=GRB.CONTINUOUS, lb=0, ub=len(N)-1, name=f"u_{i}") for i in N}
+        for i in range(len(CH)):
+            j = (i + 1) % len(CH)
+            model.remove(x[CH[i], CH[j]])
             model.remove(x[CH[j], CH[i]])
-            model.remove(f[CH[j], CH[i]])
-            f.pop((CH[j], CH[i]))
+            x.pop((CH[i], CH[j]))
             x.pop((CH[j], CH[i]))
-      
+        
+        for i in range(len(CH)):
+            for j in range(i+2, len(CH)):
+                if (i == 0 and j == len(CH) - 1):
+                    continue
+                model.remove(x[CH[i], CH[j]])
+                model.remove(x[CH[j], CH[i]])
+                x.pop((CH[i], CH[j]))
+                x.pop((CH[j], CH[i]))
+
+
+
+    # Consideramos f_ij^k variables para el modelo de flujo multicommodity
+    elif subtour == 2:
+        f = {(k): {} for k in N[:-1]}  # No necesitamos una capa de flujo para el nodo fuente
+        for k in N[:-1]:  # No necesitamos una capa de flujo para el nodo fuente
+            f[k] = {(i,j): model.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"f^{k}_{i}_{j}") for i in N for j in N if i != j}
+
+            for i in range(len(CH)):
+                for j in range(i+2, len(CH)):
+                    if (i == 0 and j == len(CH) - 1):
+                        continue
+                    model.remove(x[CH[i], CH[j]])
+                    model.remove(x[CH[j], CH[i]])
+                    model.remove(f[k][CH[i], CH[j]])
+                    model.remove(f[k][CH[j], CH[i]])
+                    f[k].pop((CH[i], CH[j]))
+                    f[k].pop((CH[j], CH[i]))
+                    x.pop((CH[i], CH[j]))
+                    x.pop((CH[j], CH[i]))
+
+            
+            # Remove clockwise oriented convex hull edges
+            for i in range(len(CH)):
+                j = (i + 1) % len(CH)
+                #print(f"Removing clockwise CH edge: ({CH[j]}, {CH[i]})")
+                if (CH[j], CH[i]) in x.keys():
+                    model.remove(x[CH[j], CH[i]])
+                    model.remove(f[k][CH[j], CH[i]])
+                    f[k].pop((CH[j], CH[i]))
+                    x.pop((CH[j], CH[i]))
+    
     
     # Definimos y e yp variables para los triangulos
     y = { (i) : model.addVar(vtype=GRB.CONTINUOUS, lb = 0, name=f"y_{i}") for i in V}
@@ -230,12 +292,36 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
 
 
     # Restricciones de flujo \sim 3
-    for i in N:
-        if i != 0:
-            model.addConstr(gp.quicksum(f[j,i] for j in N if j != i and (j,i) in f.keys()) - gp.quicksum(f[i,j] for j in N if j != i and (i,j) in f.keys()) == 1, name=f"flujo_nodos_{i}") 
+    if subtour == 0:    
+        for i in N:
+            if i != 0:
+                model.addConstr(gp.quicksum(f[j,i] for j in N if j != i and (j,i) in f.keys()) - gp.quicksum(f[i,j] for j in N if j != i and (i,j) in f.keys()) == 1, name=f"flujo_nodos_{i}") 
         for j in N:
             if i != j and (i,j) in f.keys():
-                model.addConstr(f[i,j] <= (len(N)-1) * x[i,j] , name=f"flujo_arcos_{i}_{j}") 
+                model.addConstr(f[i,j] <= (len(N)-1) * x[i,j] , name=f"flujo_arcos_{i}_{j}")
+
+     
+    elif subtour == 1:
+        for i in N[:-1]:
+            for j in N[:-1]:
+                if i != j and (i,j) in x.keys():
+                    model.addConstr(u[i] - u[j] + 1 <= (len(N)-1) * (1 - x[i,j]) , name=f"MTZ_{i}_{j}")
+
+
+    elif subtour == 2:
+        for k in N[:-1]:
+            for i in N:
+                if i == N[:-1]:
+                    model.addConstr(gp.quicksum(f[k][j,i] for j in N if j != i and (j,i) in f[k].keys()) - gp.quicksum(f[k][i,j] for j in N if j != i and (i,j) in f[k].keys()) == -1, name=f"MCF_flujo_nodos_{k}_{i}") 
+                elif i == k:
+                    model.addConstr(gp.quicksum(f[k][j,i] for j in N if j != i and (j,i) in f[k].keys()) - gp.quicksum(f[k][i,j] for j in N if j != i and (i,j) in f[k].keys()) == 1, name=f"MCF_flujo_nodos_{k}_{i}")
+                else:
+                    model.addConstr(gp.quicksum(f[k][j,i] for j in N if j != i and (j,i) in f[k].keys()) - gp.quicksum(f[k][i,j] for j in N if j != i and (i,j) in f[k].keys()) == 0, name=f"MCF_flujo_nodos_{k}_{i}")
+                
+                for j in N:
+                    if i != j and (i,j) in x.keys():
+                        model.addConstr(f[k][i,j] <= x[i,j] , name=f"MCF_flujo_arcos_{k}_{i}_{j}")
+
 
     # RESTRICCION RAMOS ET AL.(2022B) )(8)
 #    for i in N:
