@@ -115,9 +115,6 @@ def benders_callback(model, where):
         for x_vars in x_sol.keys():
             if x_sol[x_vars] > 0.5:
                 x_results.append(x_vars)
-        
-        if model._iteration == 4:
-            print(x_results)
 
         
         G = nx.DiGraph()
@@ -134,10 +131,10 @@ def benders_callback(model, where):
         if hasattr(model, '_iteration'):
             model._iteration += 1
         
-        print("\n=== Iteración: {} ===".format(model._iteration))
-        print("--- Tour obtenido ---")
-        print(tour)
-        print("-" * 30, "\n")
+            print("\n=== Iteración: {} ===".format(model._iteration))
+            print("--- Tour obtenido ---")
+            print(tour)
+            print("-" * 30, "\n")
 
         # ==========================================
         # 2. ACTUALIZAR RHS PARA EL SUBPROBLEMA Y
@@ -225,15 +222,16 @@ def benders_callback(model, where):
                     cut_y_val += farkas * (1 - x_sol[j, i])
             
             # --- Análisis por consola ---
-            print("\n" + "-"*30)
-            print("RAYO DE FARKAS DETECTADO EN SUBPROBLEMA Y")
-            print("Valor numérico de la violación (v^T * b(x_bar)): ", cut_y_val)
-            for comp, values in v_components_y.items():
-                if values: # Solo imprime si hay valores no nulos
-                    print(f"Componente {comp}:")
-                    for k, v in values.items():
-                        print(f"  {k}: {v:.4f}")
-            print("-"*30 + "\n")
+            if model._save_cuts:
+                print("\n" + "-"*30)
+                print("RAYO DE FARKAS DETECTADO EN SUBPROBLEMA Y")
+                print("Valor numérico de la violación (v^T * b(x_bar)): ", cut_y_val)
+                for comp, values in v_components_y.items():
+                    if values: # Solo imprime si hay valores no nulos
+                        print(f"Componente {comp}:")
+                        for k, v in values.items():
+                            print(f"  {k}: {v:.4f}")
+                print("-"*30 + "\n")
            
             # --- NUEVO: Guardar en el log estructurado ---
             if getattr(model, '_save_cuts', False):
@@ -297,15 +295,16 @@ def benders_callback(model, where):
                     cut_yp_val += farkas * (1 - x_sol[i, j])
             
             # --- Análisis por consola ---
-            print("\n" + "="*50)
-            print("RAYO DE FARKAS DETECTADO EN SUBPROBLEMA Y'")
-            print("Valor numérico de la violación (v'^T * b(x_bar)): ", cut_yp_val)
-            for comp, values in v_components_yp.items():
-                if values:
-                    print(f"Componente {comp}:")
-                    for k, v in values.items():
-                        print(f"  {k}: {v:.4f}")
-            print("="*50 + "\n")
+            if model._save_cuts:
+                print("\n" + "="*50)
+                print("RAYO DE FARKAS DETECTADO EN SUBPROBLEMA Y'")
+                print("Valor numérico de la violación (v'^T * b(x_bar)): ", cut_yp_val)
+                for comp, values in v_components_yp.items():
+                    if values:
+                        print(f"Componente {comp}:")
+                        for k, v in values.items():
+                            print(f"  {k}: {v:.4f}")
+                print("="*50 + "\n")
 
             # --- NUEVO: Guardar en el log estructurado ---
             if getattr(model, '_save_cuts', False):
