@@ -175,6 +175,9 @@ def main(dir_path="data",
             df_final['Time_Diff_Min_ST0'] = df_final[('Min_Time', 0)] - df_final['MIN_Time']
             df_final['Time_Diff_Max_ST0'] = df_final[('Max_Time', 0)] - df_final['MAX_Time']
 
+            df_final['RelativeTime_Diff_Min_ST0'] = (df_final[('Min_Time', 0)] - df_final['MIN_Time']) / df_final['MIN_Time'] * 100
+            df_final['RelativeTime_Diff_Max_ST0'] = (df_final[('Max_Time', 0)] - df_final['MAX_Time']) / df_final['MAX_Time'] * 100
+
             df_final['Nodes_Diff_Min_ST0'] = df_final[('Min_Nodes', 0)] - df_final['MIN_Nodes']
             df_final['Nodes_Diff_Max_ST0'] = df_final[('Max_Nodes', 0)] - df_final['MAX_Nodes']
 
@@ -194,6 +197,9 @@ def main(dir_path="data",
             df_final['Time_Diff_Min_ST1'] = df_final[('Min_Time', 1)] - df_final['MIN_Time']
             df_final['Time_Diff_Max_ST1'] = df_final[('Max_Time', 1)] - df_final['MAX_Time']
 
+            df_final['RelativeTime_Diff_Min_ST1'] = (df_final[('Min_Time', 1)] - df_final['MIN_Time']) / df_final['MIN_Time'] * 100
+            df_final['RelativeTime_Diff_Max_ST1'] = (df_final[('Max_Time', 1)] - df_final['MAX_Time']) / df_final['MAX_Time'] * 100
+
             df_final['Nodes_Diff_Min_ST1'] = df_final[('Min_Nodes', 1)] - df_final['MIN_Nodes']
             df_final['Nodes_Diff_Max_ST1'] = df_final[('Max_Nodes', 1)] - df_final['MAX_Nodes']
 
@@ -212,6 +218,9 @@ def main(dir_path="data",
 
             df_final['Time_Diff_Min_ST2'] = df_final[('Min_Time', 2)] - df_final['MIN_Time']
             df_final['Time_Diff_Max_ST2'] = df_final[('Max_Time', 2)] - df_final['MAX_Time']
+
+            df_final['RelativeTime_Diff_Min_ST2'] = (df_final[('Min_Time', 2)] - df_final['MIN_Time']) / df_final['MIN_Time'] * 100
+            df_final['RelativeTime_Diff_Max_ST2'] = (df_final[('Max_Time', 2)] - df_final['MAX_Time']) / df_final['MAX_Time'] * 100
 
             df_final['Nodes_Diff_Min_ST2'] = df_final[('Min_Nodes', 2)] - df_final['MIN_Nodes']
             df_final['Nodes_Diff_Max_ST2'] = df_final[('Max_Nodes', 2)] - df_final['MAX_Nodes']
