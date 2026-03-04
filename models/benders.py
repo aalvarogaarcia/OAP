@@ -482,7 +482,7 @@ def benders_callback(model, where):
 
 def build_master_problem(instance_path: str, verbose: bool = False, plot: bool = False, 
                          time_limit: int = 7200, maximize: bool = True, save_cuts: bool = False,
-                         crosses_constrain: bool = True) -> gp.Model:
+                         crosses_constrain: bool = False) -> gp.Model:
     """
     Construye y resuelve el Problema Maestro (PM) usando Descomposición de Benders.
     """

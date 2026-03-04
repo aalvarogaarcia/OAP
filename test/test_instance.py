@@ -9,14 +9,14 @@ import time
 import networkx as nx
 
 
-instance = "instance/london-0000015.instance"
+instance = "instance/stars-0000015.instance"
 
 
-model_compact = build_and_solve_model(instance, verbose=False, plot=True, maximize=False, time_limit=100,
-                                sum_constrain=False, obj = 1, mode = 1, subtour = 0)
+model_compact = build_and_solve_model(instance, verbose=False, plot=True, maximize=True, time_limit=300,
+                                sum_constrain=False, obj = 2, mode = None, subtour = 0)
 
 
-#model = build_master_problem(instance, verbose=True, plot=True, maximize=False, time_limit=300, save_cuts=True, crosses_constrain=False)
+#model = build_master_problem(instance, verbose=True, plot=False, maximize=False, time_limit=300, save_cuts=False, crosses_constrain=False)
 #
 #lp, gap, ip, elapsed_time, nodes = get_model_stats(model)
 #
@@ -46,7 +46,7 @@ model_compact = build_and_solve_model(instance, verbose=False, plot=True, maximi
 #print("-" * 30)
 #
 #print(f"Resultados: LP={lp:.2f}, Gap={gap:.2f}%, IP={ip:.2f}, Time={elapsed_time:.2f}s, Nodes={nodes}")
-#
+
 #farkas_log = load_farkas_logs(model._farkas_log_path)
 #
 #if "crosses" in model._farkas_log_path.lower():
