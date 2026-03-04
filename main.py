@@ -85,7 +85,7 @@ def main(dir_path="data",
                 
                 # Limpieza del nombre para LaTeX
                 instance_name = filename.replace(".txt", "").replace("_", "-").replace(".instance", "")
-print(f"[{st_method}] Procesando: {filename}...")
+                print(f"[{st_method}] Procesando: {filename}...")
 
                 # --- Lógica de resolución (MAX y MIN) ---
                 # Importante: Pasar subtour=st_method en build_and_solve_model
@@ -101,20 +101,40 @@ print(f"[{st_method}] Procesando: {filename}...")
                 
                 min_lp, min_gap, min_ip, min_time, min_nodes = get_model_stats(modMin)
 
+                min_ip_str = f"{min_ip:.0f}" if isinstance(min_ip, Real) and modMax.SolCount > 0 else str(min_ip)
+                max_ip_str = f"{max_ip:.0f}" if isinstance(max_ip, Real) and modMax.SolCount > 0 else str(max_ip)
+                min_time_str = f"{min_time:.2f}" if isinstance(min_time, Real) and min_time < time_limit else "Timeout"
+                max_time_str = f"{max_time:.2f}" if isinstance(max_time, Real) and max_time < time_limit else "Timeout"
+
+                size_n = len(modMax._points_)
+                conv_hull_area = getattr(modMax, '_convex_hull_area', None)
+                conv_hull_area_str = f"{conv_hull_area:.2f}" if conv_hull_area is not None else "N/A"
+                cols = modMax.NumVars
+                rows = modMax.NumConstrs
                 # Guardar datos para el Excel global incluyendo el método
                 res_row = {
                     "Instance": instance_name,
                     "Subtour_Method": st_method,
+                    "N": len(modMax._points_),
+                    "Convex_Hull_Area": modMax._convex_hull_area,
                     "Cols": modMax.NumVars,
                     "Rows": modMax.NumConstrs,
-                    "Min_IP": min_ip, "Min_Time": min_time,
-                    "Max_IP": max_ip, "Max_Time": max_time
+                    "Min_LP": min_lp, "Min_Gap": min_gap,
+                    "Min_IP": min_ip, "Min_Time": min_time, "Min_Nodes": min_nodes,
+                    "Max_LP": max_lp, "Max_Gap": max_gap,
+                    "Max_IP": max_ip, "Max_Time": max_time, "Max_Nodes": max_nodes
                 }
                 data_list.append(res_row)
                 all_results_for_excel.append(res_row)
 
                 # --- Escribir fila en el .tex actual ---
-                f.write(f"{instance_name} & {min_ip:.2f} & {min_time:.2f} & {max_ip:.2f} & {max_time:.2f} \\\\\n")
+                row_str = (
+                        f"{instance_name} & {size_n} & {conv_hull_area_str} & {cols} & {rows} & "
+                        f"{min_lp:.2f} & {min_gap:.2f} & {min_ip_str} & {min_time_str} & {min_nodes} & "
+                        f"{max_lp:.2f} & {max_gap:.2f} & {max_ip_str} & {max_time_str} & {max_nodes} \\\\"
+                        )
+
+                f.write(row_str + "\n")
 
             f.write(r"\bottomrule \end{tabular} } \end{table} \end{frame} \end{document}")
 
@@ -127,17 +147,102 @@ print(f"[{st_method}] Procesando: {filename}...")
     
     # 2. Intentamos cargar el TSV que generamos antes
     try:
-        df_tsv = pd.read_csv(tsv_reference_path, sep='\t')
-        # Unimos los resultados nuevos con los del TSV usando la columna 'Instance' o 'instance'
-        # Asegúrate de que los nombres coincidan
-        df_final = pd.merge(df_tsv, df_pivot, left_on="instance", right_on="Instance", how="left")
+        # Cargar el TSV original (usando los nombres de columnas del TSV proporcionado)
+        df_tsv = pd.read_csv(tsv_ref, sep='\t')
         
-        output_excel = "outputs/Excel/Comparativa_Completa_Subtours.xlsx"
-        df_final.to_excel(output_excel)
-        print(f"\n¡Éxito! Comparativa guardada en {output_excel}")
+        # Unir con los resultados de los nuevos experimentos (subtour 0, 1, 2)
+        # df_pivot ya viene con niveles de columna (Variable, Subtour_Method)
+        df_final = pd.merge(df_tsv, df_pivot, left_on="instance", right_on="Instance", how="left")
+
+        # --- CÁLCULO DE COMPARATIVAS (Ejemplo con Subtour 0) ---
+        # Comparamos el tamaño del MILP del TSV original vs el nuevo método 0
+        if 0 in subtour_methods:
+            # Diferencia en Columnas y Filas
+            df_final['Diff_Cols_ST0'] = df_final[('Cols', 0)] - df_final['MILP_col']
+            df_final['Diff_Rows_ST0'] = df_final[('Rows', 0)] - df_final['MILP_row']
+            
+            # Diferencia en IP Value (para asegurar que el óptimo es el mismo)
+            df_final['Diff_IP_Min_ST0'] = df_final[('Min_IP', 0)] - df_final['MIN_IPvalue']
+            df_final['Diff_IP_Max_ST0'] = df_final[('Max_IP', 0)] - df_final['MAX_IPvalue']
+            
+            # Comparación de LP Gap (Nuevo vs Original)
+            df_final['Gap_Improvement_Min_ST0'] = df_final['MIN_LPgap'] - df_final[('Min_Gap', 0)]
+            df_final['Gap_Improvement_Max_ST0'] = df_final['MAX_LPgap'] - df_final[('Max_Gap', 0)]
+
+            df_final['Diff_LP_Min_ST0'] = df_final[('Min_LP', 0)] - df_final['MIN_LPvalue']
+            df_final['Diff_LP_Max_ST0'] = df_final[('Max_LP', 0)] - df_final['MAX_LPvalue']
+
+            df_final['Time_Diff_Min_ST0'] = df_final[('Min_Time', 0)] - df_final['MIN_Time']
+            df_final['Time_Diff_Max_ST0'] = df_final[('Max_Time', 0)] - df_final['MAX_Time']
+
+            df_final['Nodes_Diff_Min_ST0'] = df_final[('Min_Nodes', 0)] - df_final['MIN_Nodes']
+            df_final['Nodes_Diff_Max_ST0'] = df_final[('Max_Nodes', 0)] - df_final['MAX_Nodes']
+
+        elif 1 in subtour_methods:
+            df_final['Diff_Cols_ST1'] = df_final[('Cols', 1)] - df_final['MILP_col']
+            df_final['Diff_Rows_ST1'] = df_final[('Rows', 1)] - df_final['MILP_row']
+
+            df_final['Diff_IP_Min_ST1'] = df_final[('Min_IP', 1)] - df_final['MIN_IPvalue']
+            df_final['Diff_IP_Max_ST1'] = df_final[('Max_IP', 1)] - df_final['MAX_IPvalue']
+
+            df_final['Gap_Improvement_Min_ST1'] = df_final['MIN_LPgap'] - df_final[('Min_Gap', 1)]
+            df_final['Gap_Improvement_Max_ST1'] = df_final['MAX_LPgap'] - df_final[('Max_Gap', 1)]
+
+            df_final['Diff_LP_Min_ST1'] = df_final[('Min_LP', 1)] - df_final['MIN_LPvalue']
+            df_final['Diff_LP_Max_ST1'] = df_final[('Max_LP', 1)] - df_final['MAX_LPvalue']
+
+            df_final['Time_Diff_Min_ST1'] = df_final[('Min_Time', 1)] - df_final['MIN_Time']
+            df_final['Time_Diff_Max_ST1'] = df_final[('Max_Time', 1)] - df_final['MAX_Time']
+
+            df_final['Nodes_Diff_Min_ST1'] = df_final[('Min_Nodes', 1)] - df_final['MIN_Nodes']
+            df_final['Nodes_Diff_Max_ST1'] = df_final[('Max_Nodes', 1)] - df_final['MAX_Nodes']
+
+        elif 2 in subtour_methods:
+            df_final['Diff_Cols_ST2'] = df_final[('Cols', 2)] - df_final['MILP_col']
+            df_final['Diff_Rows_ST2'] = df_final[('Rows', 2)] - df_final['MILP_row']
+
+            df_final['Diff_IP_Min_ST2'] = df_final[('Min_IP', 2)] - df_final['MIN_IPvalue']
+            df_final['Diff_IP_Max_ST2'] = df_final[('Max_IP', 2)] - df_final['MAX_IPvalue']
+
+            df_final['Gap_Improvement_Min_ST2'] = df_final['MIN_LPgap'] - df_final[('Min_Gap', 2)]
+            df_final['Gap_Improvement_Max_ST2'] = df_final['MAX_LPgap'] - df_final[('Max_Gap', 2)]
+
+            df_final['Diff_LP_Min_ST2'] = df_final[('Min_LP', 2)] - df_final['MIN_LPvalue']
+            df_final['Diff_LP_Max_ST2'] = df_final[('Max_LP', 2)] - df_final['MAX_LPvalue']
+
+            df_final['Time_Diff_Min_ST2'] = df_final[('Min_Time', 2)] - df_final['MIN_Time']
+            df_final['Time_Diff_Max_ST2'] = df_final[('Max_Time', 2)] - df_final['MAX_Time']
+
+            df_final['Nodes_Diff_Min_ST2'] = df_final[('Min_Nodes', 2)] - df_final['MIN_Nodes']
+            df_final['Nodes_Diff_Max_ST2'] = df_final[('Max_Nodes', 2)] - df_final['MAX_Nodes']
+
+        
+            
+
+        # --- LIMPIEZA DE FORMATO PARA EXCEL ---
+        # Flatten de las columnas multi-nivel para que el Excel sea legible
+        df_final.columns = [
+            f"{col[0]}_ST{col[1]}" if isinstance(col, tuple) and col[1] != "" else col 
+            for col in df_final.columns
+        ]
+
+        output_excel = "outputs/Excel/Comparativa_Tecnica_Completa.xlsx"
+        
+        # Usamos un styler para resaltar diferencias negativas (opcional)
+        with pd.ExcelWriter(output_excel, engine='xlsxwriter') as writer:
+            df_final.to_excel(writer, sheet_name='Comparativa', index=False)
+            
+            # Auto-ajustar columnas (opcional pero muy útil)
+            worksheet = writer.sheets['Comparativa']
+            for i, col in enumerate(df_final.columns):
+                column_len = max(df_final[col].astype(str).str.len().max(), len(col)) + 2
+                worksheet.set_column(i, i, column_len)
+
+        print(f"\n¡Éxito! Comparativa técnica guardada en {output_excel}")
+
     except FileNotFoundError:
         df_new.to_excel("outputs/Excel/Resultados_Subtours_Sin_TSV.xlsx")
-        print("No se encontró el TSV, se guardó solo el resultado de los modelos actuales.")
+        print(f"Error: No se encontró el archivo de referencia {tsv_ref}")
 
 if __name__ == "__main__":
     # Create argument parser
@@ -200,4 +305,5 @@ Examples:
          sum_constrain=args.sum_constrain,
          time_limit=args.time_limit,
          obj=args.obj,
-         mode=args.mode)
+         mode=args.mode,
+         tsv_ref="test/TablaResultadosA4.tsv")
