@@ -14,291 +14,130 @@ def main(dir_path="data",
          sum_constrain=True,
          time_limit=7200000,
          obj=None,
-         mode=0):
+         mode=0,
+         tsv_ref = "data/instances_reference.tsv"):
+    
     files = glob.glob(os.path.join(dir_path, ext))
     files.sort() # Ordenar para que la tabla salga ordenada
     
-    # Generate filename based on flags
-    flag_suffix = ""
-    if not sum_constrain:
-        flag_suffix += "_nosum"
-    flag_suffix += f"_tl{time_limit}" if time_limit != 7200 else ""
-    flag_suffix += ext.replace("*", "").split(".")[0] if ext != "*.txt" else ""
-    if obj is not None:
-        flag_suffix += f"_obj{obj}_mode{mode}"
-    
-    output_filename = f"outputs/LaTex/resultados_tabla{flag_suffix}.tex"
-    output_excel_filename = f"outputs/Excel/resultados_tabla{flag_suffix}.xlsx"
+    all_results_for_excel = []
+    subtour_methods = [0, 1, 2] # Los métodos que quieres comparar
 
-
-    print(f"Iniciando proceso. Los resultados se guardarán en: {output_filename}")
-    print(f"Flags: sum_constrain={sum_constrain}, time_limit={time_limit}")
-
-    data_list = []
-    # 'w' abre el archivo para escritura (write). encoding='utf-8' es importante para LaTeX.
-    with open(output_filename, "w", encoding="utf-8") as f:
+    for st_method in subtour_methods:
+        print(f"\n>>> EMPEZANDO COMPARATIVA: Subtour Method {st_method} <<<")
         
-        # 1. Escribir Cabecera de LaTeX en el archivo
-        # Usamos f.write() para escribir en el archivo
-        f.write(r"""
-\documentclass{beamer}					% Document class
+        # Suffix y nombre de archivo específico para este método de subtour
+        st_suffix = f"_subtour{st_method}"
+        output_filename = f"outputs/LaTex/resultados_tabla{st_suffix}.tex"
 
-\usepackage[english]{babel}				% Set language
+        data_list = []
+            
+        with open(output_filename, "w", encoding="utf-8") as f:
+            
+            # 1. Escribir Cabecera de LaTeX en el archivo
+            # Usamos f.write() para escribir en el archivo
+            f.write(r"""
+\documentclass{beamer}					% Document class\usepackage[english]{babel}				% Set language
 \usepackage[utf8x]{inputenc}			% Set encoding
 \usepackage{multicol}
 \usepackage{multirow}
 \mode<presentation>						% Set options
 {
-  \usetheme{default}					% Set theme
-  \usecolortheme{default} 				% Set colors
-  \usefonttheme{default}  				% Set font theme
-  \setbeamertemplate{caption}[numbered]	% Set caption to be numbered
-}
-
-% Uncomment this to have the outline at the beginning of each section highlighted.
+\usetheme{default}					% Set theme
+\usecolortheme{default} 				% Set colors
+\usefonttheme{default}  				% Set font theme
+\setbeamertemplate{caption}[numbered]	% Set caption to be numbered
+}% Uncomment this to have the outline at the beginning of each section highlighted.
 %\AtBeginSection[]
 %{
 %  \begin{frame}{Outline}
 %    \tableofcontents[currentsection]
 %  \end{frame}
-%}
-
-\usepackage{graphicx}					% For including figures
+%}\usepackage{graphicx}					% For including figures
 \usepackage{booktabs}					% For table rules
-\usepackage{hyperref}					% For cross-referencing
-
-\title{Title for a minimal beamer presentation}	% Presentation title
+\usepackage{hyperref}					% For cross-referencing\title{Title for a minimal beamer presentation}	% Presentation title
 \author{Author One}								% Presentation author
 \institute{Name of institution}					% Author affiliation
-\date{\today}									% Today's date	
-
-\begin{document}
-
-% Title page
+\date{\today}									% Today's date	\begin{document}% Title page
 % This page includes the informations defined earlier including title, author/s, affiliation/s and the date
-\begin{frame}
-
-\begin{table}[htbp]
+\begin{frame}\begin{table}[htbp]
 \centering
 \setbeamerfont{caption}{size=\tiny}
 \caption{Resultados computacionales: Comparación de Áreas (Generado automáticamente)}
 \label{tab:resultados_optimizacion}
                 
 \setlength{\tabcolsep}{1.5pt}
-                
-
-\resizebox{\textwidth}{!}{%
+                \resizebox{\textwidth}{!}{%
 \tiny
 \begin{tabular}{lrrrr|rrrrr|rrrrr}
 \toprule
 \multirow{2}{*}{\textbf{Instance}} & \multirow{2}{*}{\textbf{Size}} & \multirow{2}{*}{\textbf{Conv.Hull}} & \multirow{2}{*}{\textbf{Cols}} & \multirow{2}{*}{\textbf{Rows}} & \multicolumn{5}{c|}{\textbf{MINAREA}} & \multicolumn{5}{c}{\textbf{MAXAREA}} \\
 \cmidrule(lr){6-10} \cmidrule(lr){11-15}
- & & & & & \textbf{LP Val} & \textbf{Gap (\%)} & \textbf{IP Val} & \textbf{Time} & \textbf{Nodes} & \textbf{LP Val} & \textbf{Gap (\%)} & \textbf{IP Val} & \textbf{Time} & \textbf{Nodes} \\
+& & & & & \textbf{LP Val} & \textbf{Gap (\%)} & \textbf{IP Val} & \textbf{Time} & \textbf{Nodes} & \textbf{LP Val} & \textbf{Gap (\%)} & \textbf{IP Val} & \textbf{Time} & \textbf{Nodes} \\
 \midrule
-""")
-        f.write("\n") # Salto de línea después de la cabecera
+    """)
+            f.write("\n") # Salto de línea después de la cabecera
 
-        for file in files:
-            filename = os.path.basename(file)
-            # Feedback para el usuario en la CONSOLA (para saber que no se colgó)
-            print(f"Procesando archivo: {filename} ...")
-            
-            # Limpieza del nombre para LaTeX
-            instance_name = filename.replace(".txt", "").replace("_", "-")
-            
-            # Intento de extraer tamaño N del nombre
-            try:
-                size_n = ''.join(filter(str.isdigit, instance_name))
-            except:
-                size_n = "-"
-
-            try:
-                points = read_indexed_instance(file)
-                conv_hull_area = compute_convex_hull_area(points)
-            except Exception:
-                conv_hull_area = "-"
-            conv_hull_area_str = f"{conv_hull_area:.2f}" if isinstance(conv_hull_area, Real) else str(conv_hull_area)
-
-            # --- MAXIMIZATION ---
-            if obj is not None:
-                modMax = build_and_solve_model(instance_path=file, 
-                                              verbose=False, 
-                                              plot=False, 
-                                              time_limit=time_limit, 
-                                              maximize=True,
-                                              sum_constrain=sum_constrain,
-                                              obj = obj,
-                                              mode = mode)
-            else:
-                modMax = build_and_solve_model(instance_path=file, 
-                                          verbose=False, 
-                                          plot=False, 
-                                          time_limit=time_limit, 
-                                          maximize=True,
-                                          sum_constrain=sum_constrain,
-                                          obj = 1)
-
-            max_lp, max_gap, max_ip, max_time, max_nodes = get_model_stats(modMax)
-            print(f"  Resultados MAXAREA: LP={max_lp}, Gap={max_gap}%, IP={max_ip}, Time={max_time}s, Nodes={max_nodes}")
-            # Datos estructurales
-            cols = modMax.NumVars
-            rows = modMax.NumConstrs
-            
-            # --- MINIMIZATION ---
-            if obj is not None:
-                modMin = build_and_solve_model(instance_path=file, 
-                                              verbose=False, 
-                                              plot=False, 
-                                              time_limit=time_limit, 
-                                              maximize=False,
-                                              sum_constrain=sum_constrain,
-                                              obj = obj,
-                                              mode = mode)
-            else:
-                modMin = build_and_solve_model(instance_path=file, 
-                                          verbose=False, 
-                                          plot=False, 
-                                          time_limit=time_limit, 
-                                          maximize=False,
-                                          sum_constrain=sum_constrain,
-                                          obj = 2
-                                          )
-
-            min_lp, min_gap, min_ip, min_time, min_nodes = get_model_stats(modMin)
-            print(f"  Resultados MINAREA: LP={min_lp}, Gap={min_gap}%, IP={min_ip}, Time={min_time}s, Nodes={min_nodes}")
-
-            # --- CREAR LA LÍNEA DE DATOS ---
-            # Usamos sintaxis LaTeX para separar celdas con & y terminar línea con \\
-            if modMax.Status == 2 and modMin.Status == 2:
+            for file in files:
+                filename = os.path.basename(file)
+                # Feedback para el usuario en la CONSOLA (para saber que no se colgó)
+                print(f"Procesando archivo: {filename} ...")
                 
-                row_str = (
-                    f"{instance_name} & {size_n} & {conv_hull_area_str} & {cols} & {rows} & "
-                    f"{min_lp:.2f} & {min_gap:.2f} & {min_ip:.2f} & {min_time:.2f} & {min_nodes} & "
-                    f"{max_lp:.2f} & {max_gap:.2f} & {max_ip:.2f} & {max_time:.2f} & {max_nodes} \\\\"
-                )
-                
-                # Escribir la línea en el archivo
-                f.write(row_str + "\n")
+                # Limpieza del nombre para LaTeX
+                instance_name = filename.replace(".txt", "").replace("_", "-").replace(".instance", "")
+print(f"[{st_method}] Procesando: {filename}...")
 
-                new_row = {
+                # --- Lógica de resolución (MAX y MIN) ---
+                # Importante: Pasar subtour=st_method en build_and_solve_model
+                modMax = build_and_solve_model(instance_path=file, maximize=True, 
+                                              subtour=st_method, time_limit=time_limit, 
+                                              sum_constrain=sum_constrain, obj=obj or 1, mode=mode)
+                
+                max_lp, max_gap, max_ip, max_time, max_nodes = get_model_stats(modMax)
+
+                modMin = build_and_solve_model(instance_path=file, maximize=False, 
+                                              subtour=st_method, time_limit=time_limit, 
+                                              sum_constrain=sum_constrain, obj=obj or 2, mode=mode)
+                
+                min_lp, min_gap, min_ip, min_time, min_nodes = get_model_stats(modMin)
+
+                # Guardar datos para el Excel global incluyendo el método
+                res_row = {
                     "Instance": instance_name,
-                    "Objective function": obj,
-                    "Size": size_n,
-                    "Convex Hull": conv_hull_area,
-                    "Cols": cols,
-                    "Rows": rows,
-                    "Min LP Val": min_lp,
-                    "Min Gap (%)": min_gap,
-                    "Min IP Val": min_ip,
-                    "Min Time": min_time,
-                    "Min Nodes": min_nodes,
-                    "Max LP Val": max_lp,
-                    "Max Gap (%)": max_gap,
-                    "Max IP Val": max_ip,
-                    "Max Time": max_time,
-                    "Max Nodes": max_nodes
+                    "Subtour_Method": st_method,
+                    "Cols": modMax.NumVars,
+                    "Rows": modMax.NumConstrs,
+                    "Min_IP": min_ip, "Min_Time": min_time,
+                    "Max_IP": max_ip, "Max_Time": max_time
                 }
+                data_list.append(res_row)
+                all_results_for_excel.append(res_row)
 
-            elif modMin.Status == 2 and modMax.Status != 2:
-                row_str = (
-                    f"{instance_name} & {size_n} & {conv_hull_area_str} & {cols} & {rows} & "
-                    f"{min_lp:.2f} & {min_gap:.2f} & {min_ip:.2f} & {min_time:.2f} & {min_nodes} & "
-                    f"- & - & - & {max_time:.2f} & {max_nodes} \\\\"
-                )
-                f.write(row_str + "\n")
+                # --- Escribir fila en el .tex actual ---
+                f.write(f"{instance_name} & {min_ip:.2f} & {min_time:.2f} & {max_ip:.2f} & {max_time:.2f} \\\\\n")
 
-                new_row = {
-                    "Instance": instance_name,
-                    "Objective function": obj,
-                    "Size": size_n,
-                    "Convex Hull": conv_hull_area,
-                    "Cols": cols,
-                    "Rows": rows,
-                    "Min LP Val": min_lp,
-                    "Min Gap (%)": min_gap,
-                    "Min IP Val": min_ip,
-                    "Min Time": min_time,
-                    "Min Nodes": min_nodes,
-                    "Max LP Val": '-',
-                    "Max Gap (%)": '-',
-                    "Max IP Val": '-',
-                    "Max Time": max_time,
-                    "Max Nodes": max_nodes
-                }
+            f.write(r"\bottomrule \end{tabular} } \end{table} \end{frame} \end{document}")
 
-            elif modMin.Status != 2 and modMax.Status == 2:
-                row_str = (
-                    f"{instance_name} & {size_n} & {conv_hull_area_str} & {cols} & {rows} & "
-                    f"- & - & - & {min_time:.2f} & {min_nodes} & "
-                    f"{max_lp:.2f} & {max_gap:.2f} & {max_ip:.2f} & {max_time:.2f} & {max_nodes} \\\\"
-                )
-                f.write(row_str + "\n")
-
-                new_row = {
-                    "Instance": instance_name,
-                    "Objective function": obj,
-                    "Size": size_n,
-                    "Convex Hull": conv_hull_area,
-                    "Cols": cols,
-                    "Rows": rows,
-                    "Min LP Val": '-',
-                    "Min Gap (%)": '-',
-                    "Min IP Val": '-',
-                    "Min Time": min_time,
-                    "Min Nodes": min_nodes,
-                    "Max LP Val": max_lp,
-                    "Max Gap (%)": max_gap,
-                    "Max IP Val": max_ip,
-                    "Max Time": max_time,
-                    "Max Nodes": max_nodes
-                }
-                
-                
-
-            else:
-                row_str = (
-                    f"{instance_name} & {size_n} & {conv_hull_area_str} & {cols} & {rows} & "
-                    f"- & - & - & {min_time:.2f} & {min_nodes} & "
-                    f"- & - & - & {max_time:.2f} & {max_nodes} \\\\"
-                )
-                f.write(row_str + "\n")
-
-                new_row = {
-                    "Instance": instance_name,
-                    "Objective function": obj,
-                    "Size": size_n,
-                    "Convex Hull": conv_hull_area,
-                    "Cols": cols,
-                    "Rows": rows,
-                    "Min LP Val": '-',
-                    "Min Gap (%)": '-',
-                    "Min IP Val": '-',
-                    "Min Time": min_time,
-                    "Min Nodes": min_nodes,
-                    "Max LP Val": '-',
-                    "Max Gap (%)": '-',
-                    "Max IP Val": '-',
-                    "Max Time": max_time,
-                    "Max Nodes": max_nodes
-                }
-
-            # 3. Añádelo a la lista
-            data_list.append(new_row)
-        # 3. Escribir Footer de LaTeX al terminar el bucle
-        f.write(r"""
-\bottomrule
-\end{tabular}
-}
-\end{table}
-                
-\end{frame}
-
-\end{document}          
-""")
-    # 4. Crear DataFrame y exportar a Excel
-    df = pd.DataFrame(data_list)
-    df.to_excel(output_excel_filename, index=False)
-    print(f"\n¡Éxito! Archivo '{output_filename}' generado correctamente.")
+    # --- GENERACIÓN DEL EXCEL COMPARATIVO FINAL ---
+    df_new = pd.DataFrame(all_results_for_excel)
+    
+    # 1. Pivotamos para tener los métodos lado a lado (opcional pero recomendado)
+    df_pivot = df_new.pivot(index="Instance", columns="Subtour_Method", 
+                            values=["Min_Time", "Max_Time", "Min_IP", "Max_IP"])
+    
+    # 2. Intentamos cargar el TSV que generamos antes
+    try:
+        df_tsv = pd.read_csv(tsv_reference_path, sep='\t')
+        # Unimos los resultados nuevos con los del TSV usando la columna 'Instance' o 'instance'
+        # Asegúrate de que los nombres coincidan
+        df_final = pd.merge(df_tsv, df_pivot, left_on="instance", right_on="Instance", how="left")
+        
+        output_excel = "outputs/Excel/Comparativa_Completa_Subtours.xlsx"
+        df_final.to_excel(output_excel)
+        print(f"\n¡Éxito! Comparativa guardada en {output_excel}")
+    except FileNotFoundError:
+        df_new.to_excel("outputs/Excel/Resultados_Subtours_Sin_TSV.xlsx")
+        print("No se encontró el TSV, se guardó solo el resultado de los modelos actuales.")
 
 if __name__ == "__main__":
     # Create argument parser

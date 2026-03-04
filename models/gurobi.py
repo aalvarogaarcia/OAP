@@ -288,7 +288,7 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
                         if i != j and (i,j) in x.keys():
                             model.addConstr(f_mcf[k, i, j] <= x[i,j], name=f"mcf_cap_{k}_{i}_{j}")
 
-                            
+
     # RESTRICCION RAMOS ET AL.(2022B) )(8)
 #    for i in N:
 #        for j in ta[i]:
@@ -340,6 +340,11 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
     model.update()
     if relaxed:
         model.relax()
+
+    model.Params.MIPGap = 0.00001  # Establece un gap del 0.001% para la solución óptima
+    model.Params.NodeLimit = GRB.INFINITY  # Limita el número de nodos explorados
+    model.Params.SolutionLimit = GRB.MAXINT  # Limita el número de soluciones enteras encontradas
+
     model.optimize()
 
 
