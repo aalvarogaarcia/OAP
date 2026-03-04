@@ -62,7 +62,7 @@ def test_instancia(instance_path, expected_min, expected_max):
     # --- PRUEBA MINAREA (maximize = False) ---
     if expected_min is not None:
         print("  -> Comprobando MINAREA ...")
-        mod_gur_min = build_and_solve_model(instance_path, verbose=False, maximize=False, time_limit=300, obj=1, subtour=0)
+        mod_gur_min = build_and_solve_model(instance_path, verbose=False, maximize=False, time_limit=300, obj=1, subtour=2)
         ip_gur_min = get_ObjVal_int(mod_gur_min)
         
         mod_ben_min = build_master_problem(instance_path, verbose=False, maximize=False, time_limit=300)
@@ -74,7 +74,7 @@ def test_instancia(instance_path, expected_min, expected_max):
     # --- PRUEBA MAXAREA (maximize = True) ---
     if expected_max is not None:
         print("  -> Comprobando MAXAREA ...")
-        mod_gur_max = build_and_solve_model(instance_path, verbose=False, maximize=True, time_limit=300, obj=2, subtour=0)
+        mod_gur_max = build_and_solve_model(instance_path, verbose=False, maximize=True, time_limit=300, obj=2, subtour=2)
         ip_gur_max = get_ObjVal_int(mod_gur_max)
         
         mod_ben_max = build_master_problem(instance_path, verbose=False, maximize=True, time_limit=300)
