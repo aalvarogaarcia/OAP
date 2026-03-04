@@ -354,7 +354,6 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
             if model.getAttr('X', x)[x_vars] > 0.5:
                 model._x_results.append(x_vars)
 
-    print(model._x_results)
     model._points_ = points
 
     if plot:
