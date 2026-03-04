@@ -27,9 +27,22 @@ def get_tour(model):
     Retorna la lista de aristas seleccionadas en la solución del modelo.
     Cada arista se representa como una tupla (i, j) de índices de puntos.
     """
-    G = nx.DiGraph()
-    G.add_edges_from(model._x_results)
-    return nx.tournament.hamiltonian_path(G)
+    if model and model.SolCount > 0:
+        x = model._x_results
+        next_i = {i: j for i, j in x}
+
+        start = x[0][0]  # Tomamos el primer punto como inicio
+        tour = [start]
+        actual = next_i[start]
+        
+        while actual != start:
+            tour.append(actual)
+            actual = next_i[actual]
+
+        return tour
+    
+    else:
+        return []
 
 def get_Objval_lp(model):
     # 1. Crear la relajación lineal

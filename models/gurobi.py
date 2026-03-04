@@ -9,7 +9,7 @@ from utils.utils import *
 
 def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool = False, time_limit: int = 7200000, 
                           maximize: bool = True, sum_constrain: bool = True, relaxed: bool = False,
-                          obj: int = 2, **kwargs) -> gp.Model:
+                          obj: int = 2, subtour: int = 0,**kwargs) -> gp.Model:
     """
     Docstring for build_and_solve_model
     
@@ -29,7 +29,8 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
     :type relaxed: bool
     :param obj: Which objective function to use: 0 for Fekete, 1 for Internal Area, 2 for External Area, 3 for Diagonals
     :type obj: int
-    :**kwargs: Additional keyword arguments
+    :param subtour: Type of subtour elimination constraints to use (0: None, 1: Miller-Tucker-Zemlin, 2: Multi-commodity flow)
+    :type subtour: int
     :type kwargs: dict
 
 
@@ -91,33 +92,51 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
 
     
     
-    # Consideramos f_ij la variable de subciclos
-    f = {(i,j) : model.addVar(vtype=GRB.CONTINUOUS, lb = 0, name=f"f_{i}_{j}") for i in N for j in N if i != j }
+    # --- VARIABLES DE ELIMINACIÓN DE SUBTOURS ---
+    if subtour == 0:
+        # 0: Single-commodity flow (Flujo de un solo producto)
+        f = {(i,j) : model.addVar(vtype=GRB.CONTINUOUS, lb = 0, name=f"f_{i}_{j}") for i in N for j in N if i != j }
     
+    elif subtour == 1:
+        # 1: Miller-Tucker-Zemlin (MTZ)
+        u = {i : model.addVar(vtype=GRB.CONTINUOUS, lb=1, ub=len(N)-1, name=f"u_{i}") for i in N if i != 0}
+        
+    elif subtour == 2:
+        # 2: Multi-commodity flow (Flujo multiproducto)
+        # f_mcf[k, i, j] es el flujo del commodity k que viaja por el arco (i,j)
+        f_mcf = {(k, i, j): model.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"fmcf_{k}_{i}_{j}") 
+                 for k in N if k != 0 for i in N for j in N if i != j}
+
+    # --- LIMPIEZA DE ARCOS EN LA ENVOLVENTE CONVEXA (CH) ---
     for i in range(len(CH)):
         for j in range(i+2, len(CH)):
             if (i == 0 and j == len(CH) - 1):
                 continue
             model.remove(x[CH[i], CH[j]])
             model.remove(x[CH[j], CH[i]])
-            model.remove(f[CH[i], CH[j]])
-            model.remove(f[CH[j], CH[i]])
-            f.pop((CH[i], CH[j]))
-            f.pop((CH[j], CH[i]))
             x.pop((CH[i], CH[j]))
             x.pop((CH[j], CH[i]))
+            
+            # Limpieza condicional de las variables SEC
+            if subtour == 0:
+                model.remove(f[CH[i], CH[j]])
+                model.remove(f[CH[j], CH[i]])
+                f.pop((CH[i], CH[j]))
+                f.pop((CH[j], CH[i]))
 
-    
-    # Remove clockwise oriented convex hull edges
+    # Remover arcos en sentido horario de la envolvente convexa
     for i in range(len(CH)):
         j = (i + 1) % len(CH)
-        #print(f"Removing clockwise CH edge: ({CH[j]}, {CH[i]})")
         if (CH[j], CH[i]) in x.keys():
             model.remove(x[CH[j], CH[i]])
-            model.remove(f[CH[j], CH[i]])
-            f.pop((CH[j], CH[i]))
             x.pop((CH[j], CH[i]))
-      
+            if subtour == 0:
+                model.remove(f[CH[j], CH[i]])
+                f.pop((CH[j], CH[i]))
+
+
+
+
     
     # Definimos y e yp variables para los triangulos
     y = { (i) : model.addVar(vtype=GRB.CONTINUOUS, lb = 0, name=f"y_{i}") for i in V}
@@ -229,14 +248,47 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
         model.addConstr((gp.quicksum(x[j,i] for j in N if j != i and (j,i) in x.keys()) == 1 ), name=f"Grado_entrada_{i}")
 
 
-    # Restricciones de flujo \sim 3
-    for i in N:
-        if i != 0:
-            model.addConstr(gp.quicksum(f[j,i] for j in N if j != i and (j,i) in f.keys()) - gp.quicksum(f[i,j] for j in N if j != i and (i,j) in f.keys()) == 1, name=f"flujo_nodos_{i}") 
-        for j in N:
-            if i != j and (i,j) in f.keys():
-                model.addConstr(f[i,j] <= (len(N)-1) * x[i,j] , name=f"flujo_arcos_{i}_{j}") 
+# --- RESTRICCIONES DE ELIMINACIÓN DE SUBTOURS (SEC) ---
+    if subtour == 0:
+        # Flujo de un solo producto (Tu formulación original)
+        for i in N:
+            if i != 0:
+                model.addConstr(gp.quicksum(f[j,i] for j in N if j != i and (j,i) in f.keys()) - 
+                                gp.quicksum(f[i,j] for j in N if j != i and (i,j) in f.keys()) == 1, 
+                                name=f"flujo_nodos_{i}") 
+            for j in N:
+                if i != j and (i,j) in f.keys():
+                    model.addConstr(f[i,j] <= (len(N)-1) * x[i,j] , name=f"flujo_arcos_{i}_{j}") 
+                    
+    elif subtour == 1:
+        # MTZ (Miller-Tucker-Zemlin)
+        for i in N:
+            for j in N:
+                if i != 0 and j != 0 and i != j and (i,j) in x.keys():
+                    # Formulación clásica: u_i - u_j + (n-1)*x_ij <= n-2
+                    model.addConstr(u[i] - u[j] + (len(N)-1) * x[i,j] <= len(N) - 2, name=f"MTZ_{i}_{j}")
+                    
+    elif subtour == 2:
+        # Flujo Multiproducto (Multi-commodity flow)
+        for k in N:
+            if k != 0:
+                for i in N:
+                    in_flow = gp.quicksum(f_mcf[k, j, i] for j in N if j != i and (j,i) in x.keys())
+                    out_flow = gp.quicksum(f_mcf[k, i, j] for j in N if j != i and (i,j) in x.keys())
+                    
+                    if i == 0:
+                        model.addConstr(out_flow - in_flow == 1, name=f"mcf_origen_{k}_{i}")
+                    elif i == k:
+                        model.addConstr(in_flow - out_flow == 1, name=f"mcf_destino_{k}_{i}")
+                    else:
+                        model.addConstr(in_flow - out_flow == 0, name=f"mcf_transito_{k}_{i}")
+                
+                for i in N:
+                    for j in N:
+                        if i != j and (i,j) in x.keys():
+                            model.addConstr(f_mcf[k, i, j] <= x[i,j], name=f"mcf_cap_{k}_{i}_{j}")
 
+                            
     # RESTRICCION RAMOS ET AL.(2022B) )(8)
 #    for i in N:
 #        for j in ta[i]:
@@ -297,6 +349,7 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
             if model.getAttr('X', x)[x_vars] > 0.5:
                 model._x_results.append(x_vars)
 
+    print(model._x_results)
     model._points_ = points
 
     if plot:

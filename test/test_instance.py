@@ -13,39 +13,39 @@ instance = "instance/stars-0000015.instance"
 
 
 model_compact = build_and_solve_model(instance, verbose=False, plot=True, maximize=True, time_limit=300,
-                                sum_constrain=False, obj = 2, mode = None, subtour = 0)
+                                sum_constrain=False, obj = 1, mode = None, subtour = 0)
 
 
-#model = build_master_problem(instance, verbose=True, plot=False, maximize=False, time_limit=300, save_cuts=False, crosses_constrain=False)
-#
-#lp, gap, ip, elapsed_time, nodes = get_model_stats(model)
-#
-#print("-" * 30)
-#print("--- Valores del modelo matemático (Benders) ---")
-#print("-" * 30)
-#print(f"Columnas modelo original: {model.NumVars}")
-#print(f"Filas modelo original: {model.NumConstrs}")
-#print(f"Area de la envolvente convexa: {model._convex_hull_area}")
-#
-#
-#print("-" * 30)
-#print("--- Valores del modelo IP y Relajado ---")
-#print("-" * 30)
-#
-#print(f"Instance: {instance}")
-#print(f"IP Objective Value: {ip:.2f}")
-#print(f"LP Objective Value: {lp:.2f}")
-#print(f"Optimality Gap: {gap:.2f}%")
-#print(f"Elapsed Time: {elapsed_time:.2f} seconds")
-#print(f"Number of Nodes Explored: {nodes}")
-#
-#print("-" * 30)
-#print("--- Tour obtenido ---")
-#tour = get_tour(model)
-#print(tour)
-#print("-" * 30)
-#
-#print(f"Resultados: LP={lp:.2f}, Gap={gap:.2f}%, IP={ip:.2f}, Time={elapsed_time:.2f}s, Nodes={nodes}")
+model = build_master_problem(instance, verbose=True, plot=True, maximize=True, time_limit=300, save_cuts=False, crosses_constrain=False)
+
+lp, gap, ip, elapsed_time, nodes = get_model_stats(model)
+
+print("-" * 30)
+print("--- Valores del modelo matemático (Benders) ---")
+print("-" * 30)
+print(f"Columnas modelo original: {model.NumVars}")
+print(f"Filas modelo original: {model.NumConstrs}")
+print(f"Area de la envolvente convexa: {model._convex_hull_area}")
+
+
+print("-" * 30)
+print("--- Valores del modelo IP y Relajado ---")
+print("-" * 30)
+
+print(f"Instance: {instance}")
+print(f"IP Objective Value: {ip:.2f}")
+print(f"LP Objective Value: {lp:.2f}")
+print(f"Optimality Gap: {gap:.2f}%")
+print(f"Elapsed Time: {elapsed_time:.2f} seconds")
+print(f"Number of Nodes Explored: {nodes}")
+
+print("-" * 30)
+print("--- Tour obtenido ---")
+tour = get_tour(model)
+print(tour)
+print("-" * 30)
+
+print(f"Resultados: LP={lp:.2f}, Gap={gap:.2f}%, IP={ip:.2f}, Time={elapsed_time:.2f}s, Nodes={nodes}")#
 
 #farkas_log = load_farkas_logs(model._farkas_log_path)
 #
