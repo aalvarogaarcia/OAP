@@ -11,6 +11,7 @@ import gurobipy as gp
 from gurobipy import GRB
 import json
 import os
+import csv
 
 
 def read_data(file_path):
@@ -689,3 +690,49 @@ def format_cut_string(cut_expr):
             
     formula = " + ".join(parts).replace("+ -", "- ")
     return f"Corte Lógico: {const} <= {formula}"
+
+
+def extract_metric_to_csv(input_tsv: str, output_csv: str, metric: str = "LPvalue"):
+    """
+    Lee un archivo TSV y crea un CSV con la instancia y los valores MIN/MAX de una métrica.
+    
+    Parámetros:
+    - input_tsv: Ruta del archivo TSV de entrada.
+    - output_csv: Ruta del archivo CSV a generar.
+    - metric: El nombre de la métrica a extraer (ej: 'LPvalue', 'IPvalue', 'IPtime').
+    """
+    
+    # Construimos los nombres exactos de las columnas como aparecen en el TSV
+    min_col = f"MIN_{metric}"
+    max_col = f"MAX_{metric}"
+    
+    try:
+        with open(input_tsv, mode='r', encoding='utf-8') as tsv_file, \
+             open(output_csv, mode='w', newline='', encoding='utf-8') as csv_file:
+            
+            # DictReader mapea la información a un diccionario usando la primera fila como claves
+            reader = csv.DictReader(tsv_file, delimiter='\t')
+            
+            # Verificamos que las columnas solicitadas realmente existen en el TSV
+            if min_col not in reader.fieldnames or max_col not in reader.fieldnames:
+                raise ValueError(f"No se encontraron las columnas '{min_col}' y/o '{max_col}' en el TSV.")
+            
+            writer = csv.writer(csv_file)
+            
+            # Escribir la cabecera (ej: instance, lpvalue_min, lpvalue_max)
+            writer.writerow(['instance', f"{metric.lower()}_min", f"{metric.lower()}_max"])
+            
+            # Escribir los datos fila por fila
+            for row in reader:
+                writer.writerow([
+                    row['instance'], 
+                    row[min_col], 
+                    row[max_col]
+                ])
+                
+        print(f"✅ Archivo '{output_csv}' generado correctamente con la métrica '{metric}'.")
+
+    except FileNotFoundError:
+        print(f"❌ Error: No se encontró el archivo '{input_tsv}'.")
+    except Exception as e:
+        print(f"❌ Ocurrió un error inesperado: {e}")

@@ -329,165 +329,12 @@ def benders_callback(model, where):
                 model.cbLazy(cut_yp_expr >= 0)
 
 
-        
-    
-    
-    elif where == GRB.Callback.MIPNODE:
-        # Solo procesamos si el nodo se resolvió a optimalidad (fraccional)
-        if model.cbGet(GRB.Callback.MIPNODE_STATUS) == GRB.OPTIMAL:
-            
-            # Extraer la solución relajada (fraccionaria) de x
-            x_sol = model.cbGetNodeRel(model._x)
-            
-            # --- MISMA LÓGICA DE ACTUALIZACIÓN DEL SUBPROBLEMA ---
-            sub_y = model._sub_y
-            sub_yp = model._sub_yp
-            constrs_y = model._constrs_y
-            constrs_yp = model._constrs_yp
-        
-            # ==========================================
-            # 2. ACTUALIZAR RHS PARA EL SUBPROBLEMA Y
-            # ==========================================
-            # Ec. (6): alpha_ij -> RHS = x_bar_ij
-            for (i, j), constr in constrs_y['alpha'].items():
-                constr.RHS = x_sol[i, j]
-
-            # Ec. (7): beta_ij -> RHS = x_bar_ij - x_bar_ji
-            for (i, j), constr in constrs_y['beta'].items():
-                constr.RHS = x_sol[i, j] - x_sol[j, i]
-
-            # Ec. (8): gamma_ij -> RHS = x_bar_ij
-            for (i, j), constr in constrs_y['gamma'].items():
-                constr.RHS = x_sol[i, j]
-
-            # Ec. (9): delta_ij -> RHS = 1 - x_bar_ji
-            for (i, j), constr in constrs_y['delta'].items():
-                constr.RHS = 1 - x_sol[j, i]
-
-            # ==========================================
-            # 3. ACTUALIZAR RHS PARA EL SUBPROBLEMA Y'
-            # ==========================================
-            # Ec. (11): alpha'_ij -> RHS = 1 - x_bar_ij
-            for (i, j), constr in constrs_yp['alpha_p'].items():
-                constr.RHS = 1 - x_sol[i, j]
-
-            # Ec. (12): beta'_ij -> RHS = x_bar_ji - x_bar_ij
-            for (i, j), constr in constrs_yp['beta_p'].items():
-                constr.RHS = x_sol[j, i] - x_sol[i, j]
-
-            # Ec. (13): gamma'_ij -> RHS = x_bar_ji
-            for (i, j), constr in constrs_yp['gamma_p'].items():
-                constr.RHS = x_sol[j, i]
-
-            # Ec. (14): delta'_ij -> RHS = 1 - x_bar_ij
-            for (i, j), constr in constrs_yp['delta_p'].items():
-                constr.RHS = 1 - x_sol[i, j]
-
-            sub_y.optimize()
-            sub_yp.optimize()
-
-            TOL = 1e-10 # o 1e-9
-
-                # --- GENERAR CORTES FRACCIONALES ---
-            if sub_y.Status == GRB.INFEASIBLE:
-                cut_y_expr = gp.LinExpr()
-                cut_y_val = 0.0
-
-                # Diccionario para almacenar y analizar las componentes de v_ij
-                v_components_y = {'alpha': {}, 'beta': {}, 'gamma': {}, 'delta': {}}
-
-                # --- Extracción de Farkas Duales ---
-                for (i, j), constr in constrs_y['alpha'].items():
-                    farkas = constr.FarkasDual
-                    if abs(farkas) > TOL:
-                        v_components_y['alpha'][i, j] = farkas
-                        cut_y_expr.add(farkas * model._x[i, j])
-                        cut_y_val += farkas * x_sol[i, j]
-
-                for (i, j), constr in constrs_y['beta'].items():
-                    farkas = constr.FarkasDual
-                    if abs(farkas) > TOL:
-                        v_components_y['beta'][i, j] = farkas
-                        cut_y_expr.add(farkas * (model._x[i, j] - model._x[j, i]))
-                        cut_y_val += farkas * (x_sol[i, j] - x_sol[j, i])
-
-                for (i, j), constr in constrs_y['gamma'].items():
-                    farkas = constr.FarkasDual
-                    if abs(farkas) > TOL:
-                        v_components_y['gamma'][i, j] = farkas
-                        cut_y_expr.add(farkas * model._x[i, j])
-                        cut_y_val += farkas * x_sol[i, j]
-
-                for (i, j), constr in constrs_y['delta'].items():
-                    farkas = constr.FarkasDual
-                    if abs(farkas) > TOL:
-                        v_components_y['delta'][i, j] = farkas
-                        cut_y_expr.add(farkas * (1 - model._x[j, i]))
-                        cut_y_val += farkas * (1 - x_sol[j, i])
-
-
-                if cut_y_val > TOL:
-                        model.cbCut(cut_y_expr <= 0) 
-                elif cut_y_val < -TOL:
-                        model.cbCut(cut_y_expr >= 0)
-
-            if sub_yp.Status == GRB.INFEASIBLE:
-                cut_yp_expr = gp.LinExpr()
-                cut_yp_val = 0.0
-
-                v_components_yp = {'alpha_p': {}, 'beta_p': {}, 'gamma_p': {}, 'delta_p': {}}
-
-                # --- Extracción de Farkas Duales ---
-                for (i, j), constr in constrs_yp['alpha_p'].items():
-                    farkas = constr.FarkasDual
-                    if abs(farkas) > TOL:
-                        v_components_yp['alpha_p'][i, j] = farkas
-                        cut_yp_expr.add(farkas * (1 - model._x[i, j]))
-                        cut_yp_val += farkas * (1 - x_sol[i, j])
-
-                for (i, j), constr in constrs_yp['beta_p'].items():
-                    farkas = constr.FarkasDual
-                    if abs(farkas) > TOL:
-                        v_components_yp['beta_p'][i, j] = farkas
-                        cut_yp_expr.add(farkas * (model._x[j, i] - model._x[i, j]))
-                        cut_yp_val += farkas * (x_sol[j, i] - x_sol[i, j])
-                        
-                for (i, j), constr in constrs_yp['gamma_p'].items():
-                    farkas = constr.FarkasDual
-                    if abs(farkas) > TOL:
-                        v_components_yp['gamma_p'][i, j] = farkas
-                        cut_yp_expr.add(farkas * model._x[j, i])
-                        cut_yp_val += farkas * x_sol[j, i]
-
-                for (i, j), constr in constrs_yp['delta_p'].items():
-                    farkas = constr.FarkasDual
-                    if abs(farkas) > TOL:
-                        v_components_yp['delta_p'][i, j] = farkas
-                        cut_yp_expr.add(farkas * (1 - model._x[i, j]))
-                        cut_yp_val += farkas * (1 - x_sol[i, j])
-
-                if cut_yp_val > TOL:
-                    model.cbCut(cut_yp_expr <= 0) 
-                elif cut_yp_val < -TOL:
-                    model.cbCut(cut_yp_expr >= 0)
-
-
-
-
-
-
-
-
-
 
 def build_master_problem(instance_path: str, verbose: bool = False, plot: bool = False, 
                          time_limit: int = 7200, maximize: bool = True, save_cuts: bool = False,
                          crosses_constrain: bool = False) -> gp.Model:
-    """
-    Construye y resuelve el Problema Maestro (PM) usando Descomposición de Benders.
-    """
     
-    # Lectura de datos
+        # Lectura de datos
     points = read_indexed_instance(instance_path)
     N = range(len(points))
     CH = compute_convex_hull(points)
@@ -514,10 +361,6 @@ def build_master_problem(instance_path: str, verbose: bool = False, plot: bool =
 
     # Consideramos xij la variable de arcos dirigidos
     x = { (i, j): model.addVar(vtype=GRB.BINARY, name=f"x_{i}_{j}") for i in N for j in N  if i != j }
-
-    
-
-    
     
     # Consideramos f_ij la variable de subciclos
     f = {(i,j) : model.addVar(vtype=GRB.CONTINUOUS, lb = 0, name=f"f_{i}_{j}") for i in N for j in N if i != j }
@@ -608,6 +451,27 @@ def build_master_problem(instance_path: str, verbose: bool = False, plot: bool =
     model._constrs_y = constrs_y
     model._constrs_yp = constrs_yp
 
+    return model
+
+
+
+def optimize_master_MILP(instance_path: str, verbose: bool = False, plot: bool = False, 
+                         time_limit: int = 7200, maximize: bool = True, save_cuts: bool = False,
+                         crosses_constrain: bool = False) -> gp.Model:
+    """
+    Construye y resuelve el Problema Maestro (PM) usando Descomposición de Benders.
+    """
+
+    model = build_master_problem(
+        instance_path,
+        verbose=verbose,
+        plot=plot,
+        time_limit=time_limit,
+        maximize=maximize,
+        save_cuts=save_cuts,
+        crosses_constrain=crosses_constrain
+    )
+
     # --- Optimización ---
     if verbose:
         print("Starting optimization with Benders decomposition...")
@@ -626,6 +490,8 @@ def build_master_problem(instance_path: str, verbose: bool = False, plot: bool =
             os.remove(model._farkas_log_path)
 
     model.optimize(benders_callback)
+    x = model._x
+
 
     # --- Resultados ---
     model._x_results = []
@@ -638,4 +504,276 @@ def build_master_problem(instance_path: str, verbose: bool = False, plot: bool =
             # Asumiendo que existe una función plot_solution en utils
             plot_solution(model, title="Optimal Tour" if model.Status == GRB.OPTIMAL else "Best Found")
     
+    return model
+
+
+def optimize_master_LP(instance_path: str, verbose: bool = False, plot: bool = False, 
+                         time_limit: int = 7200, maximize: bool = True, save_cuts: bool = False,
+                         crosses_constrain: bool = False) -> gp.Model:
+    """
+    Construye y resuelve la relajación LP del Problema Maestro (PM) usando Descomposición de Benders.
+    """
+    model = build_master_problem(
+        instance_path,
+        verbose=verbose,
+        plot=plot,
+        time_limit=time_limit,
+        maximize=maximize,
+        save_cuts=save_cuts,
+        crosses_constrain=crosses_constrain
+    )
+
+    # Cambiamos manualmente el tipo de todas las variables a continuas
+    for v in model.getVars():
+        if v.VType != GRB.CONTINUOUS:
+            v.VType = GRB.CONTINUOUS
+    model.update()
+    
+    sub_y = model._sub_y
+    sub_yp = model._sub_yp
+
+    constrs_y = model._constrs_y
+    constrs_yp = model._constrs_yp
+
+    model._iteration = 0
+    TOL = 1e-10
+
+    converged = False
+    converged_sub_y = False
+    converged_sub_yp = False
+
+    if verbose:
+        print("Starting optimization of LP relaxation with Benders decomposition...")
+    
+
+    while not converged:
+
+        if verbose:
+                print("\n=== Iteración: {} ===".format(model._iteration))
+
+
+        model.optimize()
+        x_sol = {k: v.X for k, v in model._x.items()}
+        theta_val = model.ObjVal
+
+        # ==========================================
+        # 2. ACTUALIZAR RHS PARA EL SUBPROBLEMA Y
+        # ==========================================
+        # Ec. (6): alpha_ij -> RHS = x_bar_ij
+        for (i, j), constr in constrs_y['alpha'].items():
+            constr.RHS = x_sol[i, j]
+            
+        # Ec. (7): beta_ij -> RHS = x_bar_ij - x_bar_ji
+        for (i, j), constr in constrs_y['beta'].items():
+            constr.RHS = x_sol[i, j] - x_sol[j, i]
+            
+        # Ec. (8): gamma_ij -> RHS = x_bar_ij
+        for (i, j), constr in constrs_y['gamma'].items():
+            constr.RHS = x_sol[i, j]
+            
+        # Ec. (9): delta_ij -> RHS = 1 - x_bar_ji
+        for (i, j), constr in constrs_y['delta'].items():
+            constr.RHS = 1 - x_sol[j, i]
+
+        # ==========================================
+        # 3. ACTUALIZAR RHS PARA EL SUBPROBLEMA Y'
+        # ==========================================
+        # Ec. (11): alpha'_ij -> RHS = 1 - x_bar_ij
+        for (i, j), constr in constrs_yp['alpha_p'].items():
+            constr.RHS = 1 - x_sol[i, j]
+            
+        # Ec. (12): beta'_ij -> RHS = x_bar_ji - x_bar_ij
+        for (i, j), constr in constrs_yp['beta_p'].items():
+            constr.RHS = x_sol[j, i] - x_sol[i, j]
+            
+        # Ec. (13): gamma'_ij -> RHS = x_bar_ji
+        for (i, j), constr in constrs_yp['gamma_p'].items():
+            constr.RHS = x_sol[j, i]
+            
+        # Ec. (14): delta'_ij -> RHS = 1 - x_bar_ij
+        for (i, j), constr in constrs_yp['delta_p'].items():
+            constr.RHS = 1 - x_sol[i, j]
+
+        # ==========================================
+        # 4. OPTIMIZAR AMBOS SUBPROBLEMAS
+        # ==========================================
+        sub_y.optimize()
+        sub_yp.optimize()
+
+        if sub_y.Status == GRB.OPTIMAL:
+            converged_sub_y = True # El maestro aproximó bien, terminamos.
+                
+        # =========================================================
+        # 5. ANÁLISIS DEL VECTOR v_ij Y GENERACIÓN DE CORTES PARA Y
+        # =========================================================
+        elif sub_y.Status == GRB.INFEASIBLE:
+            converged_sub_y = False
+            
+            cut_y_expr = gp.LinExpr() # Expresión simbólica para Gurobi
+            cut_y_val = 0.0           # Valor numérico para comprobar el signo
+            
+            # Diccionario para almacenar y analizar las componentes de v_ij
+            v_components_y = {'alpha': {}, 'beta': {}, 'gamma': {}, 'delta': {}}
+            
+            # --- Extracción de Farkas Duales ---
+            for (i, j), constr in constrs_y['alpha'].items():
+                farkas = constr.FarkasDual
+                if abs(farkas) > TOL:
+                    v_components_y['alpha'][i, j] = farkas
+                    cut_y_expr.add(farkas * model._x[i, j])
+                    cut_y_val += farkas * x_sol[i, j]
+                    
+            for (i, j), constr in constrs_y['beta'].items():
+                farkas = constr.FarkasDual
+                if abs(farkas) > TOL:
+                    v_components_y['beta'][i, j] = farkas
+                    cut_y_expr.add(farkas * (model._x[i, j] - model._x[j, i]))
+                    cut_y_val += farkas * (x_sol[i, j] - x_sol[j, i])
+                    
+            for (i, j), constr in constrs_y['gamma'].items():
+                farkas = constr.FarkasDual
+                if abs(farkas) > TOL:
+                    v_components_y['gamma'][i, j] = farkas
+                    cut_y_expr.add(farkas * model._x[i, j])
+                    cut_y_val += farkas * x_sol[i, j]
+                    
+            for (i, j), constr in constrs_y['delta'].items():
+                farkas = constr.FarkasDual
+                if abs(farkas) > TOL:
+                    v_components_y['delta'][i, j] = farkas
+                    cut_y_expr.add(farkas * (1 - model._x[j, i]))
+                    cut_y_val += farkas * (1 - x_sol[j, i])
+            
+            # --- Análisis por consola ---
+            if model._save_cuts:
+                print("\n" + "-"*30)
+                print("RAYO DE FARKAS DETECTADO EN SUBPROBLEMA Y")
+                print("Valor numérico de la violación (v^T * b(x_bar)): ", cut_y_val)
+                for comp, values in v_components_y.items():
+                    if values: # Solo imprime si hay valores no nulos
+                        print(f"Componente {comp}:")
+                        for k, v in values.items():
+                            print(f"  {k}: {v:.4f}")
+                print("-"*30 + "\n")
+           
+            # --- NUEVO: Guardar en el log estructurado ---
+            if getattr(model, '_save_cuts', False):
+                # 1. Obtener trazabilidad detallada        
+                log_farkas_ray(
+                    filepath=model._farkas_log_path,
+                    iteration=model._iteration,
+                    node_depth=0, # 0 porque estamos en MIPSOL
+                    subproblem_type='Y',
+                    x_sol=x_sol,
+                    v_components=v_components_y,
+                    violation_value=cut_y_val,
+                    tolerance=TOL,
+                    cut_expr = cut_y_expr,
+                )
+
+            # --- Añadir el corte al maestro de forma segura ---
+            # Si el valor evaluado es positivo, el hiperplano debe forzarse hacia <= 0
+            if cut_y_val > TOL:
+                model.addConstr(cut_y_expr <= 0, name=f"Farkas_Y_iter_{model._iteration}")
+            # Si el valor evaluado es negativo, el hiperplano debe forzarse hacia >= 0
+            elif cut_y_val < -TOL:
+                model.addConstr(cut_y_expr >= 0, name=f"Farkas_Y_iter_{model._iteration}")
+
+
+
+
+
+
+
+
+
+
+
+        if sub_yp.Status == GRB.OPTIMAL:
+            # Evaluar si el costo real del SP es mayor que la aproximación theta
+            converged_sub_yp = True # El maestro aproximó bien, terminamos.
+                
+        # =========================================================
+        # 6. ANÁLISIS DEL VECTOR v'_ij Y GENERACIÓN DE CORTES PARA Y'
+        # =========================================================
+        elif sub_yp.Status == GRB.INFEASIBLE:
+            converged_sub_yp = False
+
+            cut_yp_expr = gp.LinExpr()
+            cut_yp_val = 0.0
+            
+            v_components_yp = {'alpha_p': {}, 'beta_p': {}, 'gamma_p': {}, 'delta_p': {}}
+            
+            # --- Extracción de Farkas Duales ---
+            for (i, j), constr in constrs_yp['alpha_p'].items():
+                farkas = constr.FarkasDual
+                if abs(farkas) > TOL:
+                    v_components_yp['alpha_p'][i, j] = farkas
+                    cut_yp_expr.add(farkas * (1 - model._x[i, j]))
+                    cut_yp_val += farkas * (1 - x_sol[i, j])
+                    
+            for (i, j), constr in constrs_yp['beta_p'].items():
+                farkas = constr.FarkasDual
+                if abs(farkas) > TOL:
+                    v_components_yp['beta_p'][i, j] = farkas
+                    cut_yp_expr.add(farkas * (model._x[j, i] - model._x[i, j]))
+                    cut_yp_val += farkas * (x_sol[j, i] - x_sol[i, j])
+                    
+            for (i, j), constr in constrs_yp['gamma_p'].items():
+                farkas = constr.FarkasDual
+                if abs(farkas) > TOL:
+                    v_components_yp['gamma_p'][i, j] = farkas
+                    cut_yp_expr.add(farkas * model._x[j, i])
+                    cut_yp_val += farkas * x_sol[j, i]
+                    
+            for (i, j), constr in constrs_yp['delta_p'].items():
+                farkas = constr.FarkasDual
+                if abs(farkas) > TOL:
+                    v_components_yp['delta_p'][i, j] = farkas
+                    cut_yp_expr.add(farkas * (1 - model._x[i, j]))
+                    cut_yp_val += farkas * (1 - x_sol[i, j])
+            
+            # --- Análisis por consola ---
+            if model._save_cuts:
+                print("\n" + "="*50)
+                print("RAYO DE FARKAS DETECTADO EN SUBPROBLEMA Y'")
+                print("Valor numérico de la violación (v'^T * b(x_bar)): ", cut_yp_val)
+                for comp, values in v_components_yp.items():
+                    if values:
+                        print(f"Componente {comp}:")
+                        for k, v in values.items():
+                            print(f"  {k}: {v:.4f}")
+                print("="*50 + "\n")
+
+            # --- NUEVO: Guardar en el log estructurado ---
+            if getattr(model, '_save_cuts', False):
+                log_farkas_ray(
+                    filepath=model._farkas_log_path,
+                    iteration=model._iteration,
+                    node_depth=0, # 0 porque estamos en MIPSOL
+                    subproblem_type='Y_prime',
+                    x_sol=x_sol,
+                    v_components=v_components_yp,
+                    violation_value=cut_yp_val,
+                    tolerance=TOL,
+                    cut_expr = cut_yp_expr
+                )
+
+            # --- Añadir el corte al maestro de forma segura ---
+
+            # --- Añadir el corte al maestro de forma segura ---
+            if cut_yp_val > TOL:
+                model.addConstr(cut_yp_expr <= 0, name=f"Farkas_Y_prime_iter_{model._iteration}")
+            elif cut_yp_val < -TOL:
+                model.addConstr(cut_yp_expr >= 0, name=f"Farkas_Y_prime_iter_{model._iteration}")
+            
+            model._iteration += 1
+        
+            
+        
+        if converged_sub_y and converged_sub_yp:
+            converged = True
+
+    print("LP Relaxation converged after {} iterations.".format(model._iteration))
+
     return model
