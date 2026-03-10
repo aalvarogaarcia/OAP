@@ -8,7 +8,7 @@ import os
 from utils.utils import *
 
 def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool = False, time_limit: int = 7200000, 
-                          maximize: bool = True, sum_constrain: bool = True, relaxed: bool = False,
+                          maximize: bool = True, sum_constrain: bool = False, relaxed: bool = False,
                           obj: int = 2, subtour: int = 0,**kwargs) -> gp.Model:
     """
     Docstring for build_and_solve_model
@@ -80,6 +80,8 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
         "Diagonals"
     )
 
+    model._benders_= False
+
 
     # Model building logic goes here
     if verbose:
@@ -135,7 +137,7 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
                 f.pop((CH[j], CH[i]))
 
 
-
+    model._x = x
 
     
     # Definimos y e yp variables para los triangulos
@@ -234,7 +236,7 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
 
     
     # Resticiones de triangulos
-    if sum_constrain is not None:
+    if sum_constrain:
         model.addConstr(gp.quicksum(y[i] for i in V) == len(N)-2 , name="triangulos_internos_totales") #NONE
         model.addConstr(gp.quicksum(yp[i] for i in V) == len(N)-len(CH) , name="triangulos_externos_totales") #NONE
     
@@ -339,8 +341,10 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
     model.setParam('TimeLimit', time_limit)
     model.update()
     if relaxed:
-        model.relax()
-
+        for v in model.getVars():
+            if v.VType != GRB.CONTINUOUS:
+                v.VType = GRB.CONTINUOUS
+    model.update()
     model.Params.MIPGap = 0.00001  # Establece un gap del 0.001% para la solución óptima
     model.Params.NodeLimit = GRB.INFINITY  # Limita el número de nodos explorados
     model.Params.SolutionLimit = GRB.MAXINT  # Limita el número de soluciones enteras encontradas

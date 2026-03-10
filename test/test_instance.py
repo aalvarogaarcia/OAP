@@ -1,23 +1,20 @@
+from models.benders import optimize_master_MILP
+from models.gurobi import build_and_solve_model
 from utils.model_stats import *
 from utils.utils import *
 from utils.farkas_viz import *
 from utils.analyze_benders import generate_post_mortem_report
-from models import *
-import glob
-import os
-import time
-import networkx as nx
 
 
-instance = "instance/stars-0000015.instance"
+instance = "instance/stars-0000010.instance"
 
 
 model_compact = build_and_solve_model(instance, verbose=False, plot=False, maximize=True, time_limit=300,
-                                sum_constrain=False, obj = 1, mode = None, subtour = 0)
+                                sum_constrain=False, obj = 1, mode = 0, subtour = 0)
 
 
-#model = build_master_problem(instance, verbose=True, plot=True, maximize=True, time_limit=300, save_cuts=False, crosses_constrain=False)
-#
+#model = optimize_master_MILP(instance, verbose=True, plot=True, maximize=True, time_limit=300, 
+#                             save_cuts=False, crosses_constrain=False)
 #lp, gap, ip, elapsed_time, nodes = get_model_stats(model)
 #
 #print("-" * 30)
@@ -47,8 +44,9 @@ model_compact = build_and_solve_model(instance, verbose=False, plot=False, maxim
 #
 #print(f"Resultados: LP={lp:.2f}, Gap={gap:.2f}%, IP={ip:.2f}, Time={elapsed_time:.2f}s, Nodes={nodes}")#
 
+
 #farkas_log = load_farkas_logs(model._farkas_log_path)
-#
+
 #if "crosses" in model._farkas_log_path.lower():
 #    PDF_PATH = f"outputs/Others/Benders/{instance.split('/')[-1].split('.')[0]}-Crosses/Farkas_Analysis_Report.pdf"
 #else:
@@ -58,7 +56,7 @@ model_compact = build_and_solve_model(instance, verbose=False, plot=False, maxim
 #                            PDF_PATH, 
 #                            points=model._points_,
 #                            n=len(model._points_))
-
+#
 
 
 

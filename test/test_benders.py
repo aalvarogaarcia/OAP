@@ -6,7 +6,7 @@ from gurobipy import GRB  # Importamos GRB para evaluar los estados del modelo
 # Asegúrate de importar tus funciones correctamente
 from models.benders import optimize_master_LP, optimize_master_MILP
 from models.gurobi import build_and_solve_model
-from utils.model_stats import get_model_stats, get_Objval_lp, get_ObjVal_int
+from utils.model_stats import get_model_stats, get_Objval_lp, get_ObjVal_int, get_x_values
 
 def cargar_resultados_esperados(csv_path):
     """Lee el CSV y devuelve un diccionario {instancia: (ip_min, ip_max)}"""
@@ -142,10 +142,58 @@ def ejecutar_bateria_tests(folder_path, csv_path, output_csv_path):
     # Guardar todos los resultados de la batería en CSV
     guardar_resultados_csv(todos_los_resultados, output_csv_path)
 
+
+def diagnose_benders_gap(instance_path):
+    # 1. Obtén la solución fraccionaria de tu Maestro de Benders (132B)
+    benders_lp = optimize_master_LP(instance_path, verbose=False, plot=False, maximize=True, time_limit=300, 
+                             save_cuts=False, crosses_constrain=False) # Tu código de Benders actual
+    
+    x_benders = {k: v.X for k, v in benders_lp._x.items()}
+    
+    # 2. Construye el Modelo Compacto (el que da 127B y 0% gap)
+    compact_model = build_and_solve_model(instance_path, relaxed=True,verbose=False, plot=False, maximize=True, time_limit=300,
+                                sum_constrain=True, obj = 0, mode = 0, subtour = 0) # Tu código del modelo compacto actual
+    
+    # 3. Fuerza al Modelo Compacto a tragarse la solución de Benders
+    x_compact = compact_model._x # (Ajusta según cómo guardes x)
+    for (i, j), val in x_benders.items():
+        if(i,j) not in x_compact:
+            print(f"Advertencia: La variable x[{i},{j}] no existe en el modelo compacto. Verifica tus índices.")
+            continue
+        # Fijamos los límites de la variable para forzar el valor
+        x_compact[i, j].LB = val
+        x_compact[i, j].UB = val
+        
+    # 4. Intenta resolver el Modelo Compacto con ese x fijado
+    compact_model.optimize()
+    
+    # 5. El momento de la verdad
+    if compact_model.Status == GRB.INFEASIBLE:
+        print("\n¡BINGO! El Modelo Compacto rechaza la solución de Benders.")
+        print("Calculando qué restricciones está violando...")
+        
+        # Calcular el subsistema inconsistente
+        compact_model.computeIIS()
+        compact_model.write("diagnostico_gap.ilp")
+        
+        print("Revisa el archivo 'diagnostico_gap.ilp'.")
+        print("Ahí verás EXACTAMENTE qué ecuaciones del modelo compacto")
+        print("hacen que esta solución sea inválida. ¡Esas son las ecuaciones")
+        print("que le faltan a tu Subproblema de Benders!")
+        
+    elif compact_model.Status == GRB.OPTIMAL:
+        print("\nAlgo es inconsistente en las funciones objetivo.")
+        print("Compacto ObjVal:", compact_model.ObjVal, "Benders ObjVal:", benders_lp.ObjVal)
+
 if __name__ == "__main__":
     # Configura aquí tus rutas
-    CARPETA_INSTANCIAS = "./instance/little-instances"  # Asegúrate de que esta carpeta contenga tus archivos de instancia
-    ARCHIVO_CSV_ENTRADA = "test/resultados_lp.csv"
-    ARCHIVO_CSV_SALIDA = "outputs/reporte_tests_lp.csv"  # El nuevo archivo donde se guardarán los logs
-    
-    ejecutar_bateria_tests(CARPETA_INSTANCIAS, ARCHIVO_CSV_ENTRADA, ARCHIVO_CSV_SALIDA)
+ #   CARPETA_INSTANCIAS = "./instance/little-instances"  # Asegúrate de que esta carpeta contenga tus archivos de instancia
+ #   ARCHIVO_CSV_ENTRADA = "test/resultados_lp.csv"
+ #   ARCHIVO_CSV_SALIDA = "outputs/reporte_tests_lp.csv"  # El nuevo archivo donde se guardarán los logs
+ #   
+ #   ejecutar_bateria_tests(CARPETA_INSTANCIAS, ARCHIVO_CSV_ENTRADA, ARCHIVO_CSV_SALIDA)
+
+
+    # Ejemplo de diagnóstico para una instancia específica
+    instance = "instance/stars-0000010.instance" # Cambia esto por la ruta de la instancia que quieres diagnosticar
+    diagnose_benders_gap(instance)

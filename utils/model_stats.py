@@ -5,6 +5,7 @@ import pandas as pd
 import os
 import networkx as nx
 
+
 def get_ObjVal_int(model):
     """
     Retorna el valor objetivo entero del modelo si existe solución.
@@ -45,27 +46,32 @@ def get_tour(model):
         return []
 
 def get_Objval_lp(model):
-    # 1. Crear la relajación lineal
-    lp = model.relax()
-    
-    # 2. Optimizar (SIN asignar el resultado a la variable lp)
-    lp.optimize()
-    
-    # 3. Extraer valores filtrados
-    x = get_x_values(lp)
-    
-    obj_val = 0
-    # Usamos .items() para recorrer nombre y valor
-    """for var_name, value in x.items():
-        # Asumiendo formato "x_i_j"
-        idx_i = int(var_name.split('_')[1])
-        idx_j = int(var_name.split('_')[2])
+    if model._benders_:
 
-        i = model._points_[idx_i]
-        j = model._points_[idx_j]
+        
+        from models.benders import optimize_master_LP,benders_callback
+        lp = optimize_master_LP(model._instance_path, 
+                                  verbose= False, 
+                                  plot= False, 
+                                  maximize=model._maximize, 
+                                  time_limit=model._time_limit,
+                                  save_cuts=model._save_cuts, 
+                                  crosses_constrain=model._crosses_constrain)
+        lp.write("outputs/Others/LP_Relaxation_Converged_Benders.sol")
+        lp.write("outputs/Others/LP_Relaxation_Converged_Benders.lp")
 
-        obj_val += value * (i[0]*j[1] - j[0]*i[1])/2"""
 
+    else: 
+        # 1. Crear la relajación lineal
+        lp = model.relax()
+        lp.Params.OutputFlag = 0  # Desactivar salida de Gurobi para la relajación
+
+        # 2. Optimizar (SIN asignar el resultado a la variable lp)
+        lp.optimize()
+
+        lp.write("outputs/Others/LP_Relaxation_Converged_Compact.sol")
+        lp.write("outputs/Others/LP_Relaxation_Converged_Compact.lp")
+        
     obj_val = lp.ObjVal if lp.SolCount > 0 else 0
     
     return obj_val
