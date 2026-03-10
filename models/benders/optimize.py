@@ -69,7 +69,7 @@ def benders_callback(model, where):
 
 def optimize_master_MILP(instance_path: str, verbose: bool = False, plot: bool = False, 
                          time_limit: int = 7200, maximize: bool = True, save_cuts: bool = False,
-                         crosses_constrain: bool = False, benders_method: str = "farkas") -> gp.Model:
+                         crosses_constrain: bool = False, benders_method: str = "farkas", sum_constrain: bool = True) -> gp.Model:
     """
     Construye y resuelve el Problema Maestro (PM) usando Descomposición de Benders.
     """
@@ -82,7 +82,8 @@ def optimize_master_MILP(instance_path: str, verbose: bool = False, plot: bool =
         maximize=maximize,
         save_cuts=save_cuts,
         crosses_constrain=crosses_constrain,
-        benders_method=benders_method
+        benders_method=benders_method,
+        sum_constrain=sum_constrain
     )
 
     # --- Optimización ---
@@ -93,14 +94,19 @@ def optimize_master_MILP(instance_path: str, verbose: bool = False, plot: bool =
         model._instance_name = instance_path.split('/')[-1].replace('.instance', '')
         model._iteration = 0
         
-        # NUEVO: Ruta para el log de rayos de Farkas
+        # NUEVO: Sufijo dinámico
+        suffix = "con_techo" if sum_constrain else "sin_techo"
+        
+        # NUEVO: Ruta para el log de rayos de Farkas dinámica
         if crosses_constrain:
-            model._farkas_log_path = f"outputs/Others/Benders/{model._instance_name}-Crosses/farkas_log.jsonl"
+            model._farkas_log_path = f"outputs/Others/Benders/{model._instance_name}-Crosses/farkas_log_{suffix}.jsonl"
         else:
-            model._farkas_log_path = f"outputs/Others/Benders/{model._instance_name}/farkas_log.jsonl"
+            model._farkas_log_path = f"outputs/Others/Benders/{model._instance_name}/farkas_log_{suffix}.jsonl"
+            
         # Limpiar el archivo si ya existe de una corrida anterior
         if os.path.exists(model._farkas_log_path):
             os.remove(model._farkas_log_path)
+
 
     model.optimize(benders_callback)
     x = model._x
@@ -125,7 +131,7 @@ def optimize_master_MILP(instance_path: str, verbose: bool = False, plot: bool =
 
 def optimize_master_LP(instance_path: str, verbose: bool = False, plot: bool = False, 
                          time_limit: int = 7200, maximize: bool = True, save_cuts: bool = False,
-                         crosses_constrain: bool = False, benders_method: str = "farkas") -> gp.Model:
+                         crosses_constrain: bool = False, benders_method: str = "farkas", sum_constrain: bool = True) -> gp.Model:
     """
     Construye y resuelve la relajación LP del Problema Maestro (PM) usando Descomposición de Benders.
     """
@@ -137,7 +143,8 @@ def optimize_master_LP(instance_path: str, verbose: bool = False, plot: bool = F
         maximize=maximize,
         save_cuts=save_cuts,
         crosses_constrain=crosses_constrain,
-        benders_method=benders_method
+        benders_method=benders_method,
+        sum_constrain=sum_constrain
     )
 
     model.params.OutputFlag = 0
@@ -167,7 +174,26 @@ def optimize_master_LP(instance_path: str, verbose: bool = False, plot: bool = F
 
     if verbose:
         print("Starting optimization of LP relaxation with Benders decomposition...")
+        
     
+    if model._save_cuts:
+        model._instance_name = instance_path.split('/')[-1].replace('.instance', '')
+        model._iteration = 0
+        
+        # NUEVO: Sufijo dinámico
+        suffix = "con_techo" if sum_constrain else "sin_techo"
+        
+        # NUEVO: Ruta para el log de rayos de Farkas dinámica (más corta)
+        if crosses_constrain:
+            model._farkas_log_path = f"Outputs/Benders/{model._instance_name}-Crosses/farkas_log_{suffix}.jsonl"
+        else:
+            model._farkas_log_path = f"Outputs/Benders/{model._instance_name}/farkas_log_{suffix}.jsonl"
+            
+        # Limpiar el archivo si ya existe de una corrida anterior
+        if os.path.exists(model._farkas_log_path):
+            os.remove(model._farkas_log_path)
+
+
 
     while not converged:
 

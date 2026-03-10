@@ -3,8 +3,8 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 
 # Importamos las funciones desde tu módulo utils
-from utils.farkas_viz import load_farkas_logs, plot_cut_heatmap, plot_cut_weights, plot_farkas_ray_network
-from utils.utils import format_cut_string
+from models.benders.utils import load_farkas_logs, plot_cut_heatmap, plot_cut_weights, plot_farkas_ray_network, format_cut_string
+
 
 def generate_post_mortem_report(log_filepath: str, output_pdf_path: str, points: dict = None, n:int = 10):
     """

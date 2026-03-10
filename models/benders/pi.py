@@ -45,16 +45,18 @@ def generate_pi_cut_y(constrs_y, x_sol, model, TOL):
             cut_expr.add(pi_val * (1 - model._x[j, i]))
             cut_val += pi_val * (1 - x_sol[j, i])
 
-    constr_global = constrs_y['global']
-    pi_global = constr_global.Pi
-    if abs(pi_global) > TOL:
-        rhs_global = constr_global.RHS
-        v_components['global'] = pi_global
-
-        cut_expr.add(pi_global * rhs_global)
-        cut_val += pi_global * rhs_global
+    if 'global' in constrs_y:
         
-    
+        constr_global = constrs_y['global']
+        pi_global = constr_global.Pi
+        if abs(pi_global) > TOL:
+            rhs_global = constr_global.RHS
+            v_components['global'] = pi_global
+
+            cut_expr.add(pi_global * rhs_global)
+            cut_val += pi_global * rhs_global
+
+
     return cut_expr, cut_val, v_components
 
 
@@ -100,17 +102,16 @@ def generate_pi_cut_yp(constrs_yp, x_sol, model, TOL):
             cut_expr.add(pi_val * (1 - model._x[i, j]))
             cut_val += pi_val * (1 - x_sol[i, j])
     
-    
-    constr_global = constrs_yp['global']
-    pi_global = constr_global.Pi
-    
-    
-    if abs(pi_global) > TOL:
-        rhs_global = constr_global.RHS
-        v_components['global'] = pi_global
+    if 'global_p' in constrs_yp:
+        constr_global = constrs_yp['global_p']
+        pi_global = constr_global.Pi
 
-        cut_expr.add(pi_global * rhs_global)
-        cut_val += pi_global * rhs_global
+        if abs(pi_global) > TOL:
+            rhs_global = constr_global.RHS
+            v_components['global_p'] = pi_global
+
+            cut_expr.add(pi_global * rhs_global)
+            cut_val += pi_global * rhs_global
 
 
 
@@ -127,7 +128,7 @@ def generate_pi_cut(constrs_y, constrs_yp, x_sol, model, TOL = 1e-10):
         if cut_yp_val > TOL:
             model.cbLazy(cut_yp_expr <= 0)
 
-def build_pi_subproblems(points, N, CH, master_x_keys):
+def build_pi_subproblems(points, N, CH, master_x_keys, sum_constrain: bool = True):
     """
     Construye DOS Subproblemas (SP_Y y SP_YP) de factibilidad para la triangulación.
     Están separados para evitar enmascaramiento de rayos de Farkas si ambos son infactibles.
@@ -202,22 +203,22 @@ def build_pi_subproblems(points, N, CH, master_x_keys):
     sub_yp.Params.Presolve = 1
     # Diccionarios para almacenar las restricciones (agrupadas por su variable dual)
     # RHS se inicializa en 0 o 1, y deberá actualizarse en el callback con los valores de x_bar
-    constrs_y = {'alpha': {}, 'beta': {}, 'gamma': {}, 'delta': {}, 'global':{}}
-    constrs_yp = {'alpha_p': {}, 'beta_p': {}, 'gamma_p': {}, 'delta_p': {}, 'global':{}}
+    constrs_y = {'alpha': {}, 'beta': {}, 'gamma': {}, 'delta': {}}
+    constrs_yp = {'alpha_p': {}, 'beta_p': {}, 'gamma_p': {}, 'delta_p': {}}
     
-    
-    rhs_y = len(N) - 2
-    constrs_y['global'] = sub_y.addConstr(
-        gp.quicksum(y[t] for t in V) == rhs_y, 
-        name="triangulos_internos_totales"
-    )
-    
-    
-    rhs_yp = len(N) - len(CH)  
-    constrs_yp['global'] = sub_yp.addConstr(
-        gp.quicksum(yp[t] for t in V) == rhs_yp,
-        name="triangulos_externos_totales"
-    )
+    if sum_constrain:
+        rhs_y = len(N) - 2
+        constrs_y['global'] = sub_y.addConstr(
+            gp.quicksum(y[t] for t in V) == rhs_y, 
+            name="triangulos_internos_totales"
+        )
+
+
+        rhs_yp = len(N) - len(CH)  
+        constrs_yp['global_p'] = sub_yp.addConstr(
+            gp.quicksum(yp[t] for t in V) == rhs_yp,
+            name="triangulos_externos_totales"
+        )
 
     # 1. Conjunto A': Arcos dirigidos en la frontera del Convex Hull
     A_prime = []

@@ -7,7 +7,7 @@ from utils.utils import *
 
 def build_master_problem(instance_path: str, verbose: bool = False, plot: bool = False, 
                          time_limit: int = 7200, maximize: bool = True, save_cuts: bool = False,
-                         crosses_constrain: bool = False, benders_method: str = "farkas") -> gp.Model:
+                         crosses_constrain: bool = False, benders_method: str = "farkas", sum_constrain:bool = True) -> gp.Model:
     
         # Lectura de datos
     points = read_indexed_instance(instance_path)
@@ -129,9 +129,11 @@ def build_master_problem(instance_path: str, verbose: bool = False, plot: bool =
 
     # --- Construcción del Subproblema ---
     if benders_method == "farkas":
-        sub_y, sub_yp, constrs_y, constrs_yp = build_farkas_subproblems(points, N, CH, x.keys())
+        sub_y, sub_yp, constrs_y, constrs_yp = build_farkas_subproblems(points, N, CH, x.keys(), sum_constrain=sum_constrain)
     elif benders_method == "pi":
-        sub_y, sub_yp, constrs_y, constrs_yp = build_pi_subproblems(points, N, CH, x.keys())
+        sub_y, sub_yp, constrs_y, constrs_yp = build_pi_subproblems(points, N, CH, x.keys(), sum_constrain=sum_constrain)
+    else:
+        raise ValueError(f"Método de Benders desconocido: {benders_method}. Elige 'farkas' o 'pi'.")
     
     model._x = x  
     model._sub_y = sub_y

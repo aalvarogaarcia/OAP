@@ -1,6 +1,5 @@
 import gurobipy as gp
 from gurobipy import GRB
-from models.benders.optimize import log_farkas_ray
 from utils.utils import compute_triangles, triangles_adjacency_list
 from models.benders.utils import log_farkas_ray, load_farkas_logs
 
@@ -54,7 +53,23 @@ def generate_farkas_cut_y(constrs_y, x_sol, model, TOL = 1e-10):
             cut_y_expr.add(farkas * (1 - model._x[j, i]))
             cut_y_val += farkas * (1 - x_sol[j, i])
     
+
+
+    # --- Añadir extracción del Rayo de Farkas para la Restricción Global ---
+    if 'global' in constrs_y:
+        farkas_global = constrs_y['global'].FarkasDual
+        if abs(farkas_global) > TOL:
+            rhs_global = constrs_y['global'].RHS
+            v_components_y['global'] = farkas_global
+            
+            # Se añade como constante al corte
+            cut_y_expr += farkas_global * rhs_global
+            cut_y_val += farkas_global * rhs_global
+
+
+
     # --- Análisis por consola ---
+
     if model._save_cuts:
         print("\n" + "-"*30)
         print("RAYO DE FARKAS DETECTADO EN SUBPROBLEMA Y")
@@ -62,10 +77,15 @@ def generate_farkas_cut_y(constrs_y, x_sol, model, TOL = 1e-10):
         for comp, values in v_components_y.items():
             if values: # Solo imprime si hay valores no nulos
                 print(f"Componente {comp}:")
-                for k, v in values.items():
-                    print(f"  {k}: {v:.4f}")
+                if isinstance(values, dict):
+                    for k, v in values.items():
+                        print(f"  {k}: {v:.4f}")
+                else:
+                    # Es la restricción global (un escalar)
+                    print(f"  Valor: {values:.4f}")
         print("-"*30 + "\n")
-   
+    
+    
     # --- NUEVO: Guardar en el log estructurado ---
     if getattr(model, '_save_cuts', False):
         # 1. Obtener trazabilidad detallada        
@@ -124,7 +144,18 @@ def generate_farkas_cut_yp(constrs_yp, x_sol, model, TOL = 1e-10):
                 cut_yp_expr.add(farkas * (1 - model._x[i, j]))
                 cut_yp_val += farkas * (1 - x_sol[i, j])
         
+        if 'global_p' in constrs_yp:
+            farkas_global_p = constrs_yp['global_p'].FarkasDual
+            if abs(farkas_global_p) > TOL:
+                rhs_global_p = constrs_yp['global_p'].RHS
+                v_components_yp['global_p'] = farkas_global_p
+                
+                # Se añade como constante al corte
+                cut_yp_expr += farkas_global_p * rhs_global_p
+                cut_yp_val += farkas_global_p * rhs_global_p
+    
         # --- Análisis por consola ---
+
         if model._save_cuts:
             print("\n" + "="*50)
             print("RAYO DE FARKAS DETECTADO EN SUBPROBLEMA Y'")
@@ -132,9 +163,14 @@ def generate_farkas_cut_yp(constrs_yp, x_sol, model, TOL = 1e-10):
             for comp, values in v_components_yp.items():
                 if values:
                     print(f"Componente {comp}:")
-                    for k, v in values.items():
-                        print(f"  {k}: {v:.4f}")
+                    if isinstance(values, dict):
+                        for k, v in values.items():
+                            print(f"  {k}: {v:.4f}")
+                    else:
+                        print(f"  Valor: {values:.4f}")
             print("="*50 + "\n")
+
+
         # --- NUEVO: Guardar en el log estructurado ---
         if getattr(model, '_save_cuts', False):
             log_farkas_ray(
@@ -180,7 +216,7 @@ def generate_farkas_cut(sub_y, sub_yp, constrs_y, constrs_yp, x_sol, model, TOL 
 
 
 
-def build_farkas_subproblems(points, N, CH, master_x_keys):
+def build_farkas_subproblems(points, N, CH, master_x_keys, sum_constrain: bool = True):
     """
     Construye DOS Subproblemas (SP_Y y SP_YP) de factibilidad para la triangulación.
     Están separados para evitar enmascaramiento de rayos de Farkas si ambos son infactibles.
@@ -216,22 +252,22 @@ def build_farkas_subproblems(points, N, CH, master_x_keys):
     yp = sub_yp.addVars(V, vtype=GRB.CONTINUOUS, lb=0, name="yp")
     # Diccionarios para almacenar las restricciones (agrupadas por su variable dual)
     # RHS se inicializa en 0 o 1, y deberá actualizarse en el callback con los valores de x_bar
-    constrs_y = {'alpha': {}, 'beta': {}, 'gamma': {}, 'delta': {}, 'global':{}}
-    constrs_yp = {'alpha_p': {}, 'beta_p': {}, 'gamma_p': {}, 'delta_p': {}, 'global':{}}
+    constrs_y = {'alpha': {}, 'beta': {}, 'gamma': {}, 'delta': {}}
+    constrs_yp = {'alpha_p': {}, 'beta_p': {}, 'gamma_p': {}, 'delta_p': {}}
     
-    
-    rhs_y = len(N) - 2
-    constrs_y['global'] = sub_y.addConstr(
-        gp.quicksum(y[t] for t in V) == rhs_y, 
-        name="triangulos_internos_totales"
-    )
-    
-    
-    rhs_yp = len(N) - len(CH)  
-    constrs_yp['global'] = sub_yp.addConstr(
-        gp.quicksum(yp[t] for t in V) == rhs_yp,
-        name="triangulos_externos_totales"
-    )
+    if sum_constrain:
+        rhs_y = len(N) - 2
+        constrs_y['global'] = sub_y.addConstr(
+            gp.quicksum(y[t] for t in V) == rhs_y, 
+            name="triangulos_internos_totales"
+        )
+
+
+        rhs_yp = len(N) - len(CH)  
+        constrs_yp['global_p'] = sub_yp.addConstr(
+            gp.quicksum(yp[t] for t in V) == rhs_yp,
+            name="triangulos_externos_totales"
+        )
 
     # 1. Conjunto A': Arcos dirigidos en la frontera del Convex Hull
     A_prime = []
