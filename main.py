@@ -21,7 +21,10 @@ def main(dir_path="data",
     files.sort() # Ordenar para que la tabla salga ordenada
     
     all_results_for_excel = []
-    subtour_methods = [0, 1, 2] # Los métodos que quieres comparar
+    subtour_methods = [
+    #    0,
+    #    1, 
+        2] # Los métodos que quieres comparar
 
     for st_method in subtour_methods:
         print(f"\n>>> EMPEZANDO COMPARATIVA: Subtour Method {st_method} <<<")

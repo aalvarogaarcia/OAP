@@ -29,7 +29,7 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
     :type relaxed: bool
     :param obj: Which objective function to use: 0 for Fekete, 1 for Internal Area, 2 for External Area, 3 for Diagonals
     :type obj: int
-    :param subtour: Type of subtour elimination constraints to use (0: None, 1: Miller-Tucker-Zemlin, 2: Multi-commodity flow)
+    :param subtour: Type of subtour elimination constraints to use (0: flow, 1: Miller-Tucker-Zemlin, 2: Multi-commodity flow)
     :type subtour: int
     :type kwargs: dict
 
