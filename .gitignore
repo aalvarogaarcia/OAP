@@ -19,6 +19,10 @@ outputs/
 *.log
 *.dot
 *.ilp
+.vscode/
+
+*csv
+*tsv
 
 reference.py
 
