@@ -85,13 +85,13 @@ def optimize_master_MILP(instance_path: str, verbose: bool = False, plot: bool =
         benders_method=benders_method,
         sum_constrain=sum_constrain
     )
-
+    model._instance_name = instance_path.replace('\\', '/').split('/')[-1].replace('.instance', '')
+    print(f"Modelo maestro construido para {model._instance_name}. Variables: {model.NumVars}, Restricciones: {model.NumConstrs}")
     # --- Optimización ---
     if verbose:
         print("Starting optimization with Benders decomposition...")
     
     if model._save_cuts:
-        model._instance_name = instance_path.split('/')[-1].replace('.instance', '')
         model._iteration = 0
         
         # NUEVO: Sufijo dinámico
@@ -99,9 +99,9 @@ def optimize_master_MILP(instance_path: str, verbose: bool = False, plot: bool =
         
         # NUEVO: Ruta para el log de rayos de Farkas dinámica
         if crosses_constrain:
-            model._farkas_log_path = f"outputs/Others/Benders/{model._instance_name}-Crosses/farkas_log_{suffix}.jsonl"
+            model._farkas_log_path = f"outputs/Benders/MILP-{model._instance_name}-Crosses/farkas_log_{suffix}.jsonl"
         else:
-            model._farkas_log_path = f"outputs/Others/Benders/{model._instance_name}/farkas_log_{suffix}.jsonl"
+            model._farkas_log_path = f"outputs/Benders/MILP-{model._instance_name}/farkas_log_{suffix}.jsonl"
             
         # Limpiar el archivo si ya existe de una corrida anterior
         if os.path.exists(model._farkas_log_path):
@@ -123,8 +123,8 @@ def optimize_master_MILP(instance_path: str, verbose: bool = False, plot: bool =
             # Asumiendo que existe una función plot_solution en utils
             plot_solution(model, title="Optimal Tour" if model.Status == GRB.OPTIMAL else "Best Found")
     
-    model._instance_name = instance_path.split('/')[-1].replace('.instance', '')
-    model.write(f"outputs/Others/Benders/{model._instance_name}.lp")
+
+    #model.write(f"outputs/Benders/MILP-{model._instance_name}.lp")
 
     return model
 
@@ -152,7 +152,7 @@ def optimize_master_LP(instance_path: str, verbose: bool = False, plot: bool = F
     model.params.LazyConstraints = 0
     model.params.Presolve = 1
 
-
+    model._instance_name = instance_path.replace('\\', '/').split('/')[-1].replace('.instance', '')
     # Cambiamos manualmente el tipo de todas las variables a continuas
     for v in model.getVars():
         if v.VType != GRB.CONTINUOUS:
@@ -177,7 +177,6 @@ def optimize_master_LP(instance_path: str, verbose: bool = False, plot: bool = F
         
     
     if model._save_cuts:
-        model._instance_name = instance_path.split('/')[-1].replace('.instance', '')
         model._iteration = 0
         
         # NUEVO: Sufijo dinámico
@@ -185,9 +184,9 @@ def optimize_master_LP(instance_path: str, verbose: bool = False, plot: bool = F
         
         # NUEVO: Ruta para el log de rayos de Farkas dinámica (más corta)
         if crosses_constrain:
-            model._farkas_log_path = f"Outputs/Benders/{model._instance_name}-Crosses/farkas_log_{suffix}.jsonl"
+            model._farkas_log_path = f"Outputs/Benders/LP-{model._instance_name}-Crosses/farkas_log_{suffix}.jsonl"
         else:
-            model._farkas_log_path = f"Outputs/Benders/{model._instance_name}/farkas_log_{suffix}.jsonl"
+            model._farkas_log_path = f"Outputs/Benders/LP-{model._instance_name}/farkas_log_{suffix}.jsonl"
             
         # Limpiar el archivo si ya existe de una corrida anterior
         if os.path.exists(model._farkas_log_path):
@@ -279,5 +278,5 @@ def optimize_master_LP(instance_path: str, verbose: bool = False, plot: bool = F
             break
 
     print("LP Relaxation converged after {} iterations.".format(model._iteration))
-
+    model.write(f"outputs/Benders/LP-{model._instance_name}.lp")
     return model

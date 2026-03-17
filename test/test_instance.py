@@ -6,11 +6,11 @@ from utils.farkas_viz import *
 from utils.analyze_benders import generate_post_mortem_report
 
 
-instance = "instance/stars-0000010.instance"
+instance = "instance/london-0000010.instance"
 
 
-model_compact = build_and_solve_model(instance, verbose=False, plot=False, maximize=True, time_limit=300,
-                                sum_constrain=False, obj = 1, mode = 0, subtour = 0)
+model_compact = build_and_solve_model(instance, verbose=False, plot=True, maximize=True, time_limit=300,
+                                sum_constrain=True, obj = 1, mode = 0, subtour = 0)
 
 
 #model = optimize_master_MILP(instance, verbose=True, plot=True, maximize=True, time_limit=300, 

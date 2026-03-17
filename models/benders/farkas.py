@@ -70,7 +70,7 @@ def generate_farkas_cut_y(constrs_y, x_sol, model, TOL = 1e-10):
 
     # --- Análisis por consola ---
 
-    if model._save_cuts:
+    if model._save_cuts and model._verbose:
         print("\n" + "-"*30)
         print("RAYO DE FARKAS DETECTADO EN SUBPROBLEMA Y")
         print("Valor numérico de la violación (v^T * b(x_bar)): ", cut_y_val)
@@ -86,7 +86,7 @@ def generate_farkas_cut_y(constrs_y, x_sol, model, TOL = 1e-10):
         print("-"*30 + "\n")
     
     
-    # --- NUEVO: Guardar en el log estructurado ---
+    # --- Guardar en el log estructurado ---
     if getattr(model, '_save_cuts', False):
         # 1. Obtener trazabilidad detallada        
         log_farkas_ray(
@@ -102,8 +102,7 @@ def generate_farkas_cut_y(constrs_y, x_sol, model, TOL = 1e-10):
         )
     
     return cut_y_expr, cut_y_val, v_components_y
-    # --- Añadir el corte al maestro de forma segura ---
-    # Si el valor evaluado es positivo, el hiperplano debe forzarse hacia <= 0
+
    
 
 def generate_farkas_cut_yp(constrs_yp, x_sol, model, TOL = 1e-10):
@@ -156,7 +155,7 @@ def generate_farkas_cut_yp(constrs_yp, x_sol, model, TOL = 1e-10):
     
         # --- Análisis por consola ---
 
-        if model._save_cuts:
+        if model._save_cuts and model._verbose:
             print("\n" + "="*50)
             print("RAYO DE FARKAS DETECTADO EN SUBPROBLEMA Y'")
             print("Valor numérico de la violación (v'^T * b(x_bar)): ", cut_yp_val)
@@ -171,7 +170,7 @@ def generate_farkas_cut_yp(constrs_yp, x_sol, model, TOL = 1e-10):
             print("="*50 + "\n")
 
 
-        # --- NUEVO: Guardar en el log estructurado ---
+        # --- Guardar en el log estructurado ---
         if getattr(model, '_save_cuts', False):
             log_farkas_ray(
                 filepath=model._farkas_log_path,
@@ -184,7 +183,6 @@ def generate_farkas_cut_yp(constrs_yp, x_sol, model, TOL = 1e-10):
                 tolerance=TOL,
                 cut_expr = cut_yp_expr
             )
-        # --- Añadir el corte al maestro de forma segura ---
         # --- Añadir el corte al maestro de forma segura ---
         return cut_yp_expr, cut_yp_val, v_components_yp
 
