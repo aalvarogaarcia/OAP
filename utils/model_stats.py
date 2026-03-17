@@ -69,6 +69,8 @@ def get_Objval_lp(model):
         # 2. Optimizar (SIN asignar el resultado a la variable lp)
         lp.optimize()
 
+        os.makedirs("outpus/Others", exist_ok=True)
+    
         lp.write("outputs/Others/LP_Relaxation_Converged_Compact.sol")
         lp.write("outputs/Others/LP_Relaxation_Converged_Compact.lp")
         
