@@ -596,23 +596,7 @@ def plot_solution(model: gp.Model, title: str = "Solution"):
             plt.annotate(str(i), (pt[0], pt[1]), 
                         textcoords="offset points", xytext=(5, 5),
                         fontsize=9, color='black',
-                        bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.6))
-    
-    from utils.geometry_classifier import compute_delauney
-    if points is not None:
-        delaunay_edges = compute_delauney(points)
-        # Filtramos para dibujar solo una vez cada línea (i < j)
-        delaunay_lines = [(i, j) for i, j in delaunay_edges if i < j]
-        
-        nx.draw_networkx_edges(
-            G, points, 
-            edgelist=delaunay_lines, 
-            edge_color='lightgray', 
-            style='dotted', 
-            width=1.0, 
-            alpha=0.6
-        )
-    
+                        bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.6))    
     
     plt.xlabel("X")
     plt.ylabel("Y")

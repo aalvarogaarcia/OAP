@@ -1,4 +1,4 @@
-from scipy.spatial import ConvexHull, Delaunay
+from scipy.spatial import ConvexHull, Delaunay, distance
 import numpy as np
 from utils.utils import read_indexed_instance
 
@@ -27,7 +27,7 @@ def compute_onion_layers(points):
 
     
 
-def compute_delauney(points):
+def compute_delaunay(points):
     # 1. Extraer IDs y coordenadas manteniendo el orden
     
     node_ids = range(len(points))
@@ -54,9 +54,28 @@ def compute_delauney(points):
         
     return delaunay_edges
 
+def compute_knn_edges(points, k:int = 4):
+
+
+    node_ids = range(len(points))
+
+    dist_matrix = distance.cdist(points, points, 'euclidean')
+    knn_edges = set()
+
+    for i in node_ids:
+        nearest_indices = np.argsort(dist_matrix[i])[:k+1]
+
+        for n_idx in nearest_indices:
+            j = node_ids[n_idx]
+            if i != j:
+                knn_edges.add((i,j))
+                knn_edges.add((j,i))
+
+    return knn_edges
 
 
 points = read_indexed_instance("instance/Instancias/euro-night-0000010.instance")
 
-edges = compute_delauney(points)
+edges = compute_knn_edges(points)
 print(edges)
+
