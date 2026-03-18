@@ -1,20 +1,44 @@
 from gurobipy import GRB
 import gurobipy as gp
-import os
+import numpy as np
+from numpy.typing import NDArray
+from typing import Literal, cast
+
 from models.benders.farkas import build_farkas_subproblems
 from models.benders.pi import build_pi_subproblems
-from utils.utils import *
+from utils.utils import (
+    compute_convex_hull,
+    compute_convex_hull_area,
+    compute_crossing_edges,
+    compute_triangles,
+    cost_function_area,
+    read_indexed_instance,
+)
 
-def build_master_problem(instance_path: str, verbose: bool = False, plot: bool = False, 
-                         time_limit: int = 7200, maximize: bool = True, save_cuts: bool = False,
-                         crosses_constrain: bool = False, benders_method: str = "farkas", sum_constrain:bool = True) -> gp.Model:
+Arc = tuple[int, int]
+CrossingArc = tuple[int, int, int, int]
+ArcVarMap = dict[Arc, gp.Var]
+ArcConstrMap = dict[str, dict[Arc, gp.Constr]]
+BendersSubproblemData = tuple[gp.Model, gp.Model, ArcConstrMap, ArcConstrMap]
+
+def build_master_problem(
+    instance_path: str,
+    verbose: bool = False,
+    plot: bool = False,
+    time_limit: int = 7200,
+    maximize: bool = True,
+    save_cuts: bool = False,
+    crosses_constrain: bool = False,
+    benders_method: Literal["farkas", "pi"] = "farkas",
+    sum_constrain: bool = True,
+) -> gp.Model:
     
         # Lectura de datos
-    points = read_indexed_instance(instance_path)
+    points: NDArray[np.int64] = read_indexed_instance(instance_path)
     N = range(len(points))
-    CH = compute_convex_hull(points)
-    triangles = compute_triangles(points)
-    crossing = compute_crossing_edges(triangles, points)
+    CH: NDArray[np.int64] = compute_convex_hull(points)
+    triangles: NDArray[np.int64] = compute_triangles(points)
+    crossing: NDArray[np.int64] = compute_crossing_edges(triangles, points)
 
     model = gp.Model("Master Problem - Benders Decomposition")
     model.setParam('TimeLimit', time_limit)
@@ -44,10 +68,10 @@ def build_master_problem(instance_path: str, verbose: bool = False, plot: bool =
     model._benders_method = benders_method
 
     # Consideramos xij la variable de arcos dirigidos
-    x = { (i, j): model.addVar(vtype=GRB.BINARY, name=f"x_{i}_{j}") for i in N for j in N  if i != j }
+    x: ArcVarMap = {(i, j): model.addVar(vtype=GRB.BINARY, name=f"x_{i}_{j}") for i in N for j in N if i != j}
     
     # Consideramos f_ij la variable de subciclos
-    f = {(i,j) : model.addVar(vtype=GRB.CONTINUOUS, lb = 0, name=f"f_{i}_{j}") for i in N for j in N if i != j }
+    f: ArcVarMap = {(i, j): model.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"f_{i}_{j}") for i in N for j in N if i != j}
     
     for i in range(len(CH)):
         for j in range(i+2, len(CH)):
@@ -84,7 +108,7 @@ def build_master_problem(instance_path: str, verbose: bool = False, plot: bool =
         optimizer = GRB.MINIMIZE
 
     # Coeficientes de área ca
-    c = cost_function_area(points, x.keys(), mode=3)
+    c: dict[Arc, float] = cost_function_area(points, x.keys(), mode=3)
     model.setObjective(gp.quicksum(c[i] * x[i] for i in x.keys()), optimizer)
 
     # --- Restricciones del Maestro (Bloque A0) ---
@@ -116,22 +140,28 @@ def build_master_problem(instance_path: str, verbose: bool = False, plot: bool =
     # Evitan que se crucen aristas en la solución
     if crosses_constrain:
         for cross in crossing:
-            i, j, k, l = cross
+            i, j, k, m = cross
             
             exists_edge_1 = (i, j) in x and (j, i) in x
-            exists_edge_2 = (k, l) in x and (l, k) in x
+            exists_edge_2 = (k, m) in x and (m, k) in x
             
             if exists_edge_1 and exists_edge_2:
                 model.addConstr(
-                    x[i, j] + x[j, i] + x[k, l] + x[l, k] <= 1, 
-                    name=f"crossing_{i}_{j}_{k}_{l}"
+                    x[i, j] + x[j, i] + x[k, m] + x[m, k] <= 1, 
+                    name=f"crossing_{i}_{j}_{k}_{m}"
                 )
 
     # --- Construcción del Subproblema ---
     if benders_method == "farkas":
-        sub_y, sub_yp, constrs_y, constrs_yp = build_farkas_subproblems(points, N, CH, x.keys(), sum_constrain=sum_constrain)
+        sub_y, sub_yp, constrs_y, constrs_yp = cast(
+            BendersSubproblemData,
+            build_farkas_subproblems(points, N, CH, x.keys(), sum_constrain=sum_constrain),
+        )
     elif benders_method == "pi":
-        sub_y, sub_yp, constrs_y, constrs_yp = build_pi_subproblems(points, N, CH, x.keys(), sum_constrain=sum_constrain)
+        sub_y, sub_yp, constrs_y, constrs_yp = cast(
+            BendersSubproblemData,
+            build_pi_subproblems(points, N, CH, x.keys(), sum_constrain=sum_constrain),
+        )
     else:
         raise ValueError(f"Método de Benders desconocido: {benders_method}. Elige 'farkas' o 'pi'.")
     

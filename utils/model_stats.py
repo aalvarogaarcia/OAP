@@ -3,17 +3,17 @@ import gurobipy as gp
 #from docplex.mp.model import Model
 import pandas as pd
 import os
-import networkx as nx
+from typing import Literal
 
 
-def get_ObjVal_int(model):
+def get_ObjVal_int(model: gp.Model) -> float | None:
     """
     Retorna el valor objetivo entero del modelo si existe solución.
     Si no hay solución, retorna None.
     """
     if model and model.SolCount > 0:
-        x = model._x_results
-        obj_val = 0
+        x: list[tuple[int, int]] = model._x_results
+        obj_val = 0.0
         for i, j in x:
             i = model._points_[i]
             j = model._points_[j]
@@ -23,13 +23,13 @@ def get_ObjVal_int(model):
         return obj_val
 
 
-def get_tour(model):
+def get_tour(model: gp.Model) -> list[int]:
     """
     Retorna la lista de aristas seleccionadas en la solución del modelo.
     Cada arista se representa como una tupla (i, j) de índices de puntos.
     """
     if model and model.SolCount > 0:
-        x = model._x_results
+        x: list[tuple[int, int]] = model._x_results
         next_i = {i: j for i, j in x}
 
         start = x[0][0]  # Tomamos el primer punto como inicio
@@ -45,11 +45,11 @@ def get_tour(model):
     else:
         return []
 
-def get_Objval_lp(model):
+def get_Objval_lp(model: gp.Model) -> float:
     if model._benders_:
 
         
-        from models.benders import optimize_master_LP,benders_callback
+        from models.benders import optimize_master_LP
         lp = optimize_master_LP(model._instance_path, 
                                   verbose= False, 
                                   plot= False, 
@@ -78,14 +78,14 @@ def get_Objval_lp(model):
     
     return obj_val
 
-def get_x_values(model):
+def get_x_values(model: gp.Model) -> dict[str, float]:
     """
     Extrae los valores de las variables de decisión que comienzan por 'x'.
     Retorna un diccionario con {nombre_variable: valor}
     """
     # Verificar si el modelo tiene solución (Optimal o Suboptimal)
     if model and model.SolCount > 0:
-        x_values = {}
+        x_values: dict[str, float] = {}
         
         # model.getVars() devuelve TODAS las variables
         for var in model.getVars():
@@ -99,7 +99,9 @@ def get_x_values(model):
 
 
 
-def get_model_stats(model):
+def get_model_stats(
+    model: gp.Model,
+) -> tuple[float, float, float | None, float, float] | tuple[Literal['-'], Literal['-'], Literal['-'], Literal['-'], Literal['-']]:
     """
     Extrae estadísticas clave del modelo y su relajación.
     Retorna: (LP_Val, Gap, IP_Val, Time, Nodes)
@@ -107,6 +109,8 @@ def get_model_stats(model):
 
     if model and model.SolCount > 0:
         ip_val = get_ObjVal_int(model)
+        if ip_val is None:
+            return "-", "-", "-", "-", "-"
         time_s = model.Runtime
         nodes = model.NodeCount
         lp_val = get_Objval_lp(model)
@@ -183,7 +187,7 @@ def get_model_stats(model):
 #
 #
 
-def save_results_excel(model: gp.Model, outputfile: str):
+def save_results_excel(model: gp.Model, outputfile: str) -> None:
     """
     Guarda estadísticas y configuración del modelo en Excel.
     - Si el archivo existe, intenta leerlo.

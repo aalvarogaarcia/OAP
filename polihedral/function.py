@@ -1,4 +1,3 @@
-import gurobipy as gp
 from gurobipy import GRB
 import cdd
 import numpy as np
@@ -7,7 +6,7 @@ from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from scipy.spatial import ConvexHull
 from models.gurobi import build_and_solve_model
 
-def extract_3d_slice_from_gurobi(model, free_var_names):
+def extract_3d_slice_from_gurobi(model: gp.Model, free_var_names: list[str]) -> list[list[float]]:
     """
     Reduce un modelo de n dimensiones a un poliedro 3D, fijando todas las variables 
     (excepto las 3 elegidas) a sus valores óptimos de la solución de Gurobi.
@@ -16,8 +15,8 @@ def extract_3d_slice_from_gurobi(model, free_var_names):
     vars = model.getVars()
     
     # Identificar cuáles son las 3 variables libres y guardar los valores del resto
-    free_indices = []
-    fixed_dict = {} 
+    free_indices: list[int] = []
+    fixed_dict: dict[int, float] = {}
     
     for i, v in enumerate(vars):
         if v.VarName in free_var_names:
@@ -36,7 +35,7 @@ def extract_3d_slice_from_gurobi(model, free_var_names):
     rhs = model.getAttr('RHS', model.getConstrs())
     senses = model.getAttr('Sense', model.getConstrs())
     
-    cdd_matrix = []
+    cdd_matrix: list[list[float]] = []
     
     # 1. Procesar restricciones y colapsar la matriz a 3D
     for i in range(len(rhs)):

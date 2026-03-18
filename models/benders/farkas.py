@@ -1,10 +1,46 @@
 import gurobipy as gp
 from gurobipy import GRB
+import numpy as np
+from numpy.typing import NDArray
+from collections.abc import Collection
+from typing import TypedDict
+
 from utils.utils import compute_triangles, triangles_adjacency_list
-from models.benders.utils import log_farkas_ray, load_farkas_logs
+from models.benders.utils import log_farkas_ray
 
 
-def generate_farkas_cut_y(constrs_y, x_sol, model, TOL = 1e-10):
+Arc = tuple[int, int]
+ArcConstraintMap = dict[Arc, gp.Constr]
+RayComponents = dict[str, dict[Arc, float] | float]
+
+
+FarkasConstrsY = TypedDict(
+    "FarkasConstrsY",
+    {
+        "alpha": ArcConstraintMap,
+        "beta": ArcConstraintMap,
+        "gamma": ArcConstraintMap,
+        "delta": ArcConstraintMap,
+        "global": gp.Constr,
+    },
+    total=False,
+)
+
+
+class FarkasConstrsYP(TypedDict, total=False):
+    alpha_p: ArcConstraintMap
+    beta_p: ArcConstraintMap
+    gamma_p: ArcConstraintMap
+    delta_p: ArcConstraintMap
+    global_p: gp.Constr
+
+
+def generate_farkas_cut_y(
+    constrs_y: FarkasConstrsY,
+    x_sol: dict[Arc, float],
+    model: gp.Model,
+    TOL: float = 1e-10,
+) -> tuple[gp.LinExpr, float, RayComponents]:
     """
     Genera un corte de Benders a partir de los rayos de Farkas obtenidos de ambos subproblemas.
     Analiza las componentes del vector v_ij para entender la naturaleza de la violación.
@@ -22,7 +58,7 @@ def generate_farkas_cut_y(constrs_y, x_sol, model, TOL = 1e-10):
     cut_y_val = 0.0           # Valor numérico para comprobar el signo
     
     # Diccionario para almacenar y analizar las componentes de v_ij
-    v_components_y = {'alpha': {}, 'beta': {}, 'gamma': {}, 'delta': {}}
+    v_components_y: RayComponents = {'alpha': {}, 'beta': {}, 'gamma': {}, 'delta': {}}
     
     # --- Extracción de Farkas Duales ---
     for (i, j), constr in constrs_y['alpha'].items():
@@ -105,14 +141,19 @@ def generate_farkas_cut_y(constrs_y, x_sol, model, TOL = 1e-10):
 
    
 
-def generate_farkas_cut_yp(constrs_yp, x_sol, model, TOL = 1e-10):
+def generate_farkas_cut_yp(
+    constrs_yp: FarkasConstrsYP,
+    x_sol: dict[Arc, float],
+    model: gp.Model,
+    TOL: float = 1e-10,
+) -> tuple[gp.LinExpr, float, RayComponents]:
     # =========================================================
     # 6. ANÁLISIS DEL VECTOR v'_ij Y GENERACIÓN DE CORTES PARA Y'
     # =========================================================
         cut_yp_expr = gp.LinExpr()
         cut_yp_val = 0.0
         
-        v_components_yp = {'alpha_p': {}, 'beta_p': {}, 'gamma_p': {}, 'delta_p': {}}
+        v_components_yp: RayComponents = {'alpha_p': {}, 'beta_p': {}, 'gamma_p': {}, 'delta_p': {}}
         
         # --- Extracción de Farkas Duales ---
         for (i, j), constr in constrs_yp['alpha_p'].items():
@@ -191,7 +232,15 @@ def generate_farkas_cut_yp(constrs_yp, x_sol, model, TOL = 1e-10):
 
 
 
-def generate_farkas_cut(sub_y, sub_yp, constrs_y, constrs_yp, x_sol, model, TOL = 1e-10):
+def generate_farkas_cut(
+    sub_y: gp.Model,
+    sub_yp: gp.Model,
+    constrs_y: FarkasConstrsY,
+    constrs_yp: FarkasConstrsYP,
+    x_sol: dict[Arc, float],
+    model: gp.Model,
+    TOL: float = 1e-10,
+) -> None:
     # Lógica para decidir cuál corte generar (si ambos subproblemas son infactibles, se pueden generar ambos cortes)
     if sub_y.Status == GRB.INFEASIBLE:
         cut_y_expr, cut_y_val, _ = generate_farkas_cut_y(constrs_y, x_sol, model, TOL)
@@ -214,7 +263,13 @@ def generate_farkas_cut(sub_y, sub_yp, constrs_y, constrs_yp, x_sol, model, TOL 
 
 
 
-def build_farkas_subproblems(points, N, CH, master_x_keys, sum_constrain: bool = True):
+def build_farkas_subproblems(
+    points: NDArray[np.int64],
+    N: range,
+    CH: NDArray[np.int64],
+    master_x_keys: Collection[Arc],
+    sum_constrain: bool = True,
+) -> tuple[gp.Model, gp.Model, FarkasConstrsY, FarkasConstrsYP]:
     """
     Construye DOS Subproblemas (SP_Y y SP_YP) de factibilidad para la triangulación.
     Están separados para evitar enmascaramiento de rayos de Farkas si ambos son infactibles.
@@ -268,7 +323,7 @@ def build_farkas_subproblems(points, N, CH, master_x_keys, sum_constrain: bool =
         )
 
     # 1. Conjunto A': Arcos dirigidos en la frontera del Convex Hull
-    A_prime = []
+    A_prime: list[Arc] = []
     for i in range(len(CH)):
         u, v = CH[i], CH[(i + 1) % len(CH)]
         if (u, v) in master_x_keys:

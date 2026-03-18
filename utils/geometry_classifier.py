@@ -2,7 +2,7 @@ from scipy.spatial import ConvexHull, Delaunay, distance
 import numpy as np
 from utils.utils import read_indexed_instance
 
-def compute_onion_layers(points):
+def compute_onion_layers(points: np.ndarray) -> dict[int, int]:
     node_to_layer = {}
     remaining_indices = np.arange(len(points))
     current_layer = 0
@@ -27,7 +27,7 @@ def compute_onion_layers(points):
 
     
 
-def compute_delaunay(points):
+def compute_delaunay(points: np.ndarray) -> set[tuple[int, int]]:
     # 1. Extraer IDs y coordenadas manteniendo el orden
     
     node_ids = range(len(points))
@@ -54,7 +54,7 @@ def compute_delaunay(points):
         
     return delaunay_edges
 
-def compute_knn_edges(points, k:int = 4):
+def compute_knn_edges(points: np.ndarray, k: int = 4) -> set[tuple[int, int]]:
 
 
     node_ids = range(len(points))

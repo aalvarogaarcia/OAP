@@ -1,15 +1,40 @@
 
-from xml.parsers.expat import model
-from xml.parsers.expat import model
 from gurobipy import GRB
 import gurobipy as gp
 import numpy as np
 import os
-from utils.utils import *
+from numpy.typing import NDArray
+from typing import Literal, cast
 
-def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool = False, time_limit: int = 7200000, 
-                          maximize: bool = True, sum_constrain: bool = False, relaxed: bool = False,
-                          obj: int = 2, subtour: int = 0,**kwargs) -> gp.Model:
+from utils.utils import (
+    compute_convex_hull,
+    compute_convex_hull_area,
+    compute_triangles,
+    cost_function_area,
+    is_colineal,
+    plot_solution,
+    read_indexed_instance,
+    signed_area,
+    triangles_adjacency_list,
+)
+
+Arc = tuple[int, int]
+ArcVarMap = dict[Arc, gp.Var]
+McfArc = tuple[int, int, int]
+McfVarMap = dict[McfArc, gp.Var]
+
+def build_and_solve_model(
+    instance_path: str,
+    verbose: bool = False,
+    plot: bool = False,
+    time_limit: int = 7200000,
+    maximize: bool = True,
+    sum_constrain: bool = False,
+    relaxed: bool = False,
+    obj: Literal[0, 1, 2, 3] = 2,
+    subtour: Literal[0, 1, 2] = 0,
+    **kwargs: object,
+) -> gp.Model:
     """
     Docstring for build_and_solve_model
     
@@ -40,13 +65,13 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
     
     """
 
-    points = read_indexed_instance(instance_path)
+    points: NDArray[np.int64] = read_indexed_instance(instance_path)
     N = range(len(points))
-    CH = compute_convex_hull(points)
-    triangles = compute_triangles(points)
+    CH: NDArray[np.int64] = compute_convex_hull(points)
+    triangles: NDArray[np.int64] = compute_triangles(points)
     V = range(len(triangles))
-    ta = triangles_adjacency_list(triangles, points)
-    mode= kwargs.get('mode', 0)
+    ta: list[list[list[int]]] = triangles_adjacency_list(triangles, points)
+    mode = cast(int, kwargs.get('mode', 0))
 
 
     for i in range(len(CH)):
@@ -88,7 +113,7 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
         print("Building model... \nDefining variables...")
 
     # Consideramos xij la variable de arcos dirigidos
-    x = { (i, j): model.addVar(vtype=GRB.BINARY, name=f"x_{i}_{j}") for i in N for j in N  if i != j }
+    x: ArcVarMap = {(i, j): model.addVar(vtype=GRB.BINARY, name=f"x_{i}_{j}") for i in N for j in N if i != j}
 
     
 
@@ -97,17 +122,19 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
     # --- VARIABLES DE ELIMINACIÓN DE SUBTOURS ---
     if subtour == 0:
         # 0: Single-commodity flow (Flujo de un solo producto)
-        f = {(i,j) : model.addVar(vtype=GRB.CONTINUOUS, lb = 0, name=f"f_{i}_{j}") for i in N for j in N if i != j }
+        f: ArcVarMap = {(i, j): model.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"f_{i}_{j}") for i in N for j in N if i != j}
     
     elif subtour == 1:
         # 1: Miller-Tucker-Zemlin (MTZ)
-        u = {i : model.addVar(vtype=GRB.CONTINUOUS, lb=1, ub=len(N)-1, name=f"u_{i}") for i in N if i != 0}
+        u: dict[int, gp.Var] = {i: model.addVar(vtype=GRB.CONTINUOUS, lb=1, ub=len(N)-1, name=f"u_{i}") for i in N if i != 0}
         
     elif subtour == 2:
         # 2: Multi-commodity flow (Flujo multiproducto)
         # f_mcf[k, i, j] es el flujo del commodity k que viaja por el arco (i,j)
-        f_mcf = {(k, i, j): model.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"fmcf_{k}_{i}_{j}") 
-                 for k in N if k != 0 for i in N for j in N if i != j}
+        f_mcf: McfVarMap = {
+            (k, i, j): model.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"fmcf_{k}_{i}_{j}")
+            for k in N if k != 0 for i in N for j in N if i != j
+        }
 
     # --- LIMPIEZA DE ARCOS EN LA ENVOLVENTE CONVEXA (CH) ---
     for i in range(len(CH)):
@@ -141,15 +168,15 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
 
     
     # Definimos y e yp variables para los triangulos
-    y = { (i) : model.addVar(vtype=GRB.CONTINUOUS, lb = 0, name=f"y_{i}") for i in V}
-    yp = { (i) : model.addVar(vtype=GRB.CONTINUOUS, lb = 0, name=f"yp_{i}") for i in V}
+    y: dict[int, gp.Var] = {i: model.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"y_{i}") for i in V}
+    yp: dict[int, gp.Var] = {i: model.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"yp_{i}") for i in V}
     
     
     # Definimos zij variables para diagonales
     if obj == 3:
 
         if mode == 0:
-            z = { (i,j) : model.addVar(vtype=GRB.CONTINUOUS, name=f"z_{i}_{j}") for i in N for j in N  if i != j and ((i not in CH) or (j not in CH)) }
+            z: ArcVarMap = {(i, j): model.addVar(vtype=GRB.CONTINUOUS, name=f"z_{i}_{j}") for i in N for j in N if i != j and ((i not in CH) or (j not in CH))}
             for i,j in z.keys():
                 if i < j and (j,i) in z.keys():
                     model.addConstr( z[i,j] == z[j,i] , name=f"diagonal_selection_{i}_{j}")
@@ -158,7 +185,7 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
                 model.addConstr(z[i,j] == gp.quicksum(y[t] for t in ta[i][j]) - x[i,j] , name=f"diagonal_triangle_relation_{i}_{j}") #Equivalente a (20)
 
         elif mode == 1:
-            zp = { (i,j) : model.addVar(vtype=GRB.CONTINUOUS, name=f"zp_{i}_{j}") for i in N for j in N  if i != j and ((i not in CH) or (j not in CH)) }
+            zp: ArcVarMap = {(i, j): model.addVar(vtype=GRB.CONTINUOUS, name=f"zp_{i}_{j}") for i in N for j in N if i != j and ((i not in CH) or (j not in CH))}
             for i,j in zp.keys():
                 if i < j and (j,i) in zp.keys():
                     model.addConstr( zp[i,j] == zp[j,i] , name=f"diagonal_selection_{i}_{j}")
@@ -169,7 +196,7 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
 
     
 
-    at = [np.abs(signed_area(points[tri[0]], points[tri[1]], points[tri[2]])) for tri in triangles]
+    at: list[float] = [np.abs(signed_area(points[tri[0]], points[tri[1]], points[tri[2]])) for tri in triangles]
 
     # ----- OBJECTIVE FUNCTION -----
     
@@ -185,7 +212,7 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
     if obj == 0:
         if verbose:
             print(f"Using Fekete objective function with mode {mode}")
-        c = cost_function_area(points, x.keys(), mode=mode)
+        c: dict[Arc, float] = cost_function_area(points, x.keys(), mode=mode)
 
         model.setObjective(gp.quicksum(c[i] * x[i] for i in x.keys()), optimizer)
         
@@ -201,10 +228,10 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
         if verbose:
             print("Using Diagonals objective function")
         
-        signed_at = [(signed_area(points[tri[0]], points[tri[1]], points[tri[2]])) for tri in triangles]
-        d = {(i,j):np.min([(signed_at[t]) for t in ta[i][j]]) for i,j in x.keys()  }
+        signed_at: list[float] = [signed_area(points[tri[0]], points[tri[1]], points[tri[2]]) for tri in triangles]
+        d: dict[Arc, float] = {(i, j): np.min([signed_at[t] for t in ta[i][j]]) for i, j in x.keys()}
         
-        td = {}
+        td: dict[tuple[int, int, int], float] = {}
         for idx, tri in enumerate(triangles):
             print(tri)
             td[tuple(tri)] = 3*signed_at[idx] - d[(tri[0]), (tri[1])] - d[(tri[1]), (tri[2])] - d[(tri[2]), (tri[0])]
@@ -333,6 +360,19 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
             if ((i not in CH) or (j not in CH)) and i !=j and (i,j) in x.keys():
                 model.addConstr( x[j,i] <= gp.quicksum(yp[t] for t in ta[i][j]) ) #(25)
                 model.addConstr( 1 - x[i,j] >= gp.quicksum(yp[t] for t in ta[i][j]) ) #(25)
+
+    # ----------------------------------------------------
+    # --- Restricciones de Prueba extraidas de benders ---
+    # ----------------------------------------------------
+
+
+    #model, constrains = restricciones_semiplanoV2(model, points, CH)
+    #c = cost_function_area(points, x)
+    #model = inyectar_cortes_knapsack_locales(model, points, c)
+
+    #model = inyectar_cliques_de_cruce(model, points)
+
+
 
     if verbose:
         print("Constraints added. \nOptimizing model...")

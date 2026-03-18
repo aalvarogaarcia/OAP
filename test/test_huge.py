@@ -1,12 +1,8 @@
-from utils.model_stats import *
-from utils.utils import *
+from utils.model_stats import get_model_stats, save_results_excel
 from models import build_and_solve_model
 import glob
-import os
 import time
-import networkx as nx
 
-"""
 instance = "instance/euro-night-0000010.instance"
 #model.write("Minimal_Proof.lp")
 model =build_and_solve_model(instance, verbose=True, plot=True, maximize=False, time_limit=600, sum_constrain=True, benders=False)
@@ -28,7 +24,6 @@ print(f"  > Continuas: {model_lp.number_of_continuous_variables}")
 model_lp.solve()
 lp, gap, ip, elapsed_time, nodes = get_model_stats(model)
 print(f"Resultados: LP={lp}, Gap={gap}%, IP={ip}, Time={elapsed_time}s, Nodes={nodes}")
-"""
 
 
 if __name__ == "__main__":

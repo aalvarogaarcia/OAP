@@ -4,13 +4,16 @@ import gurobipy as gp
 from gurobipy import GRB  # Importamos GRB para evaluar los estados del modelo
 
 # Asegúrate de importar tus funciones correctamente
-from models.benders import optimize_master_LP, optimize_master_MILP
+from models.benders import optimize_master_LP
 from models.gurobi import build_and_solve_model
-from utils.model_stats import get_model_stats, get_Objval_lp, get_ObjVal_int, get_x_values
 
-def cargar_resultados_esperados(csv_path):
+ExpectedLpGap = tuple[float | None, float | None]
+ResultValue = str | float | None
+ResultRow = dict[str, ResultValue]
+
+def cargar_resultados_esperados(csv_path: str) -> dict[str, ExpectedLpGap]:
     """Lee el CSV y devuelve un diccionario {instancia: (ip_min, ip_max)}"""
-    resultados = {}
+    resultados: dict[str, ExpectedLpGap] = {}
     with open(csv_path, mode='r', encoding='utf-8') as f:
         reader = csv.DictReader(f)
         for row in reader:
@@ -21,7 +24,15 @@ def cargar_resultados_esperados(csv_path):
             resultados[nombre] = (ip_min, ip_max)
     return resultados
 
-def evaluar_modelo(instancia, obj_gur, obj_ben, expected, mod_gur, mod_ben, test_type):
+def evaluar_modelo(
+    instancia: str,
+    obj_gur: float | None,
+    obj_ben: float | None,
+    expected: float | None,
+    mod_gur: gp.Model,
+    mod_ben: gp.Model,
+    test_type: str,
+) -> ResultRow:
     """Evalúa los resultados de ambos modelos y devuelve un diccionario con el registro."""
     status = "Desconocido"
     
@@ -34,10 +45,10 @@ def evaluar_modelo(instancia, obj_gur, obj_ben, expected, mod_gur, mod_ben, test
         print(f"     ⏳ {test_type}: Límite de tiempo alcanzado. Registrado para comprobar luego.")
     # Si no hay timeout, comprobamos discrepancias
     elif obj_gur != obj_ben:
-        status = f"Error: Gurobi != Benders"
+        status = "Error: Gurobi != Benders"
         print(f"     ❌ {test_type} FALLO: Gurobi ({obj_gur}) != Benders ({obj_ben})")
     elif expected is not None and obj_gur is not None and int(obj_gur) != expected:
-        status = f"Error: Calculado != PDF"
+        status = "Error: Calculado != PDF"
         print(f"     ❌ {test_type} FALLO: Calculado ({obj_gur}) != PDF ({expected})")
     else:
         status = "✅ OK"
@@ -52,12 +63,16 @@ def evaluar_modelo(instancia, obj_gur, obj_ben, expected, mod_gur, mod_ben, test
         "Status": status
     }
 
-def test_instancia(instance_path, expected_min, expected_max):
+def test_instancia(
+    instance_path: str,
+    expected_min: float | None,
+    expected_max: float | None,
+) -> list[ResultRow]:
     """Ejecuta los modelos para una instancia y devuelve sus resultados."""
     nombre_instancia = os.path.basename(instance_path)
     print(f"\n[{nombre_instancia}] Iniciando pruebas...")
     
-    resultados_instancia = []
+    resultados_instancia: list[ResultRow] = []
 
     # --- PRUEBA MINAREA (maximize = False) ---
     if expected_min is not None:
@@ -85,7 +100,7 @@ def test_instancia(instance_path, expected_min, expected_max):
 
     return resultados_instancia
 
-def guardar_resultados_csv(resultados, output_csv):
+def guardar_resultados_csv(resultados: list[ResultRow], output_csv: str) -> None:
     """Guarda la lista de resultados en un archivo CSV."""
     if not resultados:
         return
@@ -97,7 +112,7 @@ def guardar_resultados_csv(resultados, output_csv):
         writer.writerows(resultados)
     print(f"\n📁 Resultados guardados exitosamente en: {output_csv}")
 
-def ejecutar_bateria_tests(folder_path, csv_path, output_csv_path):
+def ejecutar_bateria_tests(folder_path: str, csv_path: str, output_csv_path: str) -> None:
     """Recorre la carpeta, evalúa las instancias y exporta resultados."""
     if not os.path.exists(csv_path):
         print(f"Error: No se encuentra el archivo CSV base en {csv_path}")
@@ -112,7 +127,7 @@ def ejecutar_bateria_tests(folder_path, csv_path, output_csv_path):
 
     print(f"Se encontraron {len(archivos_instancia)} instancias en la carpeta. Comenzando evaluación...")
     
-    todos_los_resultados = []
+    todos_los_resultados: list[ResultRow] = []
     instancias_evaluadas = 0
 
     for archivo in archivos_instancia:
@@ -143,12 +158,12 @@ def ejecutar_bateria_tests(folder_path, csv_path, output_csv_path):
     guardar_resultados_csv(todos_los_resultados, output_csv_path)
 
 
-def diagnose_benders_gap(instance_path):
+def diagnose_benders_gap(instance_path: str) -> None:
     # 1. Obtén la solución fraccionaria de tu Maestro de Benders (132B)
     benders_lp = optimize_master_LP(instance_path, verbose=False, plot=False, maximize=True, time_limit=300, 
                              save_cuts=False, crosses_constrain=False) # Tu código de Benders actual
     
-    x_benders = {k: v.X for k, v in benders_lp._x.items()}
+    x_benders: dict[tuple[int, int], float] = {k: v.X for k, v in benders_lp._x.items()}
     
     # 2. Construye el Modelo Compacto (el que da 127B y 0% gap)
     compact_model = build_and_solve_model(instance_path, relaxed=True,verbose=False, plot=False, maximize=True, time_limit=300,

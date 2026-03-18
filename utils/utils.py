@@ -3,18 +3,15 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.spatial import ConvexHull
 from itertools import combinations
-import time
-import glob  
 import matplotlib.pyplot as plt
 import networkx as nx
 import gurobipy as gp
-from gurobipy import GRB
-import json
 import os
 import csv
+from collections.abc import Iterable
 
 
-def read_data(file_path):
+def read_data(file_path: str) -> list[str]:
     """Reads data from a file and returns it as a list of lines."""
     with open(file_path, 'r') as file:
         data = file.readlines()
@@ -93,7 +90,7 @@ def compute_convex_hull_area(points: NDArray[np.int64]) -> float:
     area = 0.5 * np.abs(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1)))
     return float(area)
 
-def orientation_2d(a: tuple, b: tuple, c: tuple) -> int:
+def orientation_2d(a: tuple[int, int], b: tuple[int, int], c: tuple[int, int]) -> int:
     """Orientation sign for coordinates (x,y) tuples.
     Returns 0 for collinear, 1 for clockwise, -1 for counterclockwise.
     """
@@ -102,7 +99,12 @@ def orientation_2d(a: tuple, b: tuple, c: tuple) -> int:
         return 0
     return -1 if det > 0 else 1
 
-def contains_proper(p1: tuple, q1: tuple, p2: tuple, q2: tuple) -> bool:
+def contains_proper(
+    p1: tuple[int, int],
+    q1: tuple[int, int],
+    p2: tuple[int, int],
+    q2: tuple[int, int],
+) -> bool:
     """Return True if segments p1q1 and p2q2 intersect properly (strictly in interiors).
     Excludes cases where they only touch at endpoints or are collinear/overlapping.
     Points are (x, y) tuples.
@@ -130,7 +132,8 @@ def compute_triangles(points: NDArray[np.int64]) -> NDArray[np.int64]:
     """Computes valid triangles from a set of points."""
     n = len(points)
 
-    if n < 3: return np.empty((0, 3), dtype=np.int64)
+    if n < 3:
+        return np.empty((0, 3), dtype=np.int64)
     
     hull = compute_convex_hull(points)
     hull_edges = np.sort(np.array([(hull[i], hull[(i + 1) % len(hull)]) for i in range(len(hull))], dtype=np.int64), axis=1)
@@ -157,7 +160,6 @@ def compute_triangles(points: NDArray[np.int64]) -> NDArray[np.int64]:
         # Check if triangle has a convex hull edge oriented clockwise and adjust
         # Hull edges are oriented CCW: hull[i] -> hull[(i+1) % len(hull)]
         for h_idx in range(len(hull)):
-            hull_edge_ccw = (hull[h_idx], hull[(h_idx + 1) % len(hull)])
             hull_edge_cw = (hull[(h_idx + 1) % len(hull)], hull[h_idx])
             
             # Check all three edges of the triangle
@@ -209,7 +211,7 @@ def compute_triangles(points: NDArray[np.int64]) -> NDArray[np.int64]:
         
 def segments_intersect(p1: NDArray[np.int64], p2: NDArray[np.int64], p3: NDArray[np.int64], p4: NDArray[np.int64]) -> bool:
     """Checks if two line segments (p1-p2) and (p3-p4) intersect, excluding endpoint-only intersections."""
-    def ccw(A, B, C):
+    def ccw(A: NDArray[np.int64], B: NDArray[np.int64], C: NDArray[np.int64]) -> np.bool_:
         return (C[1] - A[1]) * (B[0] - A[0]) > (B[1] - A[1]) * (C[0] - A[0])
     
     # Check if segments share any endpoints
@@ -326,7 +328,11 @@ def compute_crossing_edges(triangles: NDArray[np.int64], points: NDArray[np.int6
         return np.empty((0, 4), dtype=np.int64)
 
     
-def are_triangles_incompatible(t1_coords: tuple, t2_coords: tuple, points: NDArray[np.int64]) -> bool:
+def are_triangles_incompatible(
+    t1_coords: tuple[int, int, int],
+    t2_coords: tuple[int, int, int],
+    points: NDArray[np.int64],
+) -> bool:
     """Coordinate-based incompatibility test between two triangles.
     
     Two triangles are incompatible ONLY if their edges properly intersect
@@ -386,10 +392,14 @@ def incompatible_triangles(triangles: NDArray[np.int64], points: NDArray[np.int6
     
     return np.array(incompatible_pairs, dtype=np.int64) if incompatible_pairs else np.empty((0, 2), dtype=np.int64)
 
-def signed_area(p1, p2, p3):
+def signed_area(p1: NDArray[np.int64], p2: NDArray[np.int64], p3: NDArray[np.int64]) -> float:
     return 0.5 * ((p2[0] - p1[0]) * (p3[1] - p1[1]) - (p2[1] - p1[1]) * (p3[0] - p1[0]))
 
-def cost_function_area(points: NDArray[np.int64], x_array: NDArray[np.int64], mode:int = 0) -> float:
+def cost_function_area(
+    points: NDArray[np.int64],
+    x_array: Iterable[tuple[int, int]],
+    mode: int = 0,
+) -> dict[tuple[int, int], float]:
     """Calculates the cost function based on points and possible selected edges."""
     c = {}
     if mode == 0:
@@ -428,7 +438,7 @@ def cost_function_area(points: NDArray[np.int64], x_array: NDArray[np.int64], mo
 
     return c
 
-def triangles_area(triangles: NDArray[np.int64], points) -> float:
+def triangles_area(triangles: NDArray[np.int64], points: NDArray[np.int64]) -> list[float]:
     # Calculate signed area for each triangle
     triangle_areas = []
     for tri in triangles:
@@ -437,7 +447,7 @@ def triangles_area(triangles: NDArray[np.int64], points) -> float:
     return triangle_areas
 
 
-def triangles_adjacency_list(triangles: NDArray[np.int64], p: NDArray) -> dict[int, list[int]]:
+def triangles_adjacency_list(triangles: NDArray[np.int64], p: NDArray[np.int64]) -> list[list[list[int]]]:
     ta_arc = []
 
     for i in range(len(p)):
@@ -457,7 +467,10 @@ def triangles_adjacency_list(triangles: NDArray[np.int64], p: NDArray) -> dict[i
             ta_arc[i][k].append(id)
     return ta_arc
 
-def minimal_triangle_adjency_list(triangles: NDArray[np.int64], p: NDArray) -> dict[int, list[int]]:
+def minimal_triangle_adjency_list(
+    triangles: NDArray[np.int64],
+    p: NDArray[np.int64],
+) -> dict[tuple[int, int], list[int]]:
     ta_arc = {}
 
     for id, t in enumerate(triangles):
@@ -479,13 +492,12 @@ def minimal_triangle_adjency_list(triangles: NDArray[np.int64], p: NDArray) -> d
     return ta_arc
 
 
-def write_prefile(file_path:str):
+def write_prefile(file_path: str) -> None:
     """Writes the computed geometric structures to a .pre file.
     
     Reads an instance file, computes convex hull, triangles, crossing segments,
     and incompatible triangle pairs, then writes results to a .pre file.
     """
-    import os
     
     # Read instance file
     points = read_indexed_instance(file_path)
@@ -501,18 +513,13 @@ def write_prefile(file_path:str):
     # Generate output filename: nXsY.pre where X=num points, Y=seed from input filename
     base_name = os.path.splitext(os.path.basename(file_path))[0]
     
-    # Extract seed from filename (last number before .instance)
-    # Format expected: something-<seed>.instance -> extract <seed>
-    parts = base_name.split('-')
-    seed = parts[-1] if parts else '0'
-    
-    out_file = os.path.join("outputs", "Pre-files", f"{base_name.split(".")[0]}.pre")
+    out_file = os.path.join("outputs", "Pre-files", f"{base_name.split('.')[0]}.pre")
     
     # Write .pre file
     with open(out_file, 'w') as f:
         # Header with statistics
         f.write(f"# Preprocesing information of intance {base_name}\n")
-        f.write(f"# Points\tConvex_Hull\tTriangles\tCrossing_segments\tIncompatible_Triangles\tTime\n")
+        f.write("# Points\tConvex_Hull\tTriangles\tCrossing_segments\tIncompatible_Triangles\tTime\n")
         f.write(f"{n_points}\t{len(hull)}\t{len(triangles)}\t{len(crossing)}\t{len(incompatible)}\t0.0\t0.0\n")
         
         # POINTS section
@@ -556,7 +563,7 @@ def is_colineal(p1: NDArray[np.int64], p2: NDArray[np.int64], p3: NDArray[np.int
 
 
 
-def plot_solution(model: gp.Model, title: str = "Solution"):
+def plot_solution(model: gp.Model, title: str = "Solution") -> None:
     """Plots the solution of the model by drawing the tour."""
 
     x = model._x_results
@@ -606,7 +613,7 @@ def plot_solution(model: gp.Model, title: str = "Solution"):
 
 
 
-def extract_metric_to_csv(input_tsv: str, output_csv: str, metric: str = "LPvalue"):
+def extract_metric_to_csv(input_tsv: str, output_csv: str, metric: str = "LPvalue") -> None:
     """
     Lee un archivo TSV y crea un CSV con la instancia y los valores MIN/MAX de una métrica.
     
@@ -650,3 +657,275 @@ def extract_metric_to_csv(input_tsv: str, output_csv: str, metric: str = "LPvalu
         print(f"❌ Error: No se encontró el archivo '{input_tsv}'.")
     except Exception as e:
         print(f"❌ Ocurrió un error inesperado: {e}")
+
+
+def restricciones_semiplano(
+    model: gp.Model,
+    points: NDArray[np.int64],
+    CH: NDArray[np.int64],
+) -> tuple[gp.Model, list[gp.Constr]]:
+    """Agrega restricciones de semiplano relacionado a CH al modelo para cada arista."""
+    
+    # 1. FORMA SEGURA: Filtrar índices, no coordenadas.
+    A_pp = [i for i in range(len(points)) if i not in CH]
+    
+    constrains = []
+    for i in A_pp:
+        for j in CH: 
+            # 2. CHECK DE EXISTENCIA OPTIMIZADO: Hacerlo antes de iterar k.
+            # En Gurobi, es infinitamente más rápido buscar la tupla en el diccionario de variables
+            if (i, j) not in model._x:
+                continue
+                
+            semiplano_izquierdo_limpio = True
+
+            for k in A_pp:
+                if k == i:
+                    continue
+                
+                # Calcular el determinante geométrico
+                x_i, y_i = points[i]
+                x_j, y_j = points[j]
+                x_k, y_k = points[k]
+                
+                D = (x_j - x_i) * (y_k - y_i) - (y_j - y_i) * (x_k - x_i)
+                
+                if D > 0: # El nodo interno k está a la izquierda
+                    semiplano_izquierdo_limpio = False
+                    break # 3. EARLY EXIT: ¡Ya falló! No necesitamos revisar más puntos.
+            
+            # (Eliminado el bloque "if k == i:" problemático que estaba aquí)
+
+            if semiplano_izquierdo_limpio:
+                index = np.where(CH == j)[0][0]
+                j_siguiente = CH[(index + 1) % len(CH)]
+                
+                # Buena práctica: comprobar también que la variable destino exista
+                if (j, j_siguiente) in model._x:
+                    constrains.append(
+                        model.addConstr(
+                            model._x[i,j] <= model._x[j, j_siguiente],
+                            name=f"semiplano_{i}_{j}"
+                    ))
+    
+    return model, constrains
+
+
+def restricciones_semiplanoV2(
+    model: gp.Model,
+    points: NDArray[np.int64],
+    CH: NDArray[np.int64],
+) -> tuple[gp.Model, list[gp.Constr]]:
+
+    # 1. FORMA SEGURA: Filtrar índices, no coordenadas.
+    A_pp = [i for i in range(len(points)) if i not in CH]
+    
+    constrains = []
+    for i in A_pp:
+
+        for j in CH:    
+            if (i, j) not in model._x:
+                continue
+            
+            # 1. Recopilar TODOS los puntos internos que caen en el semiplano izquierdo
+            S_left = []
+            for k in A_pp:
+                if k == i:
+                    continue
+
+                x_i, y_i = points[i]
+                x_j, y_j = points[j]
+                x_k, y_k = points[k]
+
+                D_k = (x_j - x_i) * (y_k - y_i) - (y_j - y_i) * (x_k - x_i)
+
+                if D_k > 0: # El punto k está atrapado en el semiplano izquierdo
+                    S_left.append(k)
+
+            # Encontrar el siguiente nodo en la Envolvente Convexa
+            idx_j = np.where(CH == j)[0][0]
+            j_siguiente = CH[(idx_j + 1) % len(CH)]
+
+
+            # 2. BIFURCACIÓN DE LA LÓGICA
+
+            if len(S_left) == 0:
+                # 1. Encontramos la posición del nodo j en la Envolvente Convexa
+                idx_j = np.where(CH == j)[0][0]
+                nodo_actual_ch = j
+                
+                # 2. Recorremos la CH en orden antihorario a partir de j
+                for step in range(1, len(CH)):
+                    idx_siguiente = (idx_j + step) % len(CH)
+                    nodo_siguiente_ch = CH[idx_siguiente]
+                    
+                    # 3. Comprobamos si 'nodo_siguiente_ch' SIGUE estando a la izquierda de la línea i->j infinita
+                    x_i, y_i = points[i]
+                    x_j, y_j = points[j]
+                    x_sig, y_sig = points[nodo_siguiente_ch]
+                    
+                    D_sig = (x_j - x_i) * (y_sig - y_i) - (y_j - y_i) * (x_sig - x_i)
+                    
+                    if D_sig > 0: # El nodo de la CH sigue estando en el semiplano izquierdo
+                        
+                        if (nodo_actual_ch, nodo_siguiente_ch) in model._x:
+                            constrains.append(
+                                model.addConstr(
+                                    model._x[i, j] <= model._x[nodo_actual_ch, nodo_siguiente_ch],
+                                    name=f"semiplano_cadena_{i}_{j}_fuerza_{nodo_actual_ch}_{nodo_siguiente_ch}"
+                                )
+                            )
+                        # Avanzamos en la cadena
+                        nodo_actual_ch = nodo_siguiente_ch
+                    
+                    else:
+                        # En cuanto un nodo de la CH cruza al semiplano derecho, 
+                        # el polígono ya tiene libertad geométrica. Rompemos la cadena.
+                        break
+            else:
+                # --- CASO B: PSEUDO-VACÍO (Bolsillo con puntos) ---
+                # La obligación se reparte: o vas por el perímetro, o visitas a los puntos atrapados
+                expr_escape = gp.LinExpr()
+
+                # Vía de escape 1: El perímetro
+                if (j, j_siguiente) in model._x:
+                    expr_escape.addTerms(1.0, model._x[j, j_siguiente])
+
+                # Vía de escape 2: Rescatar a los puntos internos atrapados
+                for k in S_left:
+                    if (j, k) in model._x:
+                        expr_escape.addTerms(1.0, model._x[j, k])
+
+                # Añadir la restricción relajada
+                constrains.append(
+                    model.addConstr(
+                        model._x[i, j] <= expr_escape,
+                        name=f"bolsillo_{i}_{j}_soporta_{len(S_left)}_puntos"
+                    )
+                )
+
+    return model, constrains
+
+def inyectar_cortes_knapsack_locales(
+    model: gp.Model,
+    points: NDArray[np.int64],
+    pesos_obj: dict[tuple[int, int], float],
+) -> gp.Model:
+    """
+    Inyecta restricciones de mochila que limitan la contribución fraccionaria máxima
+    de las aristas incidentes a cada nodo.
+    """
+    num_nodos = len(points)
+    cortes_añadidos = 0
+    
+    for i in range(num_nodos):
+        
+        # 1. Encontrar la mejor PAREJA de aristas VÁLIDA para el nodo i
+        max_beneficio_real = 0.0
+        
+        # Evaluamos todas las posibles parejas de vecinos j1 y j2
+        for j1 in range(num_nodos):
+            if j1 == i or (i, j1) not in model._x:
+                continue
+                
+            for j2 in range(j1 + 1, num_nodos):
+                if j2 == i or (i, j2) not in model._x:
+                    continue
+                    
+                # 2. Condición Geométrica: ¿Es esta pareja legal?
+                # Usamos tu lógica de triángulo vacío. Si el triángulo (j1, i, j2) 
+                # contiene algún punto 'k', esta pareja es INVÁLIDA y la ignoramos.
+                es_pareja_legal = True
+                for k in range(num_nodos):
+                    if k in [i, j1, j2]:
+                        continue
+                    if point_in_triangle(points[k], points[j1], points[i], points[j2]):
+                        es_pareja_legal = False
+                        break
+                
+                # 3. Si es legal, calculamos su beneficio conjunto
+                if es_pareja_legal:
+                    # El beneficio es la suma de los coeficientes de ambas aristas
+                    beneficio_pareja = pesos_obj[i, j1] + pesos_obj[i, j2]
+                    if beneficio_pareja > max_beneficio_real:
+                        max_beneficio_real = beneficio_pareja
+                        
+        # 4. CREAR LA RESTRICCIÓN KNAPSACK PARA EL NODO 'i'
+        # La suma de las fracciones elegidas multiplicadas por su peso no puede superar el tope
+        expr_knapsack = gp.LinExpr()
+        
+        for j in range(num_nodos):
+            if j != i and (i, j) in model._x:
+                # Sumamos W_ij * x_ij
+                expr_knapsack.addTerms(pesos_obj[i, j], model._x[i, j])
+                
+        # Añadir al modelo
+        if expr_knapsack.size() > 0:
+            model.addConstr(
+                expr_knapsack <= max_beneficio_real,
+                name=f"knapsack_local_nodo_{i}"
+            )
+            cortes_añadidos += 1
+            
+    print(f"Inyectados {cortes_añadidos} Cortes Knapsack Locales.")
+    return model
+
+
+def inyectar_cliques_de_cruce(model: gp.Model, points: NDArray[np.int64]) -> gp.Model:
+    """
+    Busca grupos de arcos que se cruzan TODOS entre sí (Cliques) 
+    y restringe que como máximo 1 de ellos puede estar activo.
+    """
+    print("Construyendo grafo de intersecciones para Cliques...")
+    
+    # 1. Recopilar todas las variables (aristas) válidas del modelo
+    aristas = []
+    for i in range(len(points)):
+        for j in range(len(points)):
+            if (i, j) in model._x:
+                # Solo guardamos una dirección i < j para evitar duplicados en el cruce
+                if i < j: 
+                    aristas.append((i, j))
+
+    # 2. Construir el Grafo de Intersecciones
+    G_cruces = nx.Graph()
+    G_cruces.add_nodes_from(aristas)
+    
+    # Evaluar qué pares de aristas se cruzan
+    # (Asume que tienes una función 'se_cruzan(p1, p2, p3, p4)' que devuelve True/False)
+    for idx, e1 in enumerate(aristas):
+        for e2 in aristas[idx+1:]:
+            # Si comparten un nodo, no se "cruzan" en el sentido estricto (forman un ángulo)
+            if e1[0] in e2 or e1[1] in e2:
+                continue
+                
+            p1, p2 = points[e1[0]], points[e1[1]]
+            p3, p4 = points[e2[0]], points[e2[1]]
+            
+            if segments_intersect(p1, p2, p3, p4):
+                G_cruces.add_edge(e1, e2)
+                
+    # 3. Encontrar Cliques Maximales
+    # find_cliques encuentra grupos maximales donde todos los nodos están conectados
+    cliques = list(nx.find_cliques(G_cruces))
+    
+    cortes_añadidos = 0
+    # 4. Añadir las restricciones al modelo
+    for clique in cliques:
+        # Solo nos interesan los cliques de tamaño 3 o más. 
+        # (Los de tamaño 2 ya están cubiertos por tu modelo base xA + xB <= 1)
+        if len(clique) >= 3:
+            expr_clique = gp.LinExpr()
+            
+            for e in clique:
+                # Añadir la variable en ambas direcciones si tu modelo es dirigido
+                if e in model._x:
+                    expr_clique.addTerms(1.0, model._x[e[0], e[1]])
+                if (e[1], e[0]) in model._x:
+                    expr_clique.addTerms(1.0, model._x[e[1], e[0]])
+                
+            model.addConstr(expr_clique <= 1, name=f"clique_cruce_{cortes_añadidos}")
+            cortes_añadidos += 1
+            
+    print(f"¡Inyectados {cortes_añadidos} Cortes de Clique de Cruces!")
+    return model

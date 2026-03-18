@@ -3,22 +3,40 @@
 from gurobipy import GRB
 import gurobipy as gp
 import os
+from typing import Literal, cast
+
 from utils.utils import plot_solution
 
-from models.benders.farkas import generate_farkas_cut, generate_farkas_cut_y, generate_farkas_cut_yp
-from models.benders.pi import generate_pi_cut, generate_pi_cut_y, generate_pi_cut_yp
+from models.benders.farkas import (
+    FarkasConstrsY,
+    FarkasConstrsYP,
+    generate_farkas_cut,
+    generate_farkas_cut_y,
+    generate_farkas_cut_yp,
+)
+from models.benders.pi import (
+    PiConstrsY,
+    PiConstrsYP,
+    generate_pi_cut,
+    generate_pi_cut_y,
+    generate_pi_cut_yp,
+)
 from models.benders.master import build_master_problem
 from models.benders.utils import update_subproblem_rhs
 
 
-def benders_callback(model, where):
+Arc = tuple[int, int]
+ArcSolution = dict[Arc, float]
+
+
+def benders_callback(model: gp.Model, where: int) -> None:
     """
     Callback de Benders. Se ejecuta cuando el Maestro encuentra una solución entera (MIPSOL).
     Verifica la factibilidad en los DOS subproblemas independientes y añade cortes Lazy si es necesario.
     """
     if where == GRB.Callback.MIPSOL:
         # 1. Obtener la solución actual del Maestro (x barra)
-        x_sol = model.cbGetSolution(model._x)
+        x_sol = cast(ArcSolution, model.cbGetSolution(model._x))
 
         update_subproblem_rhs(model, x_sol)
 
@@ -27,18 +45,29 @@ def benders_callback(model, where):
         
         TOL = 1e-10
         if model._benders_method == "pi":
+            constrs_y = cast(PiConstrsY, model._constrs_y)
+            constrs_yp = cast(PiConstrsYP, model._constrs_yp)
+
             if model._sub_y.ObjVal > TOL:
-                cut_y_expr, cut_y_val, _ = generate_pi_cut_y(model._constrs_y, x_sol, model, TOL)
+                cut_y_expr, cut_y_val, _ = generate_pi_cut_y(constrs_y, x_sol, model, TOL)
                 if cut_y_val > TOL:
                     model.cbLazy(cut_y_expr <= 0)
 
             if model._sub_yp.ObjVal > TOL:
-                cut_yp_expr, cut_yp_val, _ = generate_pi_cut_yp(model._constrs_yp, x_sol, model, TOL)
+                cut_yp_expr, cut_yp_val, _ = generate_pi_cut_yp(constrs_yp, x_sol, model, TOL)
                 if cut_yp_val > TOL:
                     model.cbLazy(cut_yp_expr <= 0)
 
         elif model._benders_method == "farkas":
-            generate_farkas_cut(model._sub_y, model._sub_yp, model._constrs_y, model._constrs_yp, x_sol, model, TOL)
+            generate_farkas_cut(
+                model._sub_y,
+                model._sub_yp,
+                cast(FarkasConstrsY, model._constrs_y),
+                cast(FarkasConstrsYP, model._constrs_yp),
+                x_sol,
+                model,
+                TOL,
+            )
 
         else:
             print("Método de Benders desconocido en callback. Por favor, elige 'farkas' o 'pi'.")
@@ -47,7 +76,7 @@ def benders_callback(model, where):
     if where == GRB.Callback.MIPNODE:
         
         if model.cbGet(GRB.Callback.MIPNODE_STATUS) == GRB.OPTIMAL:
-            x_sol = model.cbGetNodeRel(model._x)
+            x_sol = cast(ArcSolution, model.cbGetNodeRel(model._x))
 
             update_subproblem_rhs(model, x_sol)
 
@@ -57,19 +86,41 @@ def benders_callback(model, where):
             TOL = 1e-10
 
             if model._benders_method == "pi":
-                generate_pi_cut(model._constrs_y, model._constrs_yp, x_sol, model, TOL)  
+                generate_pi_cut(
+                    cast(PiConstrsY, model._constrs_y),
+                    cast(PiConstrsYP, model._constrs_yp),
+                    x_sol,
+                    model,
+                    TOL,
+                )
 
             elif model._benders_method == "farkas":
-                generate_farkas_cut(model._sub_y, model._sub_yp, model._constrs_y, model._constrs_yp, x_sol, model, TOL)
+                generate_farkas_cut(
+                    model._sub_y,
+                    model._sub_yp,
+                    cast(FarkasConstrsY, model._constrs_y),
+                    cast(FarkasConstrsYP, model._constrs_yp),
+                    x_sol,
+                    model,
+                    TOL,
+                )
 
             else:
                 print("Método de Benders desconocido en callback. Por favor, elige 'farkas' o 'pi'.")
 
 
 
-def optimize_master_MILP(instance_path: str, verbose: bool = False, plot: bool = False, 
-                         time_limit: int = 7200, maximize: bool = True, save_cuts: bool = False,
-                         crosses_constrain: bool = False, benders_method: str = "farkas", sum_constrain: bool = True) -> gp.Model:
+def optimize_master_MILP(
+    instance_path: str,
+    verbose: bool = False,
+    plot: bool = False,
+    time_limit: int = 7200,
+    maximize: bool = True,
+    save_cuts: bool = False,
+    crosses_constrain: bool = False,
+    benders_method: Literal["farkas", "pi"] = "farkas",
+    sum_constrain: bool = True,
+) -> gp.Model:
     """
     Construye y resuelve el Problema Maestro (PM) usando Descomposición de Benders.
     """
@@ -109,7 +160,7 @@ def optimize_master_MILP(instance_path: str, verbose: bool = False, plot: bool =
 
 
     model.optimize(benders_callback)
-    x = model._x
+    x: dict[Arc, gp.Var] = model._x
 
 
     # --- Resultados ---
@@ -129,9 +180,17 @@ def optimize_master_MILP(instance_path: str, verbose: bool = False, plot: bool =
     return model
 
 
-def optimize_master_LP(instance_path: str, verbose: bool = False, plot: bool = False, 
-                         time_limit: int = 7200, maximize: bool = True, save_cuts: bool = False,
-                         crosses_constrain: bool = False, benders_method: str = "farkas", sum_constrain: bool = True) -> gp.Model:
+def optimize_master_LP(
+    instance_path: str,
+    verbose: bool = False,
+    plot: bool = False,
+    time_limit: int = 7200,
+    maximize: bool = True,
+    save_cuts: bool = False,
+    crosses_constrain: bool = False,
+    benders_method: Literal["farkas", "pi"] = "farkas",
+    sum_constrain: bool = True,
+) -> gp.Model:
     """
     Construye y resuelve la relajación LP del Problema Maestro (PM) usando Descomposición de Benders.
     """
@@ -159,11 +218,15 @@ def optimize_master_LP(instance_path: str, verbose: bool = False, plot: bool = F
             v.VType = GRB.CONTINUOUS
     model.update()
     
-    sub_y = model._sub_y
-    sub_yp = model._sub_yp
+    sub_y: gp.Model = model._sub_y
+    sub_yp: gp.Model = model._sub_yp
 
-    constrs_y = model._constrs_y
-    constrs_yp = model._constrs_yp
+    if benders_method == "pi":
+        constrs_y = cast(PiConstrsY, model._constrs_y)
+        constrs_yp = cast(PiConstrsYP, model._constrs_yp)
+    else:
+        constrs_y = cast(FarkasConstrsY, model._constrs_y)
+        constrs_yp = cast(FarkasConstrsYP, model._constrs_yp)
 
     model._iteration = 0
     TOL = 1e-10
@@ -191,7 +254,8 @@ def optimize_master_LP(instance_path: str, verbose: bool = False, plot: bool = F
         # Limpiar el archivo si ya existe de una corrida anterior
         if os.path.exists(model._farkas_log_path):
             os.remove(model._farkas_log_path)
-
+    else:
+        model._farkas_log_path = None
 
 
     while not converged:
@@ -201,7 +265,7 @@ def optimize_master_LP(instance_path: str, verbose: bool = False, plot: bool = F
 
 
         model.optimize()
-        x_sol = {k: v.X for k, v in model._x.items()}
+        x_sol: ArcSolution = {k: v.X for k, v in model._x.items()}
 
         update_subproblem_rhs(model, x_sol)
 

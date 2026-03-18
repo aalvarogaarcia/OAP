@@ -1,17 +1,53 @@
 
 import gurobipy as gp
 from gurobipy import GRB
+import numpy as np
+from numpy.typing import NDArray
+from collections.abc import Collection
+from typing import TypedDict
+
 from utils.utils import compute_triangles, triangles_adjacency_list
 
 
-def generate_pi_cut_y(constrs_y, x_sol, model, TOL):
+Arc = tuple[int, int]
+ArcConstraintMap = dict[Arc, gp.Constr]
+RayComponents = dict[str, dict[Arc, float] | float]
+
+
+PiConstrsY = TypedDict(
+    "PiConstrsY",
+    {
+        "alpha": ArcConstraintMap,
+        "beta": ArcConstraintMap,
+        "gamma": ArcConstraintMap,
+        "delta": ArcConstraintMap,
+        "global": gp.Constr,
+    },
+    total=False,
+)
+
+
+class PiConstrsYP(TypedDict, total=False):
+    alpha_p: ArcConstraintMap
+    beta_p: ArcConstraintMap
+    gamma_p: ArcConstraintMap
+    delta_p: ArcConstraintMap
+    global_p: gp.Constr
+
+
+def generate_pi_cut_y(
+    constrs_y: PiConstrsY,
+    x_sol: dict[Arc, float],
+    model: gp.Model,
+    TOL: float,
+) -> tuple[gp.LinExpr, float, RayComponents]:
     """
     Genera el corte de Benders usando variables duales (.Pi) de la Fase 1
     para el subproblema Y.
     """
     cut_expr = gp.LinExpr()
     cut_val = 0.0
-    v_components = {'alpha': {}, 'beta': {}, 'gamma': {}, 'delta': {}}
+    v_components: RayComponents = {'alpha': {}, 'beta': {}, 'gamma': {}, 'delta': {}}
 
     # --- Alpha (RHS = x_ij) ---
     for (i, j), constr in constrs_y['alpha'].items():
@@ -61,14 +97,19 @@ def generate_pi_cut_y(constrs_y, x_sol, model, TOL):
 
 
 
-def generate_pi_cut_yp(constrs_yp, x_sol, model, TOL):
+def generate_pi_cut_yp(
+    constrs_yp: PiConstrsYP,
+    x_sol: dict[Arc, float],
+    model: gp.Model,
+    TOL: float,
+) -> tuple[gp.LinExpr, float, RayComponents]:
     """
     Genera el corte de Benders usando variables duales (.Pi) de la Fase 1
     para el subproblema Y'.
     """
     cut_expr = gp.LinExpr()
     cut_val = 0.0
-    v_components = {'alpha_p': {}, 'beta_p': {}, 'gamma_p': {}, 'delta_p': {}}
+    v_components: RayComponents = {'alpha_p': {}, 'beta_p': {}, 'gamma_p': {}, 'delta_p': {}}
 
     # --- Alpha_p (RHS = 1 - x_ij) ---
     for (i, j), constr in constrs_yp['alpha_p'].items():
@@ -117,7 +158,13 @@ def generate_pi_cut_yp(constrs_yp, x_sol, model, TOL):
 
     return cut_expr, cut_val, v_components
 
-def generate_pi_cut(constrs_y, constrs_yp, x_sol, model, TOL = 1e-10):
+def generate_pi_cut(
+    constrs_y: PiConstrsY,
+    constrs_yp: PiConstrsYP,
+    x_sol: dict[Arc, float],
+    model: gp.Model,
+    TOL: float = 1e-10,
+) -> None:
     if model._sub_y.ObjVal > TOL:
         cut_y_expr, cut_y_val, _ = generate_pi_cut_y(constrs_y, x_sol, model, TOL)
         if cut_y_val > TOL:
@@ -128,7 +175,13 @@ def generate_pi_cut(constrs_y, constrs_yp, x_sol, model, TOL = 1e-10):
         if cut_yp_val > TOL:
             model.cbLazy(cut_yp_expr <= 0)
 
-def build_pi_subproblems(points, N, CH, master_x_keys, sum_constrain: bool = True):
+def build_pi_subproblems(
+    points: NDArray[np.int64],
+    N: range,
+    CH: NDArray[np.int64],
+    master_x_keys: Collection[Arc],
+    sum_constrain: bool = True,
+) -> tuple[gp.Model, gp.Model, PiConstrsY, PiConstrsYP]:
     """
     Construye DOS Subproblemas (SP_Y y SP_YP) de factibilidad para la triangulación.
     Están separados para evitar enmascaramiento de rayos de Farkas si ambos son infactibles.
@@ -221,7 +274,7 @@ def build_pi_subproblems(points, N, CH, master_x_keys, sum_constrain: bool = Tru
         )
 
     # 1. Conjunto A': Arcos dirigidos en la frontera del Convex Hull
-    A_prime = []
+    A_prime: list[Arc] = []
     for i in range(len(CH)):
         u, v = CH[i], CH[(i + 1) % len(CH)]
         if (u, v) in master_x_keys:

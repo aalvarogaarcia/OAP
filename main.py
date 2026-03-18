@@ -1,26 +1,30 @@
 from models.gurobi import build_and_solve_model
-from utils.utils import *
 from utils.model_stats import get_model_stats
 import pandas as pd
 import glob
 import os
-import time
 from numbers import Real
 import argparse
+from typing import Any
 
 
-def main(dir_path="data", 
-         ext="*.txt", 
-         sum_constrain=True,
-         time_limit=7200000,
-         obj=None,
-         mode=0,
-         tsv_ref = "data/instances_reference.tsv"):
+ResultRow = dict[str, Any]
+
+
+def main(
+    dir_path: str = "data",
+    ext: str = "*.txt",
+    sum_constrain: bool = True,
+    time_limit: int = 7200000,
+    obj: int | None = None,
+    mode: int = 0,
+    tsv_ref: str = "data/instances_reference.tsv",
+) -> None:
     
     files = glob.glob(os.path.join(dir_path, ext))
     files.sort() # Ordenar para que la tabla salga ordenada
     
-    all_results_for_excel = []
+    all_results_for_excel: list[ResultRow] = []
     subtour_methods = [
     #    0,
     #    1, 
@@ -33,7 +37,7 @@ def main(dir_path="data",
         st_suffix = f"_subtour{st_method}"
         output_filename = f"outputs/LaTex/resultados_tabla{st_suffix}.tex"
 
-        data_list = []
+        data_list: list[ResultRow] = []
             
         with open(output_filename, "w", encoding="utf-8") as f:
             
@@ -115,7 +119,7 @@ def main(dir_path="data",
                 cols = modMax.NumVars
                 rows = modMax.NumConstrs
                 # Guardar datos para el Excel global incluyendo el método
-                res_row = {
+                res_row: ResultRow = {
                     "Instance": instance_name,
                     "Subtour_Method": st_method,
                     "N": len(modMax._points_),
