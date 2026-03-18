@@ -8,7 +8,10 @@ wheels/
 
 # Virtual environments
 .venv
-
+.vscode/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
 
 #Resources
 instance/
@@ -19,8 +22,6 @@ outputs/
 *.log
 *.dot
 *.ilp
-.vscode/
-
 *csv
 *tsv
 

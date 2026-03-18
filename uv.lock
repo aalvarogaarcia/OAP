@@ -371,6 +371,18 @@ wheels = [
 ]
 
 [[package]]
+name = "pycddlib"
+version = "2.1.8.post1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/3e/72/f378c0c6d6cb098c7020ac5d348590ff4c669f7e3dc1a4dec25e1ff1d5e4/pycddlib-2.1.8.post1.tar.gz", hash = "sha256:7c9a486b328236e518d253cbcfdbe912aa27f37e141b20cd526ac14471933064", size = 159631, upload-time = "2024-09-04T12:34:24.027Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/17/30/74dcb2448aff1fa78074398bae260d53b795be166db9b52653b5820d240b/pycddlib-2.1.8.post1-cp311-cp311-win32.whl", hash = "sha256:a32af17ca752ea75b9e2791aca846791ced591e4bd6f8b975c32fb6fdcba69d1", size = 223650, upload-time = "2024-09-04T12:34:13.564Z" },
+    { url = "https://files.pythonhosted.org/packages/b0/ff/0a97459b85d7bd67ffec48925ba30e6b073da74ef0599d4d0d63b57b21da/pycddlib-2.1.8.post1-cp311-cp311-win_amd64.whl", hash = "sha256:116f8b4e9fdb08422901f4ed78d1a3d7447763ca1f9e70c4c01a1898716b8967", size = 276553, upload-time = "2024-09-04T12:34:14.548Z" },
+    { url = "https://files.pythonhosted.org/packages/b8/fa/5053b1f50b6cdb4bce36df7eb93f0aebb2d30bf110ead841d2144ab98da6/pycddlib-2.1.8.post1-cp312-cp312-win32.whl", hash = "sha256:1d020fd63440c692f827e62294ae7ef7deb8f3bccec2a85bcd1be44f3f5d9e18", size = 223020, upload-time = "2024-09-04T12:34:15.861Z" },
+    { url = "https://files.pythonhosted.org/packages/d3/bf/c6f2dcc7083d491e4d1640da74e7660acf94e54436a71db7bcb668ecdcd6/pycddlib-2.1.8.post1-cp312-cp312-win_amd64.whl", hash = "sha256:6eff88a5e4b633059c247e985fdbd9d71d9848e8b5cf17925d383081e9ca74df", size = 276767, upload-time = "2024-09-04T12:34:17.813Z" },
+]
+
+[[package]]
 name = "pyparsing"
 version = "3.3.2"
 source = { registry = "https://pypi.org/simple" }
@@ -460,6 +472,7 @@ dependencies = [
     { name = "openpyxl" },
     { name = "pandas" },
     { name = "plotly" },
+    { name = "pycddlib" },
     { name = "scipy" },
     { name = "seaborn" },
 ]
@@ -476,6 +489,7 @@ requires-dist = [
     { name = "openpyxl", specifier = ">=3.1.5" },
     { name = "pandas", specifier = ">=3.0.0" },
     { name = "plotly", specifier = ">=6.5.2" },
+    { name = "pycddlib", specifier = "<3.0.0" },
     { name = "scipy", specifier = ">=1.17.0" },
     { name = "seaborn", specifier = ">=0.13.2" },
 ]

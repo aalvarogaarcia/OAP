@@ -99,9 +99,9 @@ def optimize_master_MILP(instance_path: str, verbose: bool = False, plot: bool =
         
         # NUEVO: Ruta para el log de rayos de Farkas dinámica
         if crosses_constrain:
-            model._farkas_log_path = f"outputs/Benders/MILP-{model._instance_name}-Crosses/farkas_log_{suffix}.jsonl"
+            model._farkas_log_path = f"outputs/Benders/MILP-{model._instance_name}-Crosses/farkas_log_MILP_{suffix}.jsonl"
         else:
-            model._farkas_log_path = f"outputs/Benders/MILP-{model._instance_name}/farkas_log_{suffix}.jsonl"
+            model._farkas_log_path = f"outputs/Benders/MILP-{model._instance_name}/farkas_log_MILP_{suffix}.jsonl"
             
         # Limpiar el archivo si ya existe de una corrida anterior
         if os.path.exists(model._farkas_log_path):
@@ -184,9 +184,9 @@ def optimize_master_LP(instance_path: str, verbose: bool = False, plot: bool = F
         
         # NUEVO: Ruta para el log de rayos de Farkas dinámica (más corta)
         if crosses_constrain:
-            model._farkas_log_path = f"Outputs/Benders/LP-{model._instance_name}-Crosses/farkas_log_{suffix}.jsonl"
+            model._farkas_log_path = f"Outputs/Benders/LP-{model._instance_name}-Crosses/farkas_log_LP_{suffix}.jsonl"
         else:
-            model._farkas_log_path = f"Outputs/Benders/LP-{model._instance_name}/farkas_log_{suffix}.jsonl"
+            model._farkas_log_path = f"Outputs/Benders/LP-{model._instance_name}/farkas_log_LP_{suffix}.jsonl"
             
         # Limpiar el archivo si ya existe de una corrida anterior
         if os.path.exists(model._farkas_log_path):
