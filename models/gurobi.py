@@ -6,10 +6,11 @@ import gurobipy as gp
 import numpy as np
 import os
 from utils.utils import *
+from utils.geometry_classifier import compute_oninon_layers
 
 def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool = False, time_limit: int = 7200000, 
                           maximize: bool = True, sum_constrain: bool = False, relaxed: bool = False,
-                          obj: int = 2, subtour: int = 0,**kwargs) -> gp.Model:
+                          obj: int = 2, subtour: int = 0, write_lp: bool = False, **kwargs) -> gp.Model:
     """
     Docstring for build_and_solve_model
     
@@ -334,6 +335,19 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
                 model.addConstr( x[j,i] <= gp.quicksum(yp[t] for t in ta[i][j]) ) #(25)
                 model.addConstr( 1 - x[i,j] >= gp.quicksum(yp[t] for t in ta[i][j]) ) #(25)
 
+    # ---------------------------------------------
+    # --- NUEVA RESTRICCIÓN AÑADIDA POR BENDERS ---
+    # ---------------------------------------------
+
+    model, constrains = restricciones_semiplano(model, points, CH)
+    
+    onion_layers = compute_oninon_layers(points)
+
+    model, constrains_onion = aplicar_semiplanos_por_capas(model, points, onion_layers)
+
+    # ---------------------------------------------
+
+
     if verbose:
         print("Constraints added. \nOptimizing model...")
     
@@ -348,7 +362,8 @@ def build_and_solve_model(instance_path: str, verbose: bool = False, plot: bool 
     model.Params.MIPGap = 0.00001  # Establece un gap del 0.001% para la solución óptima
     model.Params.NodeLimit = GRB.INFINITY  # Limita el número de nodos explorados
     model.Params.SolutionLimit = GRB.MAXINT  # Limita el número de soluciones enteras encontradas
-
+    if write_lp:
+        model.write(f"outputs/others/{model._instance_name}.lp")
     model.optimize()
 
 

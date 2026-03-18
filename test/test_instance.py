@@ -9,8 +9,8 @@ from utils.analyze_benders import generate_post_mortem_report
 instance = "instance/london-0000025.instance"
 
 
-model_compact = build_and_solve_model(instance, verbose=False, plot=True, maximize=False, time_limit=300,
-                                sum_constrain=True, obj = 1, mode = 0, subtour = 0)
+model_compact = build_and_solve_model(instance, verbose=False, plot=False, maximize=True, time_limit=300,
+                                sum_constrain=True, obj = 1, mode = 0, subtour = 0, write_lp=True)
 
 
 #model = optimize_master_MILP(instance, verbose=True, plot=True, maximize=True, time_limit=300, 

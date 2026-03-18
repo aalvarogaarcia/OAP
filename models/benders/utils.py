@@ -134,11 +134,11 @@ def serialize_expr(expr):
 
 
 def format_cut_string(cut_expr):
-    """Convierte el log entry en algo como '1.0 <= x_0_1 + x_2_1'"""
+    """Convierte el log entry en algo como '1.0 >= x_0_1 + x_2_1'"""
     const = cut_expr.get('constant', 0.0)
     coeffs = cut_expr.get('coeffs', {})
     
-    # Siguiendo la lógica: const <= sum(-coeff * x)
+    # Siguiendo la lógica: const >= sum(-coeff * x)
     parts = []
     for var, val in coeffs.items():
         if val < 0:
@@ -147,7 +147,7 @@ def format_cut_string(cut_expr):
             parts.append(f"- {val}*{var}" if val != 1 else f"- {var}")
             
     formula = " + ".join(parts).replace("+ -", "- ")
-    return f"Corte Lógico: {const} <= {formula}"
+    return f"Corte Lógico: {const} >= {formula}"
 
 
 def load_farkas_logs(filepath: str):

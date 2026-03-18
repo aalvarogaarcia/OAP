@@ -18,7 +18,7 @@ def compute_oninon_layers(points):
     if len(remaining_indices) > 0:
         layers.append(remaining_indices)  # Agregar los puntos restantes como la última capa
 
-    return (layers)
+    return layers
 
 #points = read_indexed_instance("instance/euro-night-0000035.instance")
 #print(points)

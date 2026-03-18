@@ -76,18 +76,51 @@ def extract_3d_slice_from_gurobi(model, free_var_names):
 
     return cdd_matrix
 
+def extract_hrep_from_gurobi(model):
+    model.update()
+    A_sparse = model.getA()
+    A_matrix = A_sparse.toarray()
+    rhs = model.getAttr('RHS', model.getConstrs())
+    senses = model.getAttr('Sense', model.getConstrs())
+    
+    cdd_matrix = []
+    for i in range(len(rhs)):
+        b_val = rhs[i]
+        a_row = A_matrix[i]
+        if senses[i] == '<': 
+            cdd_matrix.append([b_val] + (-a_row).tolist())
+        elif senses[i] == '>': 
+            cdd_matrix.append([-b_val] + a_row.tolist())
+        elif senses[i] == '=': 
+            cdd_matrix.append([b_val] + (-a_row).tolist())
+            
+    vars = model.getVars()
+    for j, v in enumerate(vars):
+        lb, ub = v.LB, v.UB
+        row_a = np.zeros(len(vars))
+        row_a[j] = 1.0
+        if lb > -GRB.INFINITY: 
+            cdd_matrix.append([-lb] + row_a.tolist())
+        if ub < GRB.INFINITY:  
+            cdd_matrix.append([ub] + (-row_a).tolist())
+
+    return cdd_matrix
+
 
 # --- PRUEBA DEL SCRIPT ---
 if __name__ == "__main__":
     # Resuelves tu modelo
-    model = build_and_solve_model("instance/uniform-0000010-2.instance", verbose=True, plot=True, maximize=True, time_limit=300)
+    model = build_and_solve_model("instance/us-night-0000006.instance", verbose=True, plot=True, maximize=True, time_limit=300)
     
     # ⚠️ AQUI DEBES PONER LOS NOMBRES EXACTOS DE 3 VARIABLES DE TU MODELO
     # Sugerencia para OAP: La X de un vértice, la Y de ese vértice, y el Área total.
-    variables_a_visualizar = ["x_0_4", "y_0", "y_1"]  # Reemplaza con los nombres de tus variables
+   # variables_a_visualizar = ["x_0_3", "x_0_2", "x_2_0"]  # Reemplaza con los nombres de tus variables
     
+
+    matriz_h = extract_hrep_from_gurobi(model)  # Si quieres el H-representation completa (sin colapsar a 3D)
+
     # Extraer a formato CDD ya colapsado a 3D
-    matriz_h = extract_3d_slice_from_gurobi(model, variables_a_visualizar)
+   # matriz_h = extract_3d_slice_from_gurobi(model, variables_a_visualizar)
 
     # El resto del código es exactamente igual
     mat = cdd.Matrix(matriz_h, number_type='float')
@@ -96,39 +129,48 @@ if __name__ == "__main__":
     
     # 1. Encontrar la representación mínima (eliminar redundancias en la matriz)
     mat.canonicalize()
-
+    
+    
+    
     # 2. Convertir a poliedro usando la matriz ya limpia
     poly = cdd.Polyhedron(mat)
 
+    print("Matriz mínima de Facetas (H-rep):")
+    print(poly.get_inequalities())
+
     vertices_raw = poly.get_generators() 
-    
+    print("\nVértices del Poliedro (V-rep):")
+    print(vertices_raw)
+
+
+
     # Limpiamos los vértices (ahora solo tienen 3 coordenadas, no 40)
-    vertices_3d = []
-    for v in vertices_raw:
-        if v[0] == 1.0: 
-            vertices_3d.append([v[1], v[2], v[3]]) 
-
-    vertices_3d = np.array(vertices_3d)
-
-    # --- VISUALIZACIÓN 3D CON MATPLOTLIB ---
-    fig = plt.figure(figsize=(8, 6))
-    ax = fig.add_subplot(111, projection='3d')
-
-    if len(vertices_3d) >= 4: # ConvexHull necesita al menos 4 puntos no coplanares
-        hull = ConvexHull(vertices_3d)
-        for s in hull.simplices:
-            s = np.append(s, s[0])  
-            ax.plot(vertices_3d[s, 0], vertices_3d[s, 1], vertices_3d[s, 2], "k-")
-
-        faces = [vertices_3d[s] for s in hull.simplices]
-        poly3d = Poly3DCollection(faces, alpha=0.5, facecolors='cyan', linewidths=1, edgecolors='blue')
-        ax.add_collection3d(poly3d)
-
-    ax.scatter(vertices_3d[:,0], vertices_3d[:,1], vertices_3d[:,2], color='red', s=50)
-
-    ax.set_xlabel(variables_a_visualizar[0])
-    ax.set_ylabel(variables_a_visualizar[1])
-    ax.set_zlabel(variables_a_visualizar[2])
-    ax.set_title("Corte 3D del Poliedro OAP")
-
-    plt.show()
+ #   vertices_3d = []
+ #   for v in vertices_raw:
+ #       if v[0] == 1.0: 
+ #           vertices_3d.append([v[1], v[2], v[3]]) 
+#
+ #   vertices_3d = np.array(vertices_3d)
+#
+ #   # --- VISUALIZACIÓN 3D CON MATPLOTLIB ---
+ #   fig = plt.figure(figsize=(8, 6))
+ #   ax = fig.add_subplot(111, projection='3d')
+#
+ #   if len(vertices_3d) >= 4: # ConvexHull necesita al menos 4 puntos no coplanares
+ #       hull = ConvexHull(vertices_3d)
+ #       for s in hull.simplices:
+ #           s = np.append(s, s[0])  
+ #           ax.plot(vertices_3d[s, 0], vertices_3d[s, 1], vertices_3d[s, 2], "k-")
+#
+ #       faces = [vertices_3d[s] for s in hull.simplices]
+ #       poly3d = Poly3DCollection(faces, alpha=0.5, facecolors='cyan', linewidths=1, edgecolors='blue')
+ #       ax.add_collection3d(poly3d)
+#
+ #   ax.scatter(vertices_3d[:,0], vertices_3d[:,1], vertices_3d[:,2], color='red', s=50)
+#
+ #   ax.set_xlabel(variables_a_visualizar[0])
+ #   ax.set_ylabel(variables_a_visualizar[1])
+ #   ax.set_zlabel(variables_a_visualizar[2])
+ #   ax.set_title("Corte 3D del Poliedro OAP")
+#
+ #   plt.show()
