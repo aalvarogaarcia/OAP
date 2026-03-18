@@ -25,7 +25,7 @@ def main(dir_path="data",
     #    0,
     #    1, 
         2] # Los métodos que quieres comparar
-
+    print(f"Subtour methods to compare: {subtour_methods}")
     for st_method in subtour_methods:
         print(f"\n>>> EMPEZANDO COMPARATIVA: Subtour Method {st_method} <<<")
         

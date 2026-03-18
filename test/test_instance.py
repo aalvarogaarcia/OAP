@@ -2,14 +2,14 @@ from models.benders import optimize_master_MILP
 from models.gurobi import build_and_solve_model
 from utils.model_stats import *
 from utils.utils import *
-from utils.farkas_viz import *
+from models.benders.utils import *
 from utils.analyze_benders import generate_post_mortem_report
 
 
-instance = "instance/london-0000010.instance"
+instance = "instance/london-0000025.instance"
 
 
-model_compact = build_and_solve_model(instance, verbose=False, plot=True, maximize=True, time_limit=300,
+model_compact = build_and_solve_model(instance, verbose=False, plot=True, maximize=False, time_limit=300,
                                 sum_constrain=True, obj = 1, mode = 0, subtour = 0)
 
 
