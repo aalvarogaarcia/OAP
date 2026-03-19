@@ -5,7 +5,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 # Importamos las funciones desde tu módulo utils
-from models.benders.utils import load_farkas_logs, plot_cut_heatmap, plot_farkas_ray_network, format_cut_string
+from utils.utils import load_farkas_logs, plot_cut_heatmap, plot_farkas_ray_network, format_cut_string
 
 
 def generate_post_mortem_report(
