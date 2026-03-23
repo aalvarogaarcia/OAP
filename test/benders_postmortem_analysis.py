@@ -50,8 +50,8 @@ def process_single_instance(instance_path: str | Path, time_limit: int = 300, LP
             log_filepath = f"{base_dir}/farkas_log_LP_{suffix}.jsonl"
             pdf_filepath = f"{base_dir}/Farkas_Analysis_Report_LP_{suffix}.pdf"
         else:
-            log_filepath = f"{base_dir}/farkas_log_{suffix}.jsonl"
-            pdf_filepath = f"{base_dir}/Farkas_Analysis_Report_{suffix}.pdf"
+            log_filepath = f"{base_dir}/farkas_log_MILP_{suffix}.jsonl"
+            pdf_filepath = f"{base_dir}/Farkas_Analysis_Report_MILP_{suffix}.pdf"
 
         # Limpiar el PDF anterior si existe
         if os.path.exists(pdf_filepath): 

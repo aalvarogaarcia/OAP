@@ -59,7 +59,7 @@ def generate_post_mortem_report(
             pdf.savefig(bbox_inches='tight')
             
             # Importante: cerramos la figura para liberar memoria RAM
-            plt.close()
+            plt.close('all')
             
 
 
@@ -76,7 +76,7 @@ def generate_post_mortem_report(
             pdf.savefig(bbox_inches='tight')
             
             # Importante: cerramos la figura para liberar memoria RAM
-            plt.close()
+            plt.close('all')
             
             # Imprimir progreso
             if (i + 1) % 10 == 0 or (i + 1) == len(logs):

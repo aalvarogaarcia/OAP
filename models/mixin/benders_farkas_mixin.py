@@ -109,7 +109,7 @@ class BendersFarkasMixin:
                 v_comps['global'] = farkas_global
                 cut_y_expr += farkas_global * rhs_global
                 cut_y_val += farkas_global * rhs_global
-
+        
         self._log_and_print_farkas(v_comps, cut_y_val, "Y", TOL, x_sol, cut_y_expr)
         return cut_y_expr, cut_y_val
 
@@ -190,11 +190,14 @@ class BendersFarkasMixin:
             logger.info("\n".join(log_msg))
 
         # 2. Tu registro JSON/Estructurado personalizado (para el Post-Mortem)
-        if self.save_cuts and hasattr(self, 'farkas_log_path'):
+        if self.save_cuts and hasattr(self, 'log_path'):
             try:
                 from utils.utils import log_farkas_ray
+                
+                print(f"Guardando log estructurado del rayo de Farkas en: {self.log_path}")
+
                 log_farkas_ray(
-                    filepath=self.farkas_log_path,
+                    filepath=self.log_path,
                     iteration=self.iteration,
                     node_depth=0,
                     subproblem_type='Y' if sub_name == 'Y' else 'Y_prime',
@@ -206,7 +209,7 @@ class BendersFarkasMixin:
                 )
             except NameError:
                 logger.warning("No se pudo guardar el log estructurado: log_farkas_ray no está definido.")
-
+            
 
 
 

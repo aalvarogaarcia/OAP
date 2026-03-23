@@ -1273,3 +1273,188 @@ def plot_sankey_traceability(
         fig.show()
 
 
+
+
+
+
+def restricciones_semiplano(model: gp.Model, points: NDArray[np.int64], CH: NDArray[np.int64]):
+    """Agrega restricciones de semiplano relacionado a CH al modelo para cada arista."""
+    
+    A_pp = [i for i in range(len(points)) if i not in CH]
+    
+    constrains = []
+    for i in A_pp:
+        for j in CH: 
+            if (i, j) not in model._x:
+                continue
+
+            semiplano_izquierdo_limpio = True
+
+            for k in A_pp:
+                if k == i:
+                    continue
+                
+                
+                # Calcular el determinante geométrico
+                x_i, y_i = points[i]
+                x_j, y_j = points[j]
+                x_k, y_k = points[k]
+                
+                D = (x_j - x_i) * (y_k - y_i) - (y_j - y_i) * (x_k - x_i)
+                
+                if D > 0: # El nodo interno k está a la izquierda
+                    semiplano_izquierdo_limpio = False
+                    break
+
+            if semiplano_izquierdo_limpio:
+                # 1. Encontramos la posición del nodo j en la Envolvente Convexa
+                idx_j = np.where(CH == j)[0][0]
+                nodo_actual_ch = j
+                
+                # 2. Recorremos la CH en orden antihorario a partir de j
+                for step in range(1, len(CH)):
+                    idx_siguiente = (idx_j + step) % len(CH)
+                    nodo_siguiente_ch = CH[idx_siguiente]
+                    
+                    # 3. Comprobamos si 'nodo_siguiente_ch' SIGUE estando a la izquierda de la línea i->j infinita
+                    x_i, y_i = points[i]
+                    x_j, y_j = points[j]
+                    x_sig, y_sig = points[nodo_siguiente_ch]
+                    
+                    D_sig = (x_j - x_i) * (y_sig - y_i) - (y_j - y_i) * (x_sig - x_i)
+                    
+                    if D_sig > 0: # El nodo de la CH sigue estando en el semiplano izquierdo
+                        
+                        if (nodo_actual_ch, nodo_siguiente_ch) in model._x:
+                            constrains.append(
+                                model.addConstr(
+                                    # VINCULAMOS LA DECISIÓN RAÍZ (i, j) CON EL ARCO PERIMETRAL
+                                    model._x[i, j] <= model._x[nodo_actual_ch, nodo_siguiente_ch],
+                                    name=f"semiplano_cadena_{i}_{j}_fuerza_{nodo_actual_ch}_{nodo_siguiente_ch}"
+                                )
+                            )
+                        # Avanzamos en la cadena
+                        nodo_actual_ch = nodo_siguiente_ch
+                    
+                    else:
+                        # En cuanto un nodo de la CH cruza al semiplano derecho, 
+                        # el polígono ya tiene libertad geométrica. Rompemos la cadena.
+                        break
+
+            
+
+    
+    return model, constrains
+
+
+
+def aplicar_semiplanos_por_capas(model: gp.Model, points: np.ndarray, capas_onion: list):
+    """
+    Aplica la propiedad del semiplano vacío iterativamente para cada par de capas convexas.
+    
+    Args:
+        capas_onion: Una lista de listas/arrays, donde capas_onion[0] es L1 (CH externa),
+                     capas_onion[1] es L2, etc. Cada capa debe estar ordenada en sentido antihorario.
+    """
+    constrains = []
+    
+    # Iteramos desde la capa más externa (0) hasta la penúltima
+    for k in range(len(capas_onion) - 1):
+        capa_exterior = capas_onion[k]
+        capa_interior = capas_onion[k+1]
+        
+        # Los puntos que pueden "bloquear" el semiplano son todos los que están 
+        # en la capa interior actual o en capas AÚN MÁS profundas.
+        puntos_profundos = []
+        for c in range(k+1, len(capas_onion)):
+            puntos_profundos.extend(capas_onion[c])
+            
+        # Ahora aplicamos exactamente la misma lógica que descubriste
+        for i in capa_interior:
+            for j in capa_exterior:
+                
+                if (i, j) not in model._x:
+                    continue
+                    
+                semiplano_izquierdo_limpio = True
+                
+                # Comprobar si hay algún punto profundo a la izquierda
+                for punto_k in puntos_profundos:
+                    if punto_k == i:
+                        continue
+                        
+                    x_i, y_i = points[i]
+                    x_j, y_j = points[j]
+                    x_k, y_k = points[punto_k]
+                    
+                    D = (x_j - x_i) * (y_k - y_i) - (y_j - y_i) * (x_k - x_i)
+                    
+                    if D > 0: # Hay un obstáculo en el semiplano
+                        semiplano_izquierdo_limpio = False
+                        break
+                        
+                # Si está limpio, generamos la REACCIÓN EN CADENA por el borde de la capa_exterior
+                if semiplano_izquierdo_limpio:
+                    idx_j = list(capa_exterior).index(j)
+                    nodo_actual_capa = j
+                    
+                    for step in range(1, len(capa_exterior)):
+                        idx_sig = (idx_j + step) % len(capa_exterior)
+                        nodo_sig_capa = capa_exterior[idx_sig]
+                        
+                        # Comprobar si nodo_sig_capa sigue a la izquierda de la línea infinita i->j
+                        x_sig, y_sig = points[nodo_sig_capa]
+                        D_sig = (x_j - x_i) * (y_sig - y_i) - (y_j - y_i) * (x_sig - x_i)
+                        
+                        if D_sig > 0: # Sigue en la zona de obligación
+                            if (nodo_actual_capa, nodo_sig_capa) in model._x:
+                                constrains.append(
+                                    model.addConstr(
+                                        model._x[i, j] <= model._x[nodo_actual_capa, nodo_sig_capa],
+                                        name=f"semiplano_L{k}_L{k+1}_{i}_{j}_fuerza_{nodo_actual_capa}_{nodo_sig_capa}"
+                                    )
+                                )
+                            nodo_actual_capa = nodo_sig_capa
+                        else:
+                            break # Fin de la cadena geométrica
+                            
+    return model, constrains
+
+if __name__ == "__main__":
+
+    # Ejemplo de uso: generar un archivo .pre a partir de una instancia
+    instance_file = "instance/little-instances/uniform-0000010-1-HIPOLITO.instance"  # Cambia esta ruta por tu archivo .instance
+    
+    points = read_indexed_instance(instance_file)  # Solo para verificar que se lee correctamente
+    CH = compute_convex_hull(points)
+    N = range(len(points))
+    
+    model = gp.Model("TSP")
+
+    x = { (i, j): model.addVar(vtype=GRB.BINARY, name=f"x_{i}_{j}") for i in N for j in N  if i != j }
+    
+    # Arcos del Convex Hull
+    for i in range(len(CH)):
+        for j in range(i+2, len(CH)):
+            if (i == 0 and j == len(CH) - 1):
+                continue
+            model.remove(x[CH[i], CH[j]])
+            model.remove(x[CH[j], CH[i]])
+            x.pop((CH[i], CH[j]))
+            x.pop((CH[j], CH[i]))
+
+    # Remover arcos en sentido horario de la envolvente convexa
+    for i in range(len(CH)):
+        j = (i + 1) % len(CH)
+        if (CH[j], CH[i]) in x.keys():
+            model.remove(x[CH[j], CH[i]])
+            x.pop((CH[j], CH[i]))
+
+        
+    model._x = x  # Aquí deberías definir tu variable de decisión x[i,j] para cada par de puntos
+    model, constrains = restricciones_semiplano(model, points, CH)
+
+    print("Restricciones de semiplano agregadas:")
+    print(f"   - Total: {len(constrains)}")
+    model.write("outputs/others/semiplano.lp")  # Guardar el modelo para revisión
+

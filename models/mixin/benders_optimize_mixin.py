@@ -1,4 +1,6 @@
 # models/mixin/benders_optimize_mixin.py
+import os
+
 import gurobipy as gp
 from gurobipy import GRB
 import logging
@@ -103,7 +105,7 @@ class BendersOptimizeMixin:
                 elif cut_val < -TOL:
                     model.cbLazy(cut_expr >= 0)
 
-    def solve(self, save_cuts: bool = False, time_limit: int = 7200, verbose: bool = False) -> None:
+    def solve(self, save_cuts: bool = False, time_limit: int = 7200, verbose: bool = False, relaxed: bool = False, polihedral: bool = False) -> None:
         """
         Configura el modelo y ejecuta la optimización con el callback.
         """
@@ -112,7 +114,8 @@ class BendersOptimizeMixin:
         # Guardar configuración local
         self.verbose = verbose
         self.save_cuts = save_cuts
-        self.log_path = None  # Se asignará si save_cuts es True
+        #self.log_path = None  # Se asignará si save_cuts es True
+        self.polihedral = polihedral
         
         # Parámetros obligatorios de Gurobi para Benders
         self.model.Params.LazyConstraints = 1
@@ -121,22 +124,21 @@ class BendersOptimizeMixin:
         # Desactivar salida de consola de Gurobi si no somos verbose
         if not verbose:
             self.model.Params.OutputFlag = 0
-        
-        if self.save_cuts:
-            if self.log_path is None:
-                # Ruta por defecto
-                self.log_path = self.farkas_log_path
 
             # Limpiar el archivo si ya existía de una ejecución anterior
             import os
             os.makedirs(os.path.dirname(self.log_path), exist_ok=True)
             with open(self.log_path, 'w') as f:
                 pass
-        else:
-            self.log_path = None  # No se guardan cortes
         
-        # Lanzar la optimización pasando nuestro método callback
-        self.model.optimize(self._benders_callback)
+        # Dentro del Solver / Callback de Benders:
+        
+        if relaxed:
+            logger.info("Resolviendo la relajación LP del modelo usando un bucle manual de Benders...")
+            self.solve_lp_relaxation(time_limit=time_limit, verbose=verbose)
+        else:
+            # Lanzar la optimización pasando nuestro método callback
+            self.model.optimize(self._benders_callback)
 
         if self.model.SolCount > 0:
             self.x_results = [(i, j) for (i, j), var in self.x.items() if var.X > 0.5]
@@ -173,6 +175,9 @@ class BendersOptimizeMixin:
         TOL = 1e-6
         converged = False
         self.iteration = 0
+        
+
+
 
         # 3. Bucle Manual de Benders
         while not converged:
@@ -182,10 +187,25 @@ class BendersOptimizeMixin:
 
             # Resolver el Maestro relajado
             self.model.optimize()
+            
+            if self.polihedral:
+                logger.info(f"Modo Polihedral activado: Extrayendo facetas en iteración {self.iteration}.")
 
-            if self.model.Status != GRB.OPTIMAL:
-                logger.warning(f"El Maestro LP se detuvo con estado: {self.model.Status}")
-                break
+                # Generar una ruta basada en el log de cortes normal (ej. cambiando el sufijo)
+                # Asumo que tienes un self.log_path como "outputs/Logs/london-20.json"  
+
+                if hasattr(self, 'log_path') and self.log_path and self.iteration == 1:
+                    self.poly_base_path = self.log_path.replace(".json", "polyhedral_iter_{}.json")
+                else:
+                    direction = f"outputs/Logs/{self.name}"
+                    self.poly_base_path = direction + "/polyhedral_iter_{}.json"
+                    os.makedirs(direction, exist_ok=True)   
+                
+                self.poly_log_path = self.poly_base_path.format(self.iteration)
+                self.log_facets(filepath=self.poly_log_path, var_prefixes=['x', 'f'], verbose=False) 
+                if self.model.Status != GRB.OPTIMAL:
+                    logger.warning(f"El Maestro LP se detuvo con estado: {self.model.Status}")
+                    break   
 
             # Extraer solución fraccional (v.X funciona perfectamente para continuas)
             x_sol = {k: v.X for k, v in self.x.items()}
@@ -232,13 +252,12 @@ class BendersOptimizeMixin:
             else:
                 converged_yp = True
 
+            if self.polihedral:
+                self.poly_log_path = self.poly_log_path.replace("_iter_*.json", f"_iter_{self.iteration}.json")
+                self.log_facets(filepath=self.poly_log_path, var_prefixes=['x'], verbose=False)
+
             # --- Condición de parada ---
             if converged_y and converged_yp:
                 converged = True
                 logger.info(f"Relajación LP convergida exitosamente tras {self.iteration} iteraciones.")
-
-        # Reporte Final
-        if self.model.Status == GRB.OPTIMAL:
-            logger.info(f"Valor óptimo de la Relajación LP: {self.model.ObjVal:.4f}")
-
         

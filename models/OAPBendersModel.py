@@ -47,8 +47,14 @@ class OAPBendersModel(
         self.benders_method = "farkas" # Valor por defecto
         
         # Para el logger de Farkas/Pi si deseas guardar archivos JSON
-        self.farkas_log_path = f"outputs/Others/Benders/{name}/Farkas_Log.json"
+        self.log_path = f"outputs/Others/Benders/{name}/log.json"
+        print(f"Ruta por defecto para log de cortes: {self.log_path}")
 
+    def set_log_path(self, path: str) -> None:
+        """
+        Permite configurar la ruta del log de Farkas/Pi desde fuera de la clase.
+        """
+        self.log_path = path
 
     def build(
         self, 
