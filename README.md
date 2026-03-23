@@ -1,101 +1,134 @@
-# **Optimal Area Polygonization (OAP) \- MILP Framework** {#optimal-area-polygonization-(oap)---milp-framework}
+# Optimal Area Polygonization (OAP): A MILP and Benders-Decomposition Framework
 
-This repository contains an ongoing research implementation for solving the **Optimal Area Polygonization** problem using Mixed-Integer Linear Programming (MILP).
+## Abstract
 
-## **📑 Table of Contents**
+This repository provides a research implementation for the **Optimal Area Polygonization (OAP)** problem, where a simple polygon must be constructed over a fixed planar point set while optimizing enclosed area.  
+Two variants are addressed: **MIN-OAP** (minimum area) and **MAX-OAP** (maximum area).  
+The codebase implements exact optimization methods based on **Mixed-Integer Linear Programming (MILP)**, including both compact formulations and a decomposed strategy via **Benders decomposition**.
 
-1. [The Problem](https://www.google.com/search?q=%23-the-problem)  
-2. [Methodology](https://www.google.com/search?q=%23-methodology)  
-3. [Repository Structure](https://www.google.com/search?q=%23-repository-structure)  
-4. [Project Status](https://www.google.com/search?q=%23-project-status)  
-5. [How to Cite](https://www.google.com/search?q=%23-how-to-cite)  
-6. [References](https://www.google.com/search?q=%23-references)
+## 1. Problem Statement
 
-## **📌 The Problem**
+Let \(S=\{p_1,\dots,p_n\}\subset\mathbb{R}^2\) be a set of points.  
+The objective is to find a **simple Hamiltonian polygon** whose vertex set is exactly \(S\), optimizing:
 
-Given a set of points $S$ in a 2D Euclidean plane, the objective is to find a **simple polygon** (a polygon that does not self-intersect) whose vertices are exactly the points in $S$, such that it:
+- **MIN-OAP**: \(\min \text{Area}(P)\)
+- **MAX-OAP**: \(\max \text{Area}(P)\)
 
-* **Minimizes** the enclosed area (**MIN-OAP**).  
-* **Maximizes** the enclosed area (**MAX-OAP**).
+The optimization is constrained by polygon simplicity (non-self-intersection) and full vertex inclusion.  
+Both variants are NP-hard and require exact combinatorial optimization techniques for reliable optimality guarantees.
 
-Both versions of the problem are **NP-hard** and require advanced combinatorial optimization techniques to guarantee optimality for moderate to large-scale point sets.
+## 2. Methodological Framework
 
-[Back to index ↑](#optimal-area-polygonization-\(oap\)---milp-framework)
+### 2.1 Compact MILP Formulation (`models/gurobi.py`)
 
-## **🛠 Methodology**
+The compact approach models polygon construction directly in a monolithic MIP, including:
 
-The project tackles the problem using two mathematical architectures implemented with the **Gurobi** solver:
+- edge-selection decision variables over graph structures,
+- subtour-elimination mechanisms (configurable variants),
+- geometric consistency constraints to enforce polygon feasibility and simplicity.
 
-### **1\. Compact Models (`models/gurobi.py`)**
+### 2.2 Benders Decomposition (`models/benders/`)
 
-These utilize a monolithic formulation based on:
+To improve scalability and modularity, the formulation is decomposed into:
 
-* **Flow Theory:** Ensures connectivity and subtour elimination (ATSP style).  
-* **Triangulation:** The area is calculated by selecting triangles from a precomputed triangulation of the convex hull.  
-* **Simplicity:** Logical constraints that prevent selected triangles from overlapping or edges from crossing.
+- **Master problem** over global combinatorial decisions,
+- **Subproblem checks** for geometric/structural feasibility,
+- **Feasibility/optimality cuts** generated iteratively (including Farkas- and \(\pi\)-based modules in the current implementation).
 
-### **2\. Benders Decomposition (`models/benders.py`)**
+This architecture is implemented in:
+- `master.py`
+- `optimize.py`
+- `farkas.py`
+- `pi.py`
+- `utils.py`
 
-To improve scalability, the problem logic is separated:
+## 3. Repository Organization
 
-* **Master Problem:** Operates on the edge selection space (graph-based).  
-* **Subproblems (SP\_Y / SP\_YP):** Verify the feasibility of the triangulation and the simplicity of the polygon.  
-* **Benders Cuts:** Implementation of *Lazy Constraints* that utilize **Farkas Rays** to identify and prohibit edge configurations that do not allow for a valid polygon.
-
-[Back to index ↑](#optimal-area-polygonization-\(oap\)---milp-framework)
-
-## **📂 Repository Structure**
-
-The project is organized modularly to separate optimization logic from analysis utilities:
-
-```
+```text
 OAP/
-├── main.py              # Main entry point for batch executions
-├── models/              # Optimization logic
-│   ├── __init__.py      # Module initializer
-│   ├── gurobi.py        # Compact models and triangulation logic
-│   └── benders.py       # Decomposition framework and callbacks
-├── utils/               # Support tools
+├── main.py
+├── models/
 │   ├── __init__.py
-│   ├── utils.py         # Geometric functions and data handling
-│   ├── model_stats.py   # Extraction of Gurobi metrics (Gap, Nodes, etc.)
-│   └── analyze_benders.py # Post-mortem analysis of cuts and Farkas rays
-├── instance/            # Sample .instance files
-├── outputs/             # Results (Excel, LaTeX, Logs)
-├── CITATION.cff         # Citation metadata
-└── README.md            # Main documentation
+│   ├── gurobi.py
+│   └── benders/
+│       ├── __init__.py
+│       ├── master.py
+│       ├── optimize.py
+│       ├── farkas.py
+│       ├── pi.py
+│       └── utils.py
+├── polihedral/
+│   └── function.py
+├── utils/
+│   ├── __init__.py
+│   ├── utils.py
+│   ├── geometry_classifier.py
+│   ├── model_stats.py
+│   └── analyze_benders.py
+├── test/
+│   ├── test.py
+│   ├── test_benders.py
+│   ├── test_huge.py
+│   ├── test_instance.py
+│   └── benders_postmortem_analysis.py
+├── instance/
+├── outputs/
+├── pyproject.toml
+├── requirements.txt
+├── CITATION.cff
+└── README.md
 ```
 
-[Back to index ↑](#optimal-area-polygonization-\(oap\)---milp-framework)
+## 4. Reproducibility and Execution
 
-## **🚧 Project Status**
+### Environment setup
 
-This repository is a **Work in Progress (WIP)**.
-
-* **Implemented:** Functional compact models and base Benders structure.  
-* **In Development:** Refinement of cut depth (Deepest Cuts) and subproblem optimization.  
-* **Future:** Integration of a visual interface (likely Streamlit) to monitor polygon generation in real-time.
-
-**Notice:** As the project is in a research phase, the Command Line Interface (CLI) and detailed user manuals will be published once a stable version is reached.
-
-[Back to index ↑](#optimal-area-polygonization-\(oap\)---milp-framework)
-
-## **🎓 How to Cite**
-
-If you use this framework in your research, please cite it using the metadata provided in the `CITATION.cff` file. You can also use the "Cite this repository" button in the GitHub sidebar.
-
-```
-García, Á. (2024). Optimal Area Polygonization (OAP) - MILP Framework (Version 0.1.0-alpha). 
-Available at: [https://github.com/aalvarogaarcia/OAP](https://github.com/aalvarogaarcia/OAP)
+```bash
+pip install -r requirements.txt
 ```
 
-[Back to index ↑](#optimal-area-polygonization-\(oap\)---milp-framework)
+or (if using `uv`):
 
-## **📚 References**
+```bash
+uv sync
+```
 
-This work is based on the following research:
+### Run
 
-* **Hernández-Pérez, H., Riera-Ledesma, J., Rodríguez-Martín, I., & Salazar-González, J. J.** *"Optimal area polygonisation problems: Mixed integer linear programming models"*.  
-* **Hosseini, M., & Turner, J.** *"Deepest Cuts for Benders Decomposition"*.
+```bash
+python main.py
+```
 
-[Back to index ↑](#optimal-area-polygonization-\(oap\)---milp-framework)
+### Tests
+
+```bash
+pytest -q
+```
+
+> **Solver requirement:** A valid **Gurobi** installation and license are required.
+
+## 5. Current Research Status
+
+This repository is under active development. Recent work includes:
+
+- refactoring of the Benders pipeline into a dedicated package (`models/benders/`),
+- extension of geometry-aware utilities (`utils/geometry_classifier.py`),
+- improvements in typing and constraint-level testing.
+
+The project is intended as a research codebase; interfaces and experimentation workflows may evolve.
+
+## 6. Citation
+
+If this repository contributes to your research, please cite via `CITATION.cff` (or GitHub “Cite this repository”).
+
+```text
+García, Á. Optimal Area Polygonization (OAP): MILP Framework.
+Repository: https://github.com/aalvarogaarcia/OAP
+```
+
+## 7. References
+
+- Hernández-Pérez, H., Riera-Ledesma, J., Rodríguez-Martín, I., & Salazar-González, J. J.  
+  *Optimal area polygonisation problems: Mixed integer linear programming models*.
+- Hosseini, M., & Turner, J.  
+  *Deepest Cuts for Benders Decomposition*.

@@ -1,12 +1,19 @@
 import os
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
+import numpy as np
+from numpy.typing import NDArray
 
 # Importamos las funciones desde tu módulo utils
-from models.benders.utils import load_farkas_logs, plot_cut_heatmap, plot_cut_weights, plot_farkas_ray_network, format_cut_string
+from utils.utils import load_farkas_logs, plot_cut_heatmap, plot_farkas_ray_network, format_cut_string
 
 
-def generate_post_mortem_report(log_filepath: str, output_pdf_path: str, points: dict = None, n:int = 10):
+def generate_post_mortem_report(
+    log_filepath: str,
+    output_pdf_path: str,
+    points: dict[int, tuple[float, float]] | NDArray[np.int64] | None = None,
+    n: int = 10,
+) -> None:
     """
     Lee un archivo JSONL con el historial de Farkas y genera un PDF multipágina.
     """

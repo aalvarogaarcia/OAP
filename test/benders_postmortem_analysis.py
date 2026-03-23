@@ -59,9 +59,9 @@ def process_single_instance(instance_path: str | Path, time_limit: int = 300, LP
 
         try:
             if LP:
-                print(f"⚠️ Modo LP activado: Solo se resolverá la relajación y se generará el PDF. No se resolverá el IP.")
+                print("⚠️ Modo LP activado: Solo se resolverá la relajación y se generará el PDF. No se resolverá el IP.")
                 # 1. Resolver la relajación LP (esto genera el .jsonl en base_dir)
-                model = optimize_master_LP(
+                optimize_master_LP(
                     instance_str, 
                     verbose=False, 
                     plot=False, 
@@ -73,9 +73,9 @@ def process_single_instance(instance_path: str | Path, time_limit: int = 300, LP
                     sum_constrain=sum_constrain_flag     
                 )
             else:
-                print(f"⚠️ Modo IP activado: Se resolverá el modelo completo y se generará el PDF con los datos del IP.")
+                print("⚠️ Modo IP activado: Se resolverá el modelo completo y se generará el PDF con los datos del IP.")
                 # 1. Resolver el modelo completo (esto genera el .jsonl en base_dir)
-                model = optimize_master_MILP(
+                optimize_master_MILP(
                     instance_str, 
                     verbose=False, 
                     plot=False, 

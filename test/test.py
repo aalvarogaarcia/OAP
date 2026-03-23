@@ -1,8 +1,6 @@
-from utils.model_stats import get_model_stats, get_model_stats_cplex, get_ObjVal_int
-from utils.utils import *
+from utils.model_stats import get_model_stats, get_ObjVal_int
+from utils.utils import write_prefile
 from models import build_and_solve_model
-import glob
-import os
 import time
 import networkx as nx
 
