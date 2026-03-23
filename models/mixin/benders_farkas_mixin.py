@@ -110,7 +110,12 @@ class BendersFarkasMixin:
                 cut_y_expr += farkas_global * rhs_global
                 cut_y_val += farkas_global * rhs_global
         
-        self._log_and_print_farkas(v_comps, cut_y_val, "Y", TOL, x_sol, cut_y_expr)
+        if cut_y_val > TOL:
+            sense = "<="  # cut_expr <= 0
+        elif cut_y_val < -TOL:
+            sense = ">="  # cut_expr >= 0
+
+        self._log_and_print_farkas(v_comps, cut_y_val, "Y", TOL, x_sol, cut_y_expr, sense)
         return cut_y_expr, cut_y_val
 
 
@@ -155,13 +160,20 @@ class BendersFarkasMixin:
                 v_comps_p['global_p'] = farkas_global_p
                 cut_yp_expr += farkas_global_p * rhs_global_p
                 cut_yp_val += farkas_global_p * rhs_global_p
-
-        self._log_and_print_farkas(v_comps_p, cut_yp_val, "Y'", TOL, x_sol, cut_yp_expr)
+        
+        sense = None
+        if cut_yp_val > TOL:
+            sense = ">="  # 0 >= cut_expr
+        elif cut_yp_val < -TOL:
+            sense = "<="  # 0 <= cut_expr
+        
+        self._log_and_print_farkas(v_comps_p, cut_yp_val, "Y'", TOL, x_sol, cut_yp_expr, sense)
+        
         return cut_yp_expr, cut_yp_val
 
 
 
-    def _log_and_print_farkas(self, v_components, cut_val, sub_name, TOL, x_sol, cut_expr):
+    def _log_and_print_farkas(self, v_components, cut_val, sub_name, TOL, x_sol, cut_expr, sense=None):
         """Método auxiliar interno para registrar el log del rayo de Farkas."""
         verbose = getattr(self, 'verbose', False)
         save_cuts = getattr(self, 'save_cuts', False)
@@ -194,8 +206,6 @@ class BendersFarkasMixin:
             try:
                 from utils.utils import log_farkas_ray
                 
-                print(f"Guardando log estructurado del rayo de Farkas en: {self.log_path}")
-
                 log_farkas_ray(
                     filepath=self.log_path,
                     iteration=self.iteration,
@@ -206,6 +216,7 @@ class BendersFarkasMixin:
                     violation_value=cut_val,
                     tolerance=TOL,
                     cut_expr=cut_expr,
+                    sense=sense
                 )
             except NameError:
                 logger.warning("No se pudo guardar el log estructurado: log_farkas_ray no está definido.")

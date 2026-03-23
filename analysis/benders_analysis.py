@@ -115,6 +115,10 @@ def mostrar_casos_secuencialmente(casos, posiciones):
     print("-" * 50)
     
     for i, (case_dict, s_l, s_r) in enumerate(casos, 1):
+        # Separar arcos
+        active_edges = [a for a in all_arcs if case_dict[get_var_name(a)] == 1]
+        inactive_edges = [a for a in all_arcs if case_dict[get_var_name(a)] == 0]
+
         # 1. Filtramos las tuplas activas de cada lado usando arcs_left y arcs_right
         activas_izq = [get_var_name(a) for a in active_edges if a in arcs_left]
         activas_der = [get_var_name(a) for a in active_edges if a in arcs_right]
@@ -134,9 +138,7 @@ def mostrar_casos_secuencialmente(casos, posiciones):
         nx.draw_networkx_nodes(G, posiciones, node_size=600, node_color='lightblue', edgecolors='black')
         nx.draw_networkx_labels(G, posiciones, font_size=11, font_weight='bold')
 
-        # Separar arcos
-        active_edges = [a for a in all_arcs if case_dict[get_var_name(a)] == 1]
-        inactive_edges = [a for a in all_arcs if case_dict[get_var_name(a)] == 0]
+
         
         # Dibujar arcos
         nx.draw_networkx_edges(G, posiciones, edgelist=active_edges, edge_color='green', width=3, arrowsize=20)

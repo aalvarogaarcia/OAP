@@ -1,12 +1,11 @@
 import argparse
-import os
 import logging
 from pathlib import Path
 
 # Ajusta las rutas de importación a tu proyecto
 from models.OAPBendersModel import OAPBendersModel
 from utils.utils import read_indexed_instance, compute_triangles
-
+from typing import Literal
 # Configuración básica del logger para la consola
 logging.basicConfig(
     level=logging.INFO,
@@ -19,7 +18,7 @@ def run_batch(
     instances_dir: str, 
     filter_texts: list[str], 
     time_limit: int, 
-    benders_method: str,
+    benders_method: Literal['farkas', 'pi'],
     maximize: bool
 ):
     """
@@ -79,15 +78,22 @@ def run_batch(
             benders.solve(time_limit=time_limit, verbose=False, save_cuts=True)
             
             # 4. Generar Reporte PDF
-            pdf_path = f"outputs/Analysis/Report_{benders_method}_{instance_name}.pdf"
+            pdf_path = f"outputs/Analysis/Report_MILP_{benders_method}_{instance_name}.pdf"
             benders.generate_benders_report(output_pdf_path=pdf_path)
+
+            pdf = pdf_path.replace("Report_MILP", "Report_MILP_Combined")
+            benders.analyze_cuts_from_benders(output_pdf=pdf)
+
+            pdf_path = pdf_path.replace("Report_MILP", "Report_LP")
             
             # El mixin se encargará de guardar el JSON en outputs/Logs/benders_{name}.json
-            benders.solve_lp_relaxation(time_limit=time_limit, verbose=False, save_cuts=True)
+            benders.solve(time_limit=time_limit, verbose=False, save_cuts=True, relaxed=True)
             
             # 4. Generar Reporte PDF
-            pdf_path = f"outputs/Analysis/Report_LP_{benders_method}_{instance_name}.pdf"
             benders.generate_benders_report(output_pdf_path=pdf_path)
+
+            pdf = pdf_path.replace("Report_LP", "Report_LP_Combined")
+            benders.analyze_cuts_from_benders(output_pdf=pdf)
 
             exitosas += 1
             

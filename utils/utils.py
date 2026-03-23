@@ -946,7 +946,8 @@ def inyectar_cliques_de_cruce(model: gp.Model, points: NDArray[np.int64]) -> gp.
 
 
 def log_farkas_ray(filepath: str, iteration: int, node_depth: int, subproblem_type: str, 
-                   x_sol: dict[tuple[int, int], float], v_components: dict[str, Any], violation_value: float, tolerance: float = 1e-5, cut_expr: gp.LinExpr | None = None) -> None:
+                   x_sol: dict[tuple[int, int], float], v_components: dict[str, Any], violation_value: float, 
+                   tolerance: float = 1e-5, cut_expr: gp.LinExpr | None = None, sense: str | None = None) -> None:
     """
     Registra la información de un rayo de Farkas y la solución candidata en un archivo JSONL.
     
@@ -960,6 +961,7 @@ def log_farkas_ray(filepath: str, iteration: int, node_depth: int, subproblem_ty
         violation_value: El valor numérico de la violación del corte.
         tolerance: Valor por debajo del cual se considera que una variable es 0.
         cut_expr: Expresión del corte generado (para debugging o análisis).
+        sense: Sentido del corte ('<=', '>=', o None).
     """
     # 1. Filtrar x_sol: Guardar solo los arcos activos para no saturar el log
     active_x: SerializedCoeffMap = {
@@ -986,6 +988,7 @@ def log_farkas_ray(filepath: str, iteration: int, node_depth: int, subproblem_ty
         "node_depth": node_depth,
         "subproblem": subproblem_type,
         "violation": round(violation_value, 6),
+        "sense": sense,
         "active_x": active_x,
         "ray_components": ray_data,
         "cut_expr": serialized_cut,
@@ -1021,7 +1024,7 @@ def serialize_expr(expr: gp.LinExpr | None) -> SerializedExpr | None:
     }
 
 
-def format_cut_string(cut_expr: SerializedExpr) -> str:
+def format_cut_string(cut_expr: SerializedExpr, sense: str | None) -> str:
     """Convierte el log entry en algo como '1.0 <= x_0_1 + x_2_1'"""
     const = cast(float, cut_expr.get('constant', 0.0))
     coeffs = cast(SerializedCoeffMap, cut_expr.get('coeffs', {}))
@@ -1035,7 +1038,13 @@ def format_cut_string(cut_expr: SerializedExpr) -> str:
             parts.append(f"- {val}*{var}" if val != 1 else f"- {var}")
             
     formula = " + ".join(parts).replace("+ -", "- ")
-    return f"Corte Lógico: {const} <= {formula}"
+    
+    if sense == "<=":
+        return f"Corte Lógico: {const} <= {formula}"
+    elif sense == ">=":
+        return f"Corte Lógico: {const} >= {formula}"
+    else:
+        raise ValueError(f"Sentido de corte desconocido: {sense}")
 
 
 def load_farkas_logs(filepath: str) -> list[dict[str, Any]]:
