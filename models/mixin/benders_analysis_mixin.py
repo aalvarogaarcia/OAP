@@ -116,7 +116,7 @@ class BendersAnalysisMixin:
 
         output_pdf_path = output_pdf or f"outputs/analysis/Casos_Validos_{self.name}.pdf"
         posiciones = {i: pt for i, pt in enumerate(self.points)}
-
+        os.makedirs(os.path.dirname(output_pdf_path), exist_ok=True)
         logs = []
         with open(self.log_path, 'r') as f:
             for line in f:

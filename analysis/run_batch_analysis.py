@@ -78,7 +78,7 @@ def run_batch(
             benders.solve(time_limit=time_limit, verbose=False, save_cuts=True)
             
             # 4. Generar Reporte PDF
-            pdf_path = f"outputs/Analysis/MILP/Report/{benders_method}_{instance_name}.pdf"
+            pdf_path = f"outputs/Analysis/MILP/Report/{"MAX" if maximize else "MIN"}_{benders_method}_{instance_name}.pdf"
             benders.generate_benders_report(output_pdf_path=pdf_path)
 
             pdf = pdf_path.replace("Report", "Cut_Analysis")
