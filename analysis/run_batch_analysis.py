@@ -78,13 +78,13 @@ def run_batch(
             benders.solve(time_limit=time_limit, verbose=False, save_cuts=True)
             
             # 4. Generar Reporte PDF
-            pdf_path = f"outputs/Analysis/Report_MILP_{benders_method}_{instance_name}.pdf"
+            pdf_path = f"outputs/Analysis/MILP/Report/{benders_method}_{instance_name}.pdf"
             benders.generate_benders_report(output_pdf_path=pdf_path)
 
-            pdf = pdf_path.replace("Report_MILP", "Report_MILP_Combined")
+            pdf = pdf_path.replace("Report", "Cut_Analysis")
             benders.generate_combinatorial_report(output_pdf=pdf, max_vars = 10)
 
-            pdf_path = pdf_path.replace("Report_MILP", "Report_LP")
+            pdf_path = pdf_path.replace("MILP", "LP")
             
             # El mixin se encargará de guardar el JSON en outputs/Logs/benders_{name}.json
             benders.solve(time_limit=time_limit, verbose=False, save_cuts=True, relaxed=True)
@@ -92,7 +92,7 @@ def run_batch(
             # 4. Generar Reporte PDF
             benders.generate_benders_report(output_pdf_path=pdf_path)
 
-            pdf = pdf_path.replace("Report_LP", "Report_LP_Combined")
+            pdf = pdf_path.replace("Report", "Cut_Analysis")
             benders.generate_combinatorial_report(output_pdf=pdf, max_vars = 10)
 
             exitosas += 1

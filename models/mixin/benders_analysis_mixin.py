@@ -140,28 +140,52 @@ class BendersAnalysisMixin:
                     print(f"⚠️ Corte {i+1} omitido: Tiene {len(all_vars)} variables (> límite {max_vars} para 2^n).")
                     continue
                 
-                # Parsear arcos puros
                 all_arcs = []
                 for v in all_vars:
                     partes = v.split('_')
                     all_arcs.append((int(partes[-2]), int(partes[-1])))
 
+                # ==========================================================
+                # 1. REFORMULACIÓN DE LA INECUACIÓN (Todo positivo: L >= R + C)
+                # ==========================================================
+                vars_left, vars_right = [], []
+                weights_left, weights_right = {}, {}
+                
+                if sense == ">=":
+                    constant_right = constant
+                    for v, c in coeffs.items():
+                        if c > 0:
+                            vars_left.append(v)
+                            weights_left[v] = c
+                        elif c < 0:
+                            vars_right.append(v)
+                            weights_right[v] = abs(c)
+                else: # sense == "<="
+                    constant_right = -constant
+                    for v, c in coeffs.items():
+                        if c < 0:
+                            vars_left.append(v)
+                            weights_left[v] = abs(c)
+                        elif c > 0:
+                            vars_right.append(v)
+                            weights_right[v] = c
+
                 valid_cases = []
                 
-                # 1. Fuerza Bruta Combinatoria
+                # ==========================================================
+                # 2. BÚSQUEDA COMBINATORIA
+                # ==========================================================
                 for comb in itertools.product([0, 1], repeat=len(all_vars)):
-                    if sum(comb) == 0: 
-                        continue # Ignorar grafo vacío
+                    if sum(comb) == 0: continue
                     
                     d = dict(zip(all_vars, comb))
                     active_arcs = [all_arcs[idx] for idx, val in enumerate(comb) if val == 1]
                     
-                    # 2. Filtro de Antisimetría (no ir y volver al mismo nodo)
+                    # Filtro Antisimetría
                     active_set = set(active_arcs)
-                    if any((v, u) in active_set for u, v in active_arcs):
-                        continue
+                    if any((v, u) in active_set for u, v in active_arcs): continue
                         
-                    # 3. Filtro de Grado (Máx 1 entrada/salida)
+                    # Filtro Grado (Máx 1 in/out)
                     in_degree, out_degree = {}, {}
                     invalido = False
                     for u, v in active_arcs:
@@ -172,7 +196,7 @@ class BendersAnalysisMixin:
                             break
                     if invalido: continue
                         
-                    # 4. Filtro de Cruces (Usando tu función)
+                    # Filtro Cruces
                     from utils.utils import segments_intersect
                     has_intersect = False
                     for e1, e2 in itertools.combinations(active_arcs, 2):
@@ -182,36 +206,34 @@ class BendersAnalysisMixin:
                             break
                     if has_intersect: continue
 
-                    # Contamos si hay variables activas con coeficientes negativos o positivos
-                    active_neg_count = sum(1 for v in all_vars if coeffs[v] < 0 and d[v] == 1)
-                    active_pos_count = sum(1 for v in all_vars if coeffs[v] > 0 and d[v] == 1)
+                    # ==========================================================
+                    # 3. FILTRO ESTRICTO DE LADOS Y EVALUACIÓN L >= R + C
+                    # ==========================================================
+                    activas_izq = [v for v in vars_left if d[v] == 1]
+                    activas_der = [v for v in vars_right if d[v] == 1]
                     
-                    is_0_on_left_or_neg_coefs = (active_neg_count == 0)
-                    is_0_on_right_or_pos_coefs = (active_pos_count == 0)
-                    
-                    if sense == "<=" and is_0_on_left_or_neg_coefs: 
+                    # 🚨 LA CLAVE: Ignorar si no hay interacción (casos triviales o =0)
+                    if not activas_izq or not activas_der:
                         continue
-                    if sense == ">=" and is_0_on_right_or_pos_coefs: 
-                        continue
-                    
                         
-                    # 5. Evaluar si cumple la desigualdad del Corte de Benders
-                    cut_val = sum(coeffs[v] * d[v] for v in all_vars)
-                    if sense == "<=" and cut_val <= constant:
-                        valid_cases.append((d, active_arcs, cut_val))
-                    elif sense == ">=" and cut_val >= constant:
-                        valid_cases.append((d, active_arcs, cut_val))
+                    sum_l = sum(weights_left[v] for v in activas_izq)
+                    sum_r = sum(weights_right[v] for v in activas_der)
+                    
+                    # Evaluar desigualdad usando tolerancia para flotantes
+                    if sum_l >= (sum_r + constant_right) - 1e-5:
+                        valid_cases.append((d, active_arcs, sum_l, sum_r, activas_izq, activas_der))
 
                 if not valid_cases:
-                    print(f"Iteración {log['iteration']}: Ninguna combinación entera cumplió los filtros.")
                     continue
                 
-                # Ordenar por el valor del corte (para ver los casos "más ajustados" o extremos)
-                valid_cases.sort(key=lambda x: x[2], reverse=(sense == ">="))
+                # Ordenar priorizando maximizar el lado derecho y luego el izquierdo
+                valid_cases.sort(key=lambda x: (x[3], x[2]), reverse=True)
                 
-                # Solo guardar los mejores 'top_k_cases' para no saturar el PDF
-                for j, (case_dict, active_edges, c_val) in enumerate(valid_cases[:top_k_cases], 1):
-                    fig, ax = plt.subplots(figsize=(9, 6))
+                # ==========================================================
+                # 4. DIBUJADO DE LOS TOP CASOS
+                # ==========================================================
+                for j, (case_dict, active_edges, s_l, s_r, act_izq, act_der) in enumerate(valid_cases[:top_k_cases], 1):
+                    fig, ax = plt.subplots(figsize=(10, 7))
                     G = nx.DiGraph()
                     G.add_nodes_from(posiciones.keys())
 
@@ -220,16 +242,20 @@ class BendersAnalysisMixin:
                     nx.draw_networkx_nodes(G, posiciones, node_size=600, node_color='lightblue', edgecolors='black', ax=ax)
                     nx.draw_networkx_labels(G, posiciones, font_size=11, font_weight='bold', ax=ax)
                     
-                    # Arcos activos vs inactivos de la combinación
                     nx.draw_networkx_edges(G, posiciones, edgelist=active_edges, edge_color='green', width=3, arrowsize=20, ax=ax)
                     nx.draw_networkx_edges(G, posiciones, edgelist=inactive_edges, edge_color='grey', width=1, style='dashed', alpha=0.3, ax=ax)
                     
-                    titulo = (f"Corte {i+1} (Iter {log['iteration']}) | Caso Válido {j}/{len(valid_cases)}\n"
-                              f"Valor del corte: {c_val:.2f} {sense} {constant:.2f}")
-                    ax.set_title(titulo, fontsize=12, fontweight='bold')
+                    # Construir los strings de la ecuación para el título
+                    str_izq = " + ".join([f"{weights_left[v]}*{v}" for v in act_izq])
+                    str_der = " + ".join([f"{weights_right[v]}*{v}" for v in act_der])
+                    str_const = f" + {constant_right:.2f}" if constant_right > 0 else (f" - {abs(constant_right):.2f}" if constant_right < 0 else "")
+                    
+                    titulo = (f"Corte {i+1} (Iter {log['iteration']}) | Caso {j}/{len(valid_cases)}\n"
+                              f"[{str_izq}] >= [{str_der}]{str_const}\n"
+                              f"Sumas: {s_l:.2f} >= {(s_r + constant_right):.2f}")
+                    
+                    ax.set_title(titulo, fontsize=10, fontweight='bold', pad=15)
                     plt.axis('off')
                     
                     pdf.savefig(fig)
                     plt.close(fig)
-
-        print(f"✅ ¡Análisis combinatorio guardado en {output_pdf_path}!")
