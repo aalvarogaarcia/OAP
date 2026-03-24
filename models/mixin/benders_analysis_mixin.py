@@ -5,6 +5,8 @@ import logging
 import numpy as np
 import networkx as nx
 import json
+import itertools
+
 
 from utils.utils import (
     load_farkas_logs, 
@@ -103,113 +105,131 @@ class BendersAnalysisMixin:
 
         logger.info(f"✅ ¡Reporte generado con éxito en: {output_pdf_path}!")
 
-    def analyze_cuts_from_benders(self, output_pdf: str | None = None) -> None:
+    def generate_combinatorial_report(self, output_pdf: str | None = None, max_vars: int = 15, top_k_cases: int = 100) -> None:
         """
-        Lee el historial de cortes desde el log del modelo y genera un reporte PDF visual,
-        utilizando las coordenadas (points) almacenadas directamente en el modelo.
+        Lee el log de cortes y, para cada uno, evalúa las combinaciones 0/1 válidas 
+        (sin cruces, grado <= 1) que satisfacen la restricción. Guarda los mejores casos en PDF.
         """
-        # 1. Validaciones usando los atributos del modelo
         if not hasattr(self, 'log_path') or not self.log_path:
-            print(f"❌ [Instancia: {self.name}] Imposible analizar cortes. No hay 'log_path' definido.")
+            print("❌ No hay log_path definido.")
             return
 
-        # Generar nombre automático si no se provee
-        if output_pdf is None:
-            output_pdf = f"Analisis_Cortes_{self.name}.pdf"
-
-        # 2. Extraer posiciones DIRECTAMENTE del modelo (sin leer el archivo .instance)
-        # model.points es un numpy array, lo convertimos a diccionario para NetworkX
+        output_pdf_path = output_pdf or f"outputs/analysis/Casos_Validos_{self.name}.pdf"
         posiciones = {i: pt for i, pt in enumerate(self.points)}
 
-        # 3. Leer logs del archivo asociado al modelo
         logs = []
-        try:
-            with open(self.log_path, 'r') as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        logs.append(json.loads(line))
-        except FileNotFoundError:
-            print(f"❌ Error: Archivo de log {self.log_path} no encontrado.")
-            return
+        with open(self.log_path, 'r') as f:
+            for line in f:
+                if line.strip(): logs.append(json.loads(line))
 
-        if not logs:
-            print("⚠️ El archivo de logs está vacío.")
-            return
+        print(f"🔍 Analizando combinaciones para {len(logs)} cortes...")
 
-        print(f"Generando reporte para {self.name}... ({len(logs)} cortes detectados)")
-
-        # 4. Generación del PDF (Misma lógica visual de antes)
-        with PdfPages(output_pdf) as pdf:
-            for log in logs:
-                fig, ax = plt.subplots(figsize=(10, 8))
-                G = nx.DiGraph()
-                G.add_nodes_from(posiciones.keys())
-
+        with PdfPages(output_pdf_path) as pdf:
+            for i, log in enumerate(logs):
                 cut_expr = log.get("cut_expr", {})
-                coeffs = cut_expr.get("coeffs", {}) if cut_expr else {}
-                active_x = log.get("active_x", {})
+                if not cut_expr: continue
+                
+                coeffs = cut_expr.get("coeffs", {})
+                constant = cut_expr.get("constant", 0.0)
                 sense = log.get("sense", "<=")
-                rhs = -cut_expr.get("constant", 0.0) if cut_expr else 0.0
-
-                # 1. Extraer arcos del Maestro (Gris punteado)
-                master_edges = []
-                for var_name, val in active_x.items():
-                    # Split por '_' y tomamos los dos últimos elementos
-                    # Funciona tanto para "0_1" como para "x_0_1"
-                    partes = var_name.split('_')
-                    u, v = int(partes[-2]), int(partes[-1])
-                    master_edges.append((u, v))
-                    G.add_edge(u, v)
                 
-                if master_edges:
-                    nx.draw_networkx_edges(G, posiciones, edgelist=master_edges, 
-                                           edge_color='lightgray', style='dashed', alpha=0.5, ax=ax)
-    
-                # 2. Clasificar y dibujar arcos del corte
-                edges_pos, edges_neg = [], []
-                weights_pos, weights_neg = [], []
-    
-                for var_name, coeff in coeffs.items():
-                    partes = var_name.split('_')
-                    u, v = int(partes[-2]), int(partes[-1])
-                    G.add_edge(u, v)
+                # Nombres de variables (ej. 'x_1_3' o '1_3') asegurando que funcionen
+                all_vars = list(coeffs.keys())
                 
-                # Clasificamos según el signo del coeficiente
-                if coeff > 0:
-                    edges_pos.append((u, v))
-                    weights_pos.append(abs(coeff))
-                elif coeff < 0:
-                    edges_neg.append((u, v))
-                    weights_neg.append(abs(coeff))
+                if len(all_vars) > max_vars:
+                    print(f"⚠️ Corte {i+1} omitido: Tiene {len(all_vars)} variables (> límite {max_vars} para 2^n).")
+                    continue
+                
+                # Parsear arcos puros
+                all_arcs = []
+                for v in all_vars:
+                    partes = v.split('_')
+                    all_arcs.append((int(partes[-2]), int(partes[-1])))
 
-                nx.draw_networkx_nodes(G, posiciones, node_size=600, node_color='lightblue', edgecolors='black', ax=ax)
-                nx.draw_networkx_labels(G, posiciones, font_size=11, font_weight='bold', ax=ax)
+                valid_cases = []
+                
+                # 1. Fuerza Bruta Combinatoria
+                for comb in itertools.product([0, 1], repeat=len(all_vars)):
+                    if sum(comb) == 0: 
+                        continue # Ignorar grafo vacío
+                    
+                    d = dict(zip(all_vars, comb))
+                    active_arcs = [all_arcs[idx] for idx, val in enumerate(comb) if val == 1]
+                    
+                    # 2. Filtro de Antisimetría (no ir y volver al mismo nodo)
+                    active_set = set(active_arcs)
+                    if any((v, u) in active_set for u, v in active_arcs):
+                        continue
+                        
+                    # 3. Filtro de Grado (Máx 1 entrada/salida)
+                    in_degree, out_degree = {}, {}
+                    invalido = False
+                    for u, v in active_arcs:
+                        out_degree[u] = out_degree.get(u, 0) + 1
+                        in_degree[v] = in_degree.get(v, 0) + 1
+                        if out_degree[u] > 1 or in_degree[v] > 1:
+                            invalido = True
+                            break
+                    if invalido: continue
+                        
+                    # 4. Filtro de Cruces (Usando tu función)
+                    from utils.utils import segments_intersect
+                    has_intersect = False
+                    for e1, e2 in itertools.combinations(active_arcs, 2):
+                        if segments_intersect(self.points[e1[0]], self.points[e1[1]], 
+                                              self.points[e2[0]], self.points[e2[1]]):
+                            has_intersect = True
+                            break
+                    if has_intersect: continue
 
-                if edges_pos:
-                    nx.draw_networkx_edges(G, posiciones, edgelist=edges_pos, 
-                                           edge_color='green', width=[w * 1.5 for w in weights_pos], 
-                                           arrowsize=15, ax=ax)
-                if edges_neg:
-                    nx.draw_networkx_edges(G, posiciones, edgelist=edges_neg, 
-                                           edge_color='red', width=[w * 1.5 for w in weights_neg], 
-                                           arrowsize=15, ax=ax)
+                    # Contamos si hay variables activas con coeficientes negativos o positivos
+                    active_neg_count = sum(1 for v in all_vars if coeffs[v] < 0 and d[v] == 1)
+                    active_pos_count = sum(1 for v in all_vars if coeffs[v] > 0 and d[v] == 1)
+                    
+                    is_0_on_left_or_neg_coefs = (active_neg_count == 0)
+                    is_0_on_right_or_pos_coefs = (active_pos_count == 0)
+                    
+                    if sense == "<=" and is_0_on_left_or_neg_coefs: 
+                        continue
+                    if sense == ">=" and is_0_on_right_or_pos_coefs: 
+                        continue
+                    
+                        
+                    # 5. Evaluar si cumple la desigualdad del Corte de Benders
+                    cut_val = sum(coeffs[v] * d[v] for v in all_vars)
+                    if sense == "<=" and cut_val <= constant:
+                        valid_cases.append((d, active_arcs, cut_val))
+                    elif sense == ">=" and cut_val >= constant:
+                        valid_cases.append((d, active_arcs, cut_val))
 
-                # Títulos y metadatos
-                ax.set_title(f"Iter: {log.get('iteration')} | Sub: {log.get('subproblem')} | Violación: {log.get('violation'):.4f}", fontweight='bold')
+                if not valid_cases:
+                    print(f"Iteración {log['iteration']}: Ninguna combinación entera cumplió los filtros.")
+                    continue
+                
+                # Ordenar por el valor del corte (para ver los casos "más ajustados" o extremos)
+                valid_cases.sort(key=lambda x: x[2], reverse=(sense == ">="))
+                
+                # Solo guardar los mejores 'top_k_cases' para no saturar el PDF
+                for j, (case_dict, active_edges, c_val) in enumerate(valid_cases[:top_k_cases], 1):
+                    fig, ax = plt.subplots(figsize=(9, 6))
+                    G = nx.DiGraph()
+                    G.add_nodes_from(posiciones.keys())
 
-                leyenda = (
-                    "Leyenda:\n"
-                    "-- Gris punteado: x_bar (Maestro)\n"
-                    "-> Verde: Coeff Positivo (<=)\n"
-                    "-> Rojo: Coeff Negativo (>=)\n"
-                    f"Restricción: {sense} {rhs}"
-                )
-                ax.text(0.02, 0.02, leyenda, transform=ax.transAxes, fontsize=9,
-                        verticalalignment='bottom', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+                    inactive_edges = [all_arcs[idx] for idx, v in enumerate(all_vars) if case_dict[v] == 0]
 
-                plt.axis('off')
-                pdf.savefig(fig)
-                plt.close(fig)
+                    nx.draw_networkx_nodes(G, posiciones, node_size=600, node_color='lightblue', edgecolors='black', ax=ax)
+                    nx.draw_networkx_labels(G, posiciones, font_size=11, font_weight='bold', ax=ax)
+                    
+                    # Arcos activos vs inactivos de la combinación
+                    nx.draw_networkx_edges(G, posiciones, edgelist=active_edges, edge_color='green', width=3, arrowsize=20, ax=ax)
+                    nx.draw_networkx_edges(G, posiciones, edgelist=inactive_edges, edge_color='grey', width=1, style='dashed', alpha=0.3, ax=ax)
+                    
+                    titulo = (f"Corte {i+1} (Iter {log['iteration']}) | Caso Válido {j}/{len(valid_cases)}\n"
+                              f"Valor del corte: {c_val:.2f} {sense} {constant:.2f}")
+                    ax.set_title(titulo, fontsize=12, fontweight='bold')
+                    plt.axis('off')
+                    
+                    pdf.savefig(fig)
+                    plt.close(fig)
 
-        print(f"✅ ¡Reporte guardado en {output_pdf}!")
+        print(f"✅ ¡Análisis combinatorio guardado en {output_pdf_path}!")

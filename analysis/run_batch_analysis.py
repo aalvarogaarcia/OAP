@@ -82,7 +82,7 @@ def run_batch(
             benders.generate_benders_report(output_pdf_path=pdf_path)
 
             pdf = pdf_path.replace("Report_MILP", "Report_MILP_Combined")
-            benders.analyze_cuts_from_benders(output_pdf=pdf)
+            benders.generate_combinatorial_report(output_pdf=pdf, max_vars = 10)
 
             pdf_path = pdf_path.replace("Report_MILP", "Report_LP")
             
@@ -93,7 +93,7 @@ def run_batch(
             benders.generate_benders_report(output_pdf_path=pdf_path)
 
             pdf = pdf_path.replace("Report_LP", "Report_LP_Combined")
-            benders.analyze_cuts_from_benders(output_pdf=pdf)
+            benders.generate_combinatorial_report(output_pdf=pdf, max_vars = 10)
 
             exitosas += 1
             
