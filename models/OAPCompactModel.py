@@ -314,59 +314,110 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
         elif version == 3:
             for i in A_pp:
                 for j in self.CH:    
-                    if (i, j) not in self.x:
+                    # Validamos si existe la arista en alguna dirección antes de calcular nada
+                    if (i, j) not in self.x and (j, i) not in self.x:
                         continue
                     
+                    # 1. Clasificamos los puntos interiores respecto al vector i -> j
                     S_left = []
+                    S_right = []
+
                     for k in A_pp:
                         if k == i: 
                             continue
                         x_i, y_i = self.points[i]
                         x_j, y_j = self.points[j]
                         x_k, y_k = self.points[k]
+                        
                         D_k = (x_j - x_i) * (y_k - y_i) - (y_j - y_i) * (x_k - x_i)
 
                         if D_k > 0:
                              S_left.append(k)
+                        elif D_k < 0:
+                             S_right.append(k)
 
                     idx_j = np.where(self.CH == j)[0][0]
                     j_siguiente = self.CH[(idx_j + 1) % len(self.CH)]
+                    j_anterior = self.CH[(idx_j - 1) % len(self.CH)]
 
-                    if len(S_left) == 0:
-                        nodo_actual_ch = j
-                        for step in range(1, len(self.CH)):
-                            idx_siguiente = (idx_j + step) % len(self.CH)
-                            nodo_siguiente_ch = self.CH[idx_siguiente]
-                            
-                            x_sig, y_sig = self.points[nodo_siguiente_ch]
-                            D_sig = (x_j - x_i) * (y_sig - y_i) - (y_j - y_i) * (x_sig - x_i)
-                            
-                            if D_sig > 0: 
-                                if (nodo_actual_ch, nodo_siguiente_ch) in self.x:
-                                    constrains.append(
-                                        self.model.addConstr(
-                                            self.x[i, j] <= self.x[nodo_actual_ch, nodo_siguiente_ch],
-                                            name=f"semiplano_cadena_{i}_{j}_fuerza_{nodo_actual_ch}_{nodo_siguiente_ch}"
-                                        ))
-                                nodo_actual_ch = nodo_siguiente_ch
-                            else:
-                                break
-                    else:
-                        expr_escape = gp.LinExpr()
-                        if (j, j_siguiente) in self.x:
-                            expr_escape.addTerms(1.0, self.x[j, j_siguiente])
+                    # --- LÓGICA FORWARD: Del interior (i) a la Envolvente (j) ---
+                    if (i, j) in self.x:
+                        if len(S_left) == 0:
+                            # Cascada hacia adelante (Counter-Clockwise)
+                            nodo_actual_ch = j
+                            for step in range(1, len(self.CH)):
+                                idx_siguiente = (idx_j + step) % len(self.CH)
+                                nodo_siguiente_ch = self.CH[idx_siguiente]
+                                
+                                x_sig, y_sig = self.points[nodo_siguiente_ch]
+                                D_sig = (x_j - x_i) * (y_sig - y_i) - (y_j - y_i) * (x_sig - x_i)
+                                
+                                if D_sig > 0: 
+                                    if (nodo_actual_ch, nodo_siguiente_ch) in self.x:
+                                        constrains.append(
+                                            self.model.addConstr(
+                                                self.x[i, j] <= self.x[nodo_actual_ch, nodo_siguiente_ch],
+                                                name=f"semiplano_cadena_{i}_{j}_fuerza_{nodo_actual_ch}_{nodo_siguiente_ch}_forwards"
+                                            ))
+                                    nodo_actual_ch = nodo_siguiente_ch
+                                else:
+                                    break
+                        else:
+                            # Restricción de Bolsillo Forward (Escape)
+                            expr_escape = gp.LinExpr()
+                            if (j, j_siguiente) in self.x:
+                                expr_escape.addTerms(1.0, self.x[j, j_siguiente])
 
-                        for k in S_left:
-                            if (j, k) in self.x:
-                                expr_escape.addTerms(1.0, self.x[j, k])
+                            for k in S_left:
+                                if (j, k) in self.x:
+                                    expr_escape.addTerms(1.0, self.x[j, k])
 
-                        constrains.append(
-                            self.model.addConstr(
-                                self.x[i, j] <= expr_escape,
-                                name=f"bolsillo_{i}_{j}_soporta_{len(S_left)}_puntos"
-                            ))
+                            constrains.append(
+                                self.model.addConstr(
+                                    self.x[i, j] <= expr_escape,
+                                    name=f"bolsillo_forward_{i}_{j}_soporta_{len(S_left)}_puntos"
+                                ))
+
+                    # --- LÓGICA BACKWARD: De la Envolvente (j) al interior (i) ---
+                    if (j, i) in self.x:
+                        if len(S_right) == 0:
+                            # Cascada hacia atrás (Clockwise)
+                            nodo_actual_ch = j
+                            for step in range(1, len(self.CH)):
+                                idx_anterior_step = (idx_j - step) % len(self.CH)
+                                nodo_anterior_ch = self.CH[idx_anterior_step]
+                                
+                                x_ant, y_ant = self.points[nodo_anterior_ch]
+                                D_ant = (x_j - x_i) * (y_ant - y_i) - (y_j - y_i) * (x_ant - x_i)
+                                
+                                # Corregido: D_ant < 0 corresponde al lado S_right
+                                if D_ant < 0: 
+                                    if (nodo_anterior_ch, nodo_actual_ch) in self.x:
+                                        constrains.append(
+                                            self.model.addConstr(
+                                                self.x[j, i] <= self.x[nodo_anterior_ch, nodo_actual_ch],
+                                                name=f"semiplano_cadena_{j}_{i}_fuerza_{nodo_anterior_ch}_{nodo_actual_ch}_backwards"
+                                            ))
+                                    nodo_actual_ch = nodo_anterior_ch
+                                else:
+                                    break
+                        else:
+                            # Restricción de Bolsillo Backward (Entrada)
+                            expr_escape_back = gp.LinExpr()
+                            if (j_anterior, j) in self.x:
+                                expr_escape_back.addTerms(1.0, self.x[j_anterior, j])
+
+                            for k in S_right:
+                                if (k, j) in self.x:
+                                    expr_escape_back.addTerms(1.0, self.x[k, j])
+
+                            constrains.append(
+                                self.model.addConstr(
+                                    self.x[j, i] <= expr_escape_back,
+                                    name=f"bolsillo_backward_{j}_{i}_soporta_{len(S_right)}_puntos"
+                                ))
+            
             print(f"Añadidas {len(constrains)} restricciones de semiplano V3.")
-
 
 
     def inyectar_cortes_knapsack_locales(self):
