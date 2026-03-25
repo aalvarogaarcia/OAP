@@ -224,6 +224,52 @@ class BendersFarkasMixin:
             
         return cut_y_expr, cut_y_val
 
+    def get_optimality_cut_yp(self, x_sol: dict[Arc, float], TOL: float = 1e-10) -> tuple[gp.LinExpr, float]:
+        """Extrae el corte de optimalidad usando variables duales (.Pi) del subproblema Y."""
+        cut_y_expr = gp.LinExpr()
+        cut_y_val = 0.0
+        v_comps: RayComponents = {'alpha_p': {}, 'beta_p': {}, 'gamma_p': {}, 'delta_p': {}}
+        
+        for (i, j), constr in self.constrs_y['alpha_p'].items():
+            pi = constr.Pi
+            if abs(pi) > TOL:
+                v_comps['alpha_p'][i, j] = pi
+                cut_y_expr += pi * self.x[i, j]
+                cut_y_val += pi * x_sol[i, j]
+                
+        for (i, j), constr in self.constrs_y['beta_p'].items():
+            pi = constr.Pi
+            if abs(pi) > TOL:
+                v_comps['beta_p'][i, j] = pi
+                cut_y_expr += pi * (self.x[i, j] - self.x[j, i])
+                cut_y_val += pi * (x_sol[i, j] - x_sol[j, i])
+                
+        for (i, j), constr in self.constrs_y['gamma_p'].items():
+            pi = constr.Pi
+            if abs(pi) > TOL:
+                v_comps['gamma_p'][i, j] = pi
+                cut_y_expr += pi * self.x[i, j]
+                cut_y_val += pi * x_sol[i, j]
+                
+        for (i, j), constr in self.constrs_y['delta_p'].items():
+            pi = constr.Pi
+            if abs(pi) > TOL:
+                v_comps['delta_p'][i, j] = pi
+                cut_y_expr += pi * (1 - self.x[j, i])
+                cut_y_val += pi * (1 - x_sol[j, i])
+        
+        if 'global' in self.constrs_y:
+            pi_global = self.constrs_y['global'].Pi
+            if abs(pi_global) > TOL:
+                rhs_global = self.constrs_y['global'].RHS
+                v_comps['global'] = pi_global
+                cut_y_expr += pi_global * rhs_global
+                cut_y_val += pi_global * rhs_global
+
+        if hasattr(self, '_log_and_print_pi'):
+            self._log_and_print_pi(v_comps, cut_y_val, "Y_OPT", TOL, x_sol, cut_y_expr, ">=")
+            
+        return cut_y_expr, cut_y_val
 
 
     def _log_and_print_farkas(self, v_components, cut_val, sub_name, TOL, x_sol, cut_expr, sense=None):

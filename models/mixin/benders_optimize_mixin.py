@@ -101,6 +101,9 @@ class BendersOptimizeMixin:
                 if self.sub_y.ObjVal > eta_sol + TOL:
                     cut_expr, cut_val = self.get_optimality_cut_y(x_sol, TOL)
                     model.cbLazy(self.eta >= cut_expr)
+                elif self.sub_y.ObjVal < eta_sol - TOL:
+                    cut_expr, cut_val = self.get_optimality_cut_y(x_sol, TOL)
+                    model.cbLazy(self.eta <= cut_expr)
 
 
             # 5. Análisis del Subproblema Y'
@@ -237,6 +240,9 @@ class BendersOptimizeMixin:
                 if self.sub_y.ObjVal > eta_sol + TOL:
                     cut_expr, cut_val = self.get_optimality_cut_y(x_sol, TOL)
                     self.model.addConstr(self.eta >= cut_expr, name=f"lp_opt_cut_y_{self.iteration}")
+                elif self.sub_y.ObjVal < eta_sol - TOL:
+                    cut_expr, cut_val = self.get_optimality_cut_y(x_sol, TOL)
+                    self.model.addConstr(self.eta <= cut_expr, name=f"lp_opt_cut_y_{self.iteration}")
                 else:
                     converged_y = True
 

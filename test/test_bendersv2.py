@@ -44,7 +44,7 @@ def instancia_cargada(request):
 
 @pytest.mark.parametrize("objective", ["Fekete", "Internal"])
 @pytest.mark.parametrize("benders_method", ["farkas"])
-def test_benders_mip_equivalence(instancia_cargada, objective, benders_method):
+def test_benders_mip_equivalence_min(instancia_cargada, objective, benders_method):
     """
     Comprueba que el valor objetivo entero (MIP) de Benders sea idéntico 
     al del modelo Compacto para diferentes funciones objetivo y métodos.
@@ -78,7 +78,7 @@ def test_benders_mip_equivalence(instancia_cargada, objective, benders_method):
 
 @pytest.mark.parametrize("objective", ["Fekete", "Internal"])
 @pytest.mark.parametrize("benders_method", ["farkas"])
-def test_benders_lp_equivalence(instancia_cargada, objective, benders_method):
+def test_benders_lp_equivalence_min(instancia_cargada, objective, benders_method):
     """
     Comprueba que la relajación lineal (LP) del Maestro con Benders
     converge al mismo límite inferior que la relajación del Compacto.
@@ -97,6 +97,75 @@ def test_benders_lp_equivalence(instancia_cargada, objective, benders_method):
     # 2. Resolver LP de Benders
     benders = OAPBendersModel(points, triangles, name=f"Benders_LP_{instance_name}_{objective}_{benders_method}")
     benders.build(objective=objective, maximize=False, benders_method=benders_method)
+    
+    # Usamos tu método de resolución para la relajación en Benders
+    benders.solve(time_limit=120, verbose=False, relaxed=True)  # Resolvemos en modo relajado
+    lp_benders = benders.get_objval_lp()
+
+    # 3. Comparación con tolerancia
+    assert lp_compacto == pytest.approx(lp_benders, rel=1e-4), \
+        f"Divergencia LP en {instance_name} ({objective}): Compacto={lp_compacto:.4f} vs Benders {benders_method}={lp_benders:.4f}"
+
+
+    # =======================================================================
+# TESTS DE INTEGRACIÓN: MIP (Solución Entera)
+# =======================================================================
+
+@pytest.mark.parametrize("objective", ["Fekete", "Internal"])
+@pytest.mark.parametrize("benders_method", ["farkas"])
+def test_benders_mip_equivalence_max(instancia_cargada, objective, benders_method):
+    """
+    Comprueba que el valor objetivo entero (MIP) de Benders sea idéntico 
+    al del modelo Compacto para diferentes funciones objetivo y métodos.
+    """
+    instance_name, points, triangles = instancia_cargada
+    
+    # 1. Resolver Compacto (Nuestra fuente de verdad)
+    compacto = OAPCompactModel(points, triangles, name=f"Compact_MIP_{instance_name}_{objective}")
+    compacto.build(objective=objective, maximize=True)
+    compacto.solve()
+    
+    # Verificamos que el compacto encontró solución para tener con qué comparar
+    assert compacto.model.Status == gp.GRB.OPTIMAL, f"El modelo compacto falló en {instance_name}"
+    obj_compacto = compacto.model.ObjVal
+
+    # 2. Resolver Benders
+    benders = OAPBendersModel(points, triangles, name=f"Benders_MIP_{instance_name}_{objective}_{benders_method}")
+    benders.build(objective=objective, maximize=True, benders_method=benders_method)
+    benders.solve()
+
+    assert benders.model.Status == gp.GRB.OPTIMAL, f"Benders ({benders_method}) falló en {instance_name}"
+    obj_benders = benders.get_objval_int() # Usamos tu método específico para obtener el valor entero de Benders
+
+    # 3. Comparación con tolerancia para evitar problemas de coma flotante
+    assert obj_compacto == pytest.approx(obj_benders, rel=1e-4), \
+        f"Divergencia MIP en {instance_name} ({objective}): Compacto={obj_compacto:.4f} vs Benders {benders_method}={obj_benders:.4f}"
+
+# =======================================================================
+# TESTS DE INTEGRACIÓN: LP (Relajación Lineal / Root Node)
+# =======================================================================
+
+@pytest.mark.parametrize("objective", ["Fekete", "Internal"])
+@pytest.mark.parametrize("benders_method", ["farkas"])
+def test_benders_lp_equivalence_max(instancia_cargada, objective, benders_method):
+    """
+    Comprueba que la relajación lineal (LP) del Maestro con Benders
+    converge al mismo límite inferior que la relajación del Compacto.
+    """
+    instance_name, points, triangles = instancia_cargada
+
+    # 1. Resolver LP del Compacto
+    compacto = OAPCompactModel(points, triangles, name=f"Compact_LP_{instance_name}_{objective}")
+    compacto.build(objective=objective, maximize=True)  # Construimos el modelo en modo relajado
+    compacto.solve(time_limit=120, verbose=False, relaxed=True)  # Resolv
+    
+    # Asumo que tienes un método get_objval_lp() como mostrabas en tu test original. 
+    # Si no, esto equivaldría a: lp_compacto = compacto.model.relax(); lp_compacto.optimize(); obj = lp_compacto.ObjVal
+    lp_compacto = compacto.get_objval_lp() 
+
+    # 2. Resolver LP de Benders
+    benders = OAPBendersModel(points, triangles, name=f"Benders_LP_{instance_name}_{objective}_{benders_method}")
+    benders.build(objective=objective, maximize=True, benders_method=benders_method)
     
     # Usamos tu método de resolución para la relajación en Benders
     benders.solve(time_limit=120, verbose=False, relaxed=True)  # Resolvemos en modo relajado
