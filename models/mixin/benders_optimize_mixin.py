@@ -5,6 +5,8 @@ import gurobipy as gp
 from gurobipy import GRB
 import logging
 
+from typing import Literal
+
 logger = logging.getLogger(__name__)
 
 Arc = tuple[int, int]
@@ -22,6 +24,7 @@ class BendersOptimizeMixin:
     sub_y: gp.Model
     sub_yp: gp.Model
     benders_method: str
+    objective: Literal["Fekete", "Internal"]
     
     def _update_subproblem_rhs(self, x_sol: dict[Arc, float]) -> None:
         """
@@ -68,6 +71,8 @@ class BendersOptimizeMixin:
         if where == GRB.Callback.MIPSOL:
             # 1. Extraer la solución actual del Maestro (x_bar)
             x_sol = model.cbGetSolution(self.x)
+            
+            eta_sol = model.cbGetSolution(self.eta) if hasattr(self, 'objective') and self.objective == "Internal" else 0.0
 
             # 2. Inyectar x_bar en los RHS de los subproblemas
             self._update_subproblem_rhs(x_sol)
@@ -91,6 +96,12 @@ class BendersOptimizeMixin:
                     model.cbLazy(cut_expr <= 0)
                 elif cut_val < -TOL:
                     model.cbLazy(cut_expr >= 0)
+
+            elif self.sub_y.Status == GRB.OPTIMAL and getattr(self, 'objective', 'Fekete') == "Internal":
+                if self.sub_y.ObjVal > eta_sol + TOL:
+                    cut_expr, cut_val = self.get_optimality_cut_y(x_sol, TOL)
+                    model.cbLazy(self.eta >= cut_expr)
+
 
             # 5. Análisis del Subproblema Y'
             if self.sub_yp.Status == GRB.INFEASIBLE or (self.benders_method == "pi" and self.sub_yp.ObjVal > TOL):
@@ -187,28 +198,15 @@ class BendersOptimizeMixin:
 
             # Resolver el Maestro relajado
             self.model.optimize()
-            
-            if self.polihedral:
-                logger.info(f"Modo Polihedral activado: Extrayendo facetas en iteración {self.iteration}.")
-
-                # Generar una ruta basada en el log de cortes normal (ej. cambiando el sufijo)
-                # Asumo que tienes un self.log_path como "outputs/Logs/london-20.json"  
-
-                if hasattr(self, 'log_path') and self.log_path and self.iteration == 1:
-                    self.poly_base_path = self.log_path.replace(".json", "polyhedral_iter_{}.json")
-                else:
-                    direction = f"outputs/Logs/{self.name}"
-                    self.poly_base_path = direction + "/polyhedral_iter_{}.json"
-                    os.makedirs(direction, exist_ok=True)   
-                
-                self.poly_log_path = self.poly_base_path.format(self.iteration)
-                self.log_facets(filepath=self.poly_log_path, var_prefixes=['x', 'f'], verbose=False) 
-                if self.model.Status != GRB.OPTIMAL:
-                    logger.warning(f"El Maestro LP se detuvo con estado: {self.model.Status}")
-                    break   
 
             # Extraer solución fraccional (v.X funciona perfectamente para continuas)
             x_sol = {k: v.X for k, v in self.x.items()}
+            
+                        # BIEN (extracción estándar):
+            if hasattr(self, 'eta'):
+                eta_sol = self.eta.X
+            else:
+                eta_sol = 0.0
 
             # Actualizar RHS de los subproblemas
             # (Restamos 1 a iteration temporalmente porque _update_subproblem_rhs suma 1 por dentro)
@@ -234,9 +232,18 @@ class BendersOptimizeMixin:
                     self.model.addConstr(cut_expr <= 0, name=f"lp_cut_y_{self.iteration}")
                 elif cut_val < -TOL:
                     self.model.addConstr(cut_expr >= 0, name=f"lp_cut_y_{self.iteration}")
+
+            elif self.sub_y.Status == GRB.OPTIMAL and getattr(self, 'objective', 'Fekete') == "Internal":
+                if self.sub_y.ObjVal > eta_sol + TOL:
+                    cut_expr, cut_val = self.get_optimality_cut_y(x_sol, TOL)
+                    self.model.addConstr(self.eta >= cut_expr, name=f"lp_opt_cut_y_{self.iteration}")
+                else:
+                    converged_y = True
+
             else:
                 converged_y = True
 
+           
             # --- Análisis del Subproblema Y' ---
             if self.sub_yp.Status == GRB.INFEASIBLE or (self.benders_method == "pi" and self.sub_yp.ObjVal > TOL):
                 if self.benders_method == "farkas":

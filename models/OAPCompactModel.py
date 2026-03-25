@@ -311,6 +311,64 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
                             ))
             print(f"Añadidas {len(constrains)} restricciones de semiplano V2.")
 
+        elif version == 3:
+            for i in A_pp:
+                for j in self.CH:    
+                    if (i, j) not in self.x:
+                        continue
+                    
+                    S_left = []
+                    for k in A_pp:
+                        if k == i: 
+                            continue
+                        x_i, y_i = self.points[i]
+                        x_j, y_j = self.points[j]
+                        x_k, y_k = self.points[k]
+                        D_k = (x_j - x_i) * (y_k - y_i) - (y_j - y_i) * (x_k - x_i)
+
+                        if D_k > 0:
+                             S_left.append(k)
+
+                    idx_j = np.where(self.CH == j)[0][0]
+                    j_siguiente = self.CH[(idx_j + 1) % len(self.CH)]
+
+                    if len(S_left) == 0:
+                        nodo_actual_ch = j
+                        for step in range(1, len(self.CH)):
+                            idx_siguiente = (idx_j + step) % len(self.CH)
+                            nodo_siguiente_ch = self.CH[idx_siguiente]
+                            
+                            x_sig, y_sig = self.points[nodo_siguiente_ch]
+                            D_sig = (x_j - x_i) * (y_sig - y_i) - (y_j - y_i) * (x_sig - x_i)
+                            
+                            if D_sig > 0: 
+                                if (nodo_actual_ch, nodo_siguiente_ch) in self.x:
+                                    constrains.append(
+                                        self.model.addConstr(
+                                            self.x[i, j] <= self.x[nodo_actual_ch, nodo_siguiente_ch],
+                                            name=f"semiplano_cadena_{i}_{j}_fuerza_{nodo_actual_ch}_{nodo_siguiente_ch}"
+                                        ))
+                                nodo_actual_ch = nodo_siguiente_ch
+                            else:
+                                break
+                    else:
+                        expr_escape = gp.LinExpr()
+                        if (j, j_siguiente) in self.x:
+                            expr_escape.addTerms(1.0, self.x[j, j_siguiente])
+
+                        for k in S_left:
+                            if (j, k) in self.x:
+                                expr_escape.addTerms(1.0, self.x[j, k])
+
+                        constrains.append(
+                            self.model.addConstr(
+                                self.x[i, j] <= expr_escape,
+                                name=f"bolsillo_{i}_{j}_soporta_{len(S_left)}_puntos"
+                            ))
+            print(f"Añadidas {len(constrains)} restricciones de semiplano V3.")
+
+
+
     def inyectar_cortes_knapsack_locales(self):
         """Inyecta restricciones de mochila que limitan la contribución fraccionaria."""
         cortes_añadidos = 0

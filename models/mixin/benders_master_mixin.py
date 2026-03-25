@@ -3,6 +3,7 @@ import gurobipy as gp
 from gurobipy import GRB
 from utils.utils import cost_function_area, compute_crossing_edges
 from models.typing_oap import NumericArray, IndexArray, TrianglesAdjList
+from typing import Literal
 
 class BendersMasterMixin:
     """Mixin exclusivo para construir el Problema Maestro de Benders."""
@@ -16,17 +17,18 @@ class BendersMasterMixin:
     triangles_adj_list: TrianglesAdjList
     x: dict
     f: dict
+    eta: gp.Var
 
     def build_master(
         self, 
-        objective: str = "Fekete", 
+        objective: Literal["Fekete", "Internal"] = "Fekete", 
         mode: int = 0, 
         maximize: bool = True, 
         crosses_constrain: bool = False
     ) -> None:
         """Construye las variables y restricciones del Problema Maestro."""
 
-        self._add_variables_master()  # Método auxiliar para añadir variables al maestro
+        self._add_variables_master(objective)  # Método auxiliar para añadir variables al maestro
         
         # --- Función Objetivo ---
         self._add_function_objective_master(objective, mode, maximize)  # Método auxiliar para configurar la función objetivo del maestro
@@ -43,13 +45,18 @@ class BendersMasterMixin:
 
         self.model.update()
 
-    def _add_variables_master(self):
+    def _add_variables_master(self, objective: Literal["Fekete", "Internal"]):
         """Método auxiliar para añadir variables al maestro (si es necesario)."""
         self.x = {(i, j): self.model.addVar(vtype=GRB.BINARY, name=f"x_{i}_{j}") 
                   for i in self.N_list for j in self.N_list if i != j}
         
         self.f = {(i, j): self.model.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"f_{i}_{j}") 
                   for i in self.N_list for j in self.N_list if i != j}
+
+        # Instanciamos la variable artificial eta solo si usamos la descomposición guiada por triángulos
+        if objective == "Internal":
+            self.eta = self.model.addVar(vtype=GRB.CONTINUOUS, lb=0, ub = self.convex_hull_area, name="eta")
+            self.objective = objective  # Guardamos el objetivo para usarlo en callbacks o futuras referencias
 
         # --- Limpieza de la CH ---
         for i in range(len(self.CH)):
@@ -69,12 +76,14 @@ class BendersMasterMixin:
                     var_dict.pop((self.CH[j], self.CH[i]), None)
 
 
-    def _add_function_objective_master(self, objective: str, mode: int, maximize: bool):
+    def _add_function_objective_master(self, objective: Literal["Fekete", "Internal"], mode: int, maximize: bool):
         """Método auxiliar para configurar la función objetivo del maestro."""
+        opt_sense = GRB.MAXIMIZE if maximize else GRB.MINIMIZE
         if objective == "Fekete":
             c = cost_function_area(self.points, self.x.keys(), mode=mode)
-            opt_sense = GRB.MAXIMIZE if maximize else GRB.MINIMIZE
             self.model.setObjective(gp.quicksum(c[i] * self.x[i] for i in self.x.keys()), opt_sense)
+        elif objective == "Internal":
+            self.model.setObjective(self.eta, opt_sense)
 
     def _add_degree_constraints_master(self):
         """Método auxiliar para añadir restricciones de grado al maestro."""
