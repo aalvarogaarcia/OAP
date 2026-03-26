@@ -3,14 +3,13 @@ import gurobipy as gp
 from gurobipy import GRB
 import numpy as np
 from models.typing_oap import IndexArray, TrianglesAdjList
+from typing import Literal
 import logging
+from utils.utils import signed_area
 
 
 # Instanciamos el logger para este módulo
 logger = logging.getLogger(__name__)
-
-# Si mantienes la función de logging en un archivo de utilidades, impórtala aquí:
-
 
 Arc = tuple[int, int]
 RayComponents = dict[str, dict[Arc, float] | float]
@@ -48,6 +47,12 @@ class BendersFarkasMixin:
         
         # 2. Creación de variables Y y YP en sus respectivos modelos
         self.y = self.sub_y.addVars(self.V_list, vtype=GRB.CONTINUOUS, lb=0, name="y")
+
+        if hasattr(self, 'objective') and self.objective == "Internal":
+            at = [np.abs(signed_area(self.points[tri[0]], self.points[tri[1]], self.points[tri[2]])) for tri in self.triangles]
+            self.sub_y.setObjective(gp.quicksum(at[t] * self.y[t] for t in self.V_list), GRB.MINIMIZE)
+
+
         self.yp = self.sub_yp.addVars(self.V_list, vtype=GRB.CONTINUOUS, lb=0, name="yp")
         
         # 3. Inicializar diccionarios de restricciones
@@ -171,6 +176,100 @@ class BendersFarkasMixin:
         
         return cut_yp_expr, cut_yp_val
 
+    
+    def get_optimality_cut_y(self, x_sol: dict[Arc, float], TOL: float = 1e-10) -> tuple[gp.LinExpr, float]:
+        """Extrae el corte de optimalidad usando variables duales (.Pi) del subproblema Y."""
+        cut_y_expr = gp.LinExpr()
+        cut_y_val = 0.0
+        v_comps: RayComponents = {'alpha': {}, 'beta': {}, 'gamma': {}, 'delta': {}}
+        
+        for (i, j), constr in self.constrs_y['alpha'].items():
+            pi = constr.Pi
+            if abs(pi) > TOL:
+                v_comps['alpha'][i, j] = pi
+                cut_y_expr += pi * self.x[i, j]
+                cut_y_val += pi * x_sol[i, j]
+                
+        for (i, j), constr in self.constrs_y['beta'].items():
+            pi = constr.Pi
+            if abs(pi) > TOL:
+                v_comps['beta'][i, j] = pi
+                cut_y_expr += pi * (self.x[i, j] - self.x[j, i])
+                cut_y_val += pi * (x_sol[i, j] - x_sol[j, i])
+                
+        for (i, j), constr in self.constrs_y['gamma'].items():
+            pi = constr.Pi
+            if abs(pi) > TOL:
+                v_comps['gamma'][i, j] = pi
+                cut_y_expr += pi * self.x[i, j]
+                cut_y_val += pi * x_sol[i, j]
+                
+        for (i, j), constr in self.constrs_y['delta'].items():
+            pi = constr.Pi
+            if abs(pi) > TOL:
+                v_comps['delta'][i, j] = pi
+                cut_y_expr += pi * (1 - self.x[j, i])
+                cut_y_val += pi * (1 - x_sol[j, i])
+        
+        if 'global' in self.constrs_y:
+            pi_global = self.constrs_y['global'].Pi
+            if abs(pi_global) > TOL:
+                rhs_global = self.constrs_y['global'].RHS
+                v_comps['global'] = pi_global
+                cut_y_expr += pi_global * rhs_global
+                cut_y_val += pi_global * rhs_global
+
+        if hasattr(self, '_log_and_print_pi'):
+            self._log_and_print_pi(v_comps, cut_y_val, "Y_OPT", TOL, x_sol, cut_y_expr, ">=")
+            
+        return cut_y_expr, cut_y_val
+
+    def get_optimality_cut_yp(self, x_sol: dict[Arc, float], TOL: float = 1e-10) -> tuple[gp.LinExpr, float]:
+        """Extrae el corte de optimalidad usando variables duales (.Pi) del subproblema Y."""
+        cut_y_expr = gp.LinExpr()
+        cut_y_val = 0.0
+        v_comps: RayComponents = {'alpha_p': {}, 'beta_p': {}, 'gamma_p': {}, 'delta_p': {}}
+        
+        for (i, j), constr in self.constrs_y['alpha_p'].items():
+            pi = constr.Pi
+            if abs(pi) > TOL:
+                v_comps['alpha_p'][i, j] = pi
+                cut_y_expr += pi * self.x[i, j]
+                cut_y_val += pi * x_sol[i, j]
+                
+        for (i, j), constr in self.constrs_y['beta_p'].items():
+            pi = constr.Pi
+            if abs(pi) > TOL:
+                v_comps['beta_p'][i, j] = pi
+                cut_y_expr += pi * (self.x[i, j] - self.x[j, i])
+                cut_y_val += pi * (x_sol[i, j] - x_sol[j, i])
+                
+        for (i, j), constr in self.constrs_y['gamma_p'].items():
+            pi = constr.Pi
+            if abs(pi) > TOL:
+                v_comps['gamma_p'][i, j] = pi
+                cut_y_expr += pi * self.x[i, j]
+                cut_y_val += pi * x_sol[i, j]
+                
+        for (i, j), constr in self.constrs_y['delta_p'].items():
+            pi = constr.Pi
+            if abs(pi) > TOL:
+                v_comps['delta_p'][i, j] = pi
+                cut_y_expr += pi * (1 - self.x[j, i])
+                cut_y_val += pi * (1 - x_sol[j, i])
+        
+        if 'global' in self.constrs_y:
+            pi_global = self.constrs_y['global'].Pi
+            if abs(pi_global) > TOL:
+                rhs_global = self.constrs_y['global'].RHS
+                v_comps['global'] = pi_global
+                cut_y_expr += pi_global * rhs_global
+                cut_y_val += pi_global * rhs_global
+
+        if hasattr(self, '_log_and_print_pi'):
+            self._log_and_print_pi(v_comps, cut_y_val, "Y_OPT", TOL, x_sol, cut_y_expr, ">=")
+            
+        return cut_y_expr, cut_y_val
 
 
     def _log_and_print_farkas(self, v_components, cut_val, sub_name, TOL, x_sol, cut_expr, sense=None):
@@ -204,26 +303,23 @@ class BendersFarkasMixin:
         # 2. Tu registro JSON/Estructurado personalizado (para el Post-Mortem)
         if self.save_cuts and hasattr(self, 'log_path'):
             try:
-                from utils.utils import log_farkas_ray
+                from utils.utils import log_benders_cut
                 
-                log_farkas_ray(
+                log_benders_cut(
                     filepath=self.log_path,
                     iteration=self.iteration,
                     node_depth=0,
                     subproblem_type='Y' if sub_name == 'Y' else 'Y_prime',
                     x_sol=x_sol,
                     v_components=v_components,
-                    violation_value=cut_val,
+                    cut_value=cut_val,
                     tolerance=TOL,
                     cut_expr=cut_expr,
                     sense=sense
                 )
             except NameError:
-                logger.warning("No se pudo guardar el log estructurado: log_farkas_ray no está definido.")
+                logger.warning("No se pudo guardar el log estructurado: log_benders_cut no está definido.")
             
-
-
-
 
     def _add_sum_constrain_farkas(self):
         """Método auxiliar para añadir la restricción de suma en los subproblemas."""

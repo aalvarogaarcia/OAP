@@ -98,10 +98,17 @@ class BendersPiMixin:
                 v_comps['global'] = pi_global
                 cut_y_expr += pi_global * rhs_global
                 cut_y_val += pi_global * rhs_global
+        
 
-        self._log_and_print_pi(v_comps, cut_y_val, "Y")
+   
+        if cut_y_val > TOL:
+            sense = "<="
+        elif cut_y_val < -TOL:
+            sense = ">="
+        self._log_and_print_pi(v_comps, cut_y_val, "Y", TOL, x_sol, cut_y_expr, sense)
+        
         return cut_y_expr, cut_y_val
-
+    
     def get_pi_cut_yp(self, x_sol: dict[Arc, float], TOL: float = 1e-10) -> tuple[gp.LinExpr, float]:
         """Extrae el corte de Benders usando variables duales (.Pi) del subproblema YP."""
         cut_yp_expr = gp.LinExpr()
@@ -144,19 +151,35 @@ class BendersPiMixin:
                 cut_yp_expr += pi_global_p * rhs_global_p
                 cut_yp_val += pi_global_p * rhs_global_p
 
-        self._log_and_print_pi(v_comps_p, cut_yp_val, "Y'")
+        if cut_yp_val > TOL:
+            sense = "<="
+        elif cut_yp_val < -TOL:
+            sense = ">="
+        else:
+            sense = "==" # Por si acaso
+
+        self._log_and_print_pi(v_comps_p, cut_yp_val, "Y'", TOL, x_sol, cut_yp_expr, sense)
         return cut_yp_expr, cut_yp_val
 
-    def _log_and_print_pi(self, v_components, cut_val, sub_name):
-        """Método auxiliar interno para registrar el log del corte de Pi."""
+    def _log_and_print_pi(self, v_components, cut_val, sub_name, TOL, x_sol, cut_expr, sense=None):
+        """Método auxiliar interno para registrar el log de variables duales (.Pi).
+        Diferencia automáticamente entre cortes de Optimalidad y Factibilidad.
+        """
         verbose = getattr(self, 'verbose', False)
         save_cuts = getattr(self, 'save_cuts', False)
         
+        # Determinar si el corte es de optimalidad basado en el nombre del subproblema
+        is_optimality = (sub_name == 'Y_OPT')
+        
+        tipo_corte = "OPTIMALIDAD" if is_optimality else "FACTIBILIDAD"
+        nombre_impreso = "Y" if is_optimality else sub_name
+        
+        # 1. Registro en la consola / archivo log estándar de Python
         if save_cuts and verbose:
             log_msg = [
                 f"\n{'='*50}",
-                f"CORTE DUAL (MÉTODO PI) DETECTADO EN SUBPROBLEMA {sub_name}",
-                f"Valor de la suma artificial (inviabilidad): {cut_val:.6f}"
+                f"CORTE DE {tipo_corte} (MÉTODO PI) DETECTADO EN SUBPROBLEMA {nombre_impreso}",
+                f"Valor {'del coste real evaluado' if is_optimality else 'numérico de la violación'}: {cut_val:.6f}"
             ]
             
             for comp, values in v_components.items():
@@ -171,8 +194,31 @@ class BendersPiMixin:
             log_msg.append(f"{'='*50}\n")
             logger.info("\n".join(log_msg))
 
-
-
+        # 2. Registro JSON/Estructurado personalizado (para el Post-Mortem)
+        if self.save_cuts and hasattr(self, 'log_path'):
+            try:
+                # Nota: Uso log_benders_cut para mantener compatibilidad con tu código actual. 
+                # Si en el futuro la renombras a log_benders_cut en utils.py, actualízalo aquí.
+                from utils.utils import log_benders_cut
+                
+                # Para el JSON, mantenemos la etiqueta Y_OPT para que el visualizador 
+                # (Post-Mortem) sepa que es de optimalidad.
+                json_subproblem_type = 'Y_OPT' if is_optimality else ('Y' if sub_name == 'Y' else 'Y_prime')
+                
+                log_benders_cut(
+                    filepath=self.log_path,
+                    iteration=getattr(self, 'iteration', 0),
+                    node_depth=0,
+                    subproblem_type=json_subproblem_type,
+                    x_sol=x_sol,
+                    v_components=v_components,
+                    cut_value=cut_val,
+                    tolerance=TOL,
+                    cut_expr=cut_expr,
+                    sense=sense
+                )
+            except ImportError:
+                logger.warning("No se pudo guardar el log estructurado: log_benders_cut no está definido.")
 
 
     def _configurar_parametros_pi(self) -> None:

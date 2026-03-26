@@ -945,20 +945,26 @@ def inyectar_cliques_de_cruce(model: gp.Model, points: NDArray[np.int64]) -> gp.
 
 
 
-def log_farkas_ray(filepath: str, iteration: int, node_depth: int, subproblem_type: str, 
-                   x_sol: dict[tuple[int, int], float], v_components: dict[str, Any], violation_value: float, 
+import os
+import json
+import gurobipy as gp
+from typing import Any, cast
+# Asegúrate de importar tus tipos personalizados: SerializedCoeffMap, SerializedRayData, Arc, serialize_expr
+
+def log_benders_cut(filepath: str, iteration: int, node_depth: int, subproblem_type: str, 
+                   x_sol: dict[tuple[int, int], float], v_components: dict[str, Any], cut_value: float, 
                    tolerance: float = 1e-5, cut_expr: gp.LinExpr | None = None, sense: str | None = None) -> None:
     """
-    Registra la información de un rayo de Farkas y la solución candidata en un archivo JSONL.
+    Registra la información de un corte de Benders (Factibilidad u Optimalidad) en un archivo JSONL.
     
     Args:
         filepath: Ruta del archivo .jsonl donde se guardará el log.
         iteration: Número de iteración o contador de cortes.
         node_depth: Profundidad del árbol de exploración (0 para nodo raíz/soluciones enteras).
-        subproblem_type: 'Y' o 'Y_prime'.
+        subproblem_type: 'Y' (Factibilidad externa), 'Y_prime' (Factibilidad interna) o 'Y_OPT' (Optimalidad).
         x_sol: Diccionario con los valores de la solución maestra actual.
-        v_components: Diccionario con los componentes del rayo (alpha, beta, etc.).
-        violation_value: El valor numérico de la violación del corte.
+        v_components: Diccionario con los componentes del rayo o vértice dual (alpha, beta, gamma, delta, global).
+        cut_value: Violación del corte (factibilidad) o coste real de la triangulación (optimalidad).
         tolerance: Valor por debajo del cual se considera que una variable es 0.
         cut_expr: Expresión del corte generado (para debugging o análisis).
         sense: Sentido del corte ('<=', '>=', o None).
@@ -970,14 +976,15 @@ def log_farkas_ray(filepath: str, iteration: int, node_depth: int, subproblem_ty
         if abs(val) > tolerance
     }
 
-    # 2. Estructurar los componentes del rayo
+    # 2. Estructurar los componentes duales / rayo de Farkas
     ray_data: SerializedRayData = {}
     for comp_name, values in v_components.items():
-        if values:
+        if values: # Detecta tanto diccionarios con contenido como floats distintos de cero
             if isinstance(values, dict):
                 typed_values = cast(dict[Arc, float], values)
                 ray_data[comp_name] = {f"{k[0]}_{k[1]}": round(v, 4) for k, v in typed_values.items()}
             else:
+                # Maneja la constante 'global'
                 ray_data[comp_name] = round(cast(float, values), 4)
 
     serialized_cut = serialize_expr(cut_expr) if cut_expr else None
@@ -987,10 +994,10 @@ def log_farkas_ray(filepath: str, iteration: int, node_depth: int, subproblem_ty
         "iteration": iteration,
         "node_depth": node_depth,
         "subproblem": subproblem_type,
-        "violation": round(violation_value, 6),
+        "cut_value": round(cut_value, 6), # Renombrado de 'violation' a 'cut_value' en el JSON
         "sense": sense,
         "active_x": active_x,
-        "ray_components": ray_data,
+        "dual_components": ray_data,      # Renombrado de 'ray_components' a 'dual_components'
         "cut_expr": serialized_cut,
     }
     
@@ -1000,8 +1007,6 @@ def log_farkas_ray(filepath: str, iteration: int, node_depth: int, subproblem_ty
     # 5. Escribir en formato JSON Lines (append mode)
     with open(filepath, 'a') as f:
         f.write(json.dumps(registro) + '\n')
-
-
 
 
 def serialize_expr(expr: gp.LinExpr | None) -> SerializedExpr | None:
