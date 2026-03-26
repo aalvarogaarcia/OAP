@@ -19,7 +19,8 @@ def run_batch(
     filter_texts: list[str], 
     time_limit: int, 
     benders_method: Literal['farkas', 'pi'],
-    maximize: bool
+    maximize: bool,
+    lp: bool
 ):
     """
     Busca instancias que coincidan con 'filter_texts', las resuelve con Benders
@@ -84,18 +85,19 @@ def run_batch(
             pdf = pdf_path.replace("Report", "Cut_Analysis")
             benders.generate_combinatorial_report(output_pdf=pdf, max_vars = 10)
 
-            pdf_path = pdf_path.replace("MILP", "LP")
-            
-            # El mixin se encargará de guardar el JSON en outputs/Logs/benders_{name}.json
-            benders.solve(time_limit=time_limit, verbose=False, save_cuts=True, relaxed=True)
-            
-            # 4. Generar Reporte PDF
-            benders.generate_benders_report(output_pdf_path=pdf_path)
-
-            pdf = pdf_path.replace("Report", "Cut_Analysis")
-            benders.generate_combinatorial_report(output_pdf=pdf, max_vars = 10)
-
-            exitosas += 1
+            if lp:
+                pdf_path = pdf_path.replace("MILP", "LP")
+                
+                # El mixin se encargará de guardar el JSON en outputs/Logs/benders_{name}.json
+                benders.solve(time_limit=time_limit, verbose=False, save_cuts=True, relaxed=True)
+                
+                # 4. Generar Reporte PDF
+                benders.generate_benders_report(output_pdf_path=pdf_path)
+    
+                pdf = pdf_path.replace("Report", "Cut_Analysis")
+                benders.generate_combinatorial_report(output_pdf=pdf, max_vars = 10)
+    
+                exitosas += 1
             
         except Exception as e:
             logger.error(f"❌ Fallo crítico al procesar {instance_name}: {e}")
@@ -119,6 +121,8 @@ if __name__ == "__main__":
                         help="Método de subproblema a usar (farkas o pi).")
     parser.add_argument("--maximize", action="store_true", 
                         help="Si se incluye este flag, el modelo maximizará. Por defecto minimiza.")
+    parser.add_argument("--lp", action="store_true",
+                        help="Si se incluye este flag, también se resolverá la versión relajada (LP) de cada instancia para análisis comparativo.")
 
     args = parser.parse_args()
 
@@ -127,5 +131,6 @@ if __name__ == "__main__":
         filter_texts=args.filter,
         time_limit=args.time,
         benders_method=args.method,
-        maximize=args.maximize
+        maximize=args.maximize,
+        lp = args.lp
     )
