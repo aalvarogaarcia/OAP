@@ -60,9 +60,8 @@ class OAPStatsMixin:
             
         # 3. Si es Benders MIP y no hemos calculado el LP previamente
         if hasattr(self, 'benders_method'):
-            # No podemos usar .relax() porque destruiría los callbacks.
-            # Avisamos de que el LP debe calcularse explícitamente primero.
-            return "-"
+            self.solve_lp_relaxation()
+            return self.model.ObjVal
 
         # 4. Si es Compacto MIP (Comportamiento Clásico)
         lp = self.model.relax()
@@ -122,25 +121,26 @@ class OAPStatsMixin:
 
         tour = self.get_tour()
 
-        return (
-            f"-" * 30 + "\n"
-            f"--- Valores del modelo matemático ---\n"
-            f"-" * 30 + "\n"
-            f"Columnas modelo original: {self.model.NumVars}\n"
-            f"Filas modelo original: {self.model.NumConstrs}\n"
-            f"Area de la envolvente convexa: {self.convex_hull_area}\n\n"
-            f"-" * 30 + "\n"
-            f"--- Valores del modelo IP y Relajado ---\n"
-            f"-" * 30 + "\n"
-            f"Instance: {self.model.ModelName}\n"
-            f"IP Objective Value: {ip_str}\n"
-            f"LP Objective Value: {lp_str}\n"
-            f"Optimality Gap: {gap_str}\n"
-            f"Elapsed Time: {elapsed_time:.2f} seconds\n"
-            f"Number of Nodes Explored: {nodes}\n\n"
-            f"-" * 30 + "\n"
-            f"--- Tour obtenido ---\n"
-            f"{tour}\n"
-            f"-" * 30 + "\n"
-            f"Resultados: LP={lp_str}, Gap={gap_str}, IP={ip_str}, Time={elapsed_time:.2f}s, Nodes={nodes}"
-        )
+        str_format =  f"""{'-' * 30}
+--- Valores del modelo matemático ({"Benders" if hasattr(self, 'benders_method') else "Compacto"}) ---
+{'-' * 30}
+Columnas modelo original: {self.model.NumVars}
+Filas modelo original: {self.model.NumConstrs}
+Area de la envolvente convexa: {self.convex_hull_area}
+
+{'-' * 30}
+--- Valores del modelo IP y Relajado ---
+{'-' * 30}
+Instance: {self.model.ModelName}
+IP Objective Value: {ip_str}
+LP Objective Value: {lp_str}
+Optimality Gap: {gap_str}
+Elapsed Time: {elapsed_time:.2f} seconds
+Number of Nodes Explored: {nodes}
+
+{'-' * 30}
+--- Tour obtenido ---
+{tour}
+{'-' * 30}
+Resultados: LP={lp_str}, Gap={gap_str}, IP={ip_str}, Time={elapsed_time:.2f}s, Nodes={nodes}\n\n\n"""
+        return str_format
