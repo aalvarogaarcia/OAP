@@ -295,9 +295,9 @@ class BendersPiMixin:
                 obj_yp += art_vars.sum()
             else:
                 obj_yp += art_vars
-
-        self.sub_y.setObjective(obj_y, GRB.MINIMIZE)
-        self.sub_yp.setObjective(obj_yp, GRB.MINIMIZE)
+        sense = self.model.ModelSense if hasattr(self, 'model') else GRB.MINIMIZE
+        self.sub_y.setObjective(obj_y, sense)
+        self.sub_yp.setObjective(obj_yp, sense)
 
     def _añadir_restricciones_pi(self, A_prime: list[Arc], A_double_prime: list[Arc], A_double_prime_beta: list[Arc], sum_constrain: bool) -> None:
         """Construye las ecuaciones matemáticas integrando las variables reales y las artificiales."""

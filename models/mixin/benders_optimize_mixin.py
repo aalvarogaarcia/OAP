@@ -98,10 +98,11 @@ class BendersOptimizeMixin:
                     model.cbLazy(cut_expr >= 0)
 
             elif self.sub_y.Status == GRB.OPTIMAL and getattr(self, 'objective', 'Fekete') == "Internal":
-                if self.sub_y.ObjVal > eta_sol + TOL:
+                rel_tol = max(TOL, 1e-5 * abs(eta_sol))
+                if self.sub_y.ObjVal > eta_sol + rel_tol:
                     cut_expr, cut_val = self.get_optimality_cut_y(x_sol, TOL)
                     model.cbLazy(self.eta >= cut_expr)
-                elif self.sub_y.ObjVal < eta_sol - TOL:
+                elif self.sub_y.ObjVal < eta_sol - rel_tol:
                     cut_expr, cut_val = self.get_optimality_cut_y(x_sol, TOL)
                     model.cbLazy(self.eta <= cut_expr)
 
@@ -165,18 +166,31 @@ class BendersOptimizeMixin:
             logger.warning(f"La optimización terminó con estado: {self.model.Status}")
 
 
-    def solve_lp_relaxation(self, time_limit: int = 7200, verbose: bool = False) -> None:
+    def solve_lp_relaxation(self, time_limit: int = 7200, verbose: bool = False, save_cuts: bool = False, polihedral: bool = False) -> None:
         """
         Resuelve la relajación LP del modelo usando un bucle manual de Benders.
         (Obligatorio para LPs, ya que Gurobi no dispara callbacks MIPSOL en continuas).
         """
         logger.info("Iniciando resolución de la relajación LP con Benders...")
         self.verbose = verbose
+        self.save_cuts = save_cuts
+        self.polihedral = polihedral
 
         # 1. Transformar el modelo a LP (in-place para mantener referencias a self.x)
         for v in self.model.getVars():
             if v.VType != GRB.CONTINUOUS:
                 v.VType = GRB.CONTINUOUS
+        
+        # PREVENCIÓN DE ERROR '.X': Acotar 'eta' inicialmente previene que el LP sea UNBOUNDED. 
+        if hasattr(self, 'eta'):
+            if self.model.ModelSense == GRB.MAXIMIZE:
+                if self.eta.UB > 1e12:
+                    self.eta.UB = 1e12
+            else:
+                if self.eta.LB < -1e12:
+                    self.eta.LB = -1e12
+        
+        self.model.update()
         self.model.update()
 
         # 2. Configurar parámetros para el bucle manual LP
@@ -201,7 +215,12 @@ class BendersOptimizeMixin:
 
             # Resolver el Maestro relajado
             self.model.optimize()
-
+            
+            # Evita fallo al acceder a `.X` si la relajación acaba infactible
+            if self.model.Status == GRB.INFEASIBLE:
+                logger.warning(f"El modelo Maestro LP se volvió INFACTIBLE en la iteración {self.iteration}.")
+                break
+            
             # Extraer solución fraccional (v.X funciona perfectamente para continuas)
             x_sol = {k: v.X for k, v in self.x.items()}
             
