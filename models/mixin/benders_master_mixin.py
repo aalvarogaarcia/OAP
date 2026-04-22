@@ -14,6 +14,7 @@ class BendersMasterMixin:
     N: int
     CH: IndexArray
     points: NumericArray
+    triangles: IndexArray
     triangles_adj_list: TrianglesAdjList
     x: dict
     f: dict
@@ -106,7 +107,7 @@ class BendersMasterMixin:
 
     def _add_crossing_constraints_master(self):
         """Método auxiliar para añadir restricciones de cruce al maestro."""
-        crossing = compute_crossing_edges(self.points, self.x.keys())
+        crossing = compute_crossing_edges(self.triangles, self.points)
         for cross in crossing:
             i, j, k, m = cross
             if (i, j) in self.x and (j, i) in self.x and (k, m) in self.x and (m, k) in self.x:

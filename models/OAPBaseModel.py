@@ -59,7 +59,7 @@ class OAPBaseModel(OAPStatsMixin):
                 except AttributeError:
                     raise ValueError(f"El modelo no tiene solución para la variable {v.VarName}.")
 
-        if self.verbose:
+        if verbose:
             logger.info(f"Dimensión del sub-espacio: {len(free_indices)} variables ({', '.join(var_prefixes)}) libres.")
             logger.info(f"Variables congeladas: {len(fixed_dict)}")
 

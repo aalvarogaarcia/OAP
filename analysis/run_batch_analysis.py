@@ -1,5 +1,6 @@
 import argparse
 import logging
+import os
 from pathlib import Path
 
 # Ajusta las rutas de importación a tu proyecto
@@ -55,7 +56,7 @@ def run_batch(
     logger.info("=" * 60)
 
     exitosas = 0
-
+    errores = 0
     for i, instance_path in enumerate(instancias_filtradas, 1):
         instance_name = instance_path.stem
         logger.info(f"\n--- Procesando Instancia {i}/{total}: {instance_name} ---")
@@ -66,20 +67,26 @@ def run_batch(
             triangles = compute_triangles(points)
             
             # 2. Instanciar el modelo
+            log_path = f"outputs/Logs/benders_{instance_name}_MILP.json"
+
             benders = OAPBendersModel(points, triangles, name=instance_name)
             benders.build(
                 objective="Fekete", 
                 maximize=maximize, 
                 benders_method=benders_method, 
-                sum_constrain=True
+                sum_constrain=True,
             )
             
+            benders.set_log_path(log_path)  # Configura la ruta del log para este modelo
+
             # 3. Resolver (Obligatorio save_cuts=True para el análisis)
             # El mixin se encargará de guardar el JSON en outputs/Logs/benders_{name}.json
             benders.solve(time_limit=time_limit, verbose=False, save_cuts=True)
             
             # 4. Generar Reporte PDF
             pdf_path = f"outputs/Analysis/MILP/Report/{"MAX" if maximize else "MIN"}_{benders_method}_{instance_name}.pdf"
+
+            os.makedirs(os.path.dirname(pdf_path), exist_ok=True)
             benders.generate_benders_report(output_pdf_path=pdf_path)
 
             pdf = pdf_path.replace("Report", "Cut_Analysis")
@@ -89,22 +96,26 @@ def run_batch(
                 pdf_path = pdf_path.replace("MILP", "LP")
                 
                 # El mixin se encargará de guardar el JSON en outputs/Logs/benders_{name}.json
+                benders.set_log_path(f"outputs/Logs/benders_{instance_name}_lp_relaxation.json")
                 benders.solve(time_limit=time_limit, verbose=False, save_cuts=True, relaxed=True)
                 
                 # 4. Generar Reporte PDF
+                os.makedirs(os.path.dirname(pdf_path), exist_ok=True)
                 benders.generate_benders_report(output_pdf_path=pdf_path)
     
                 pdf = pdf_path.replace("Report", "Cut_Analysis")
                 benders.generate_combinatorial_report(output_pdf=pdf, max_vars = 10)
     
-                exitosas += 1
+            exitosas += 1
             
         except Exception as e:
             logger.error(f"❌ Fallo crítico al procesar {instance_name}: {e}")
+            errores += 1
             continue
 
-    logger.info("\n" + "=" * 60)
+    logger.info( "=" * 60)
     logger.info(f"📊 RESUMEN: {exitosas} de {total} reportes generados exitosamente.")
+    logger.info(f"❌ ERRORES: {errores} instancias fallaron.")
     logger.info("=" * 60)
 
 if __name__ == "__main__":

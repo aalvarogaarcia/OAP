@@ -1,4 +1,5 @@
-from scipy.spatial import ConvexHull, Delaunay, distance
+from scipy.spatial import ConvexHull, Delaunay
+from scipy.spatial.distance import cdist
 import numpy as np
 from utils.utils import read_indexed_instance
 
@@ -55,11 +56,14 @@ def compute_delaunay(points: np.ndarray) -> set[tuple[int, int]]:
     return delaunay_edges
 
 def compute_knn_edges(points: np.ndarray, k: int = 4) -> set[tuple[int, int]]:
+    """Return the symmetric k-nearest-neighbour edge set for *points*.
 
-
+    Each undirected edge (i, j) is stored in both directions so callers can
+    do O(1) membership tests with either orientation.
+    """
     node_ids = range(len(points))
 
-    dist_matrix = distance.cdist(points, points, 'euclidean')
+    dist_matrix = cdist(points, points, 'euclidean')
     knn_edges = set()
 
     for i in node_ids:
@@ -74,8 +78,8 @@ def compute_knn_edges(points: np.ndarray, k: int = 4) -> set[tuple[int, int]]:
     return knn_edges
 
 
-points = read_indexed_instance("instance/Instancias/euro-night-0000010.instance")
-
-edges = compute_knn_edges(points)
-print(edges)
+if __name__ == "__main__":
+    points = read_indexed_instance("instance/Instancias/euro-night-0000010.instance")
+    edges = compute_knn_edges(points)
+    print(edges)
 

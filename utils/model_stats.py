@@ -47,18 +47,12 @@ def get_tour(model: gp.Model) -> list[int]:
 
 def get_Objval_lp(model: gp.Model) -> float:
     if model._benders_:
-
-        
-        from models.benders import optimize_master_LP
-        lp = optimize_master_LP(model._instance_path, 
-                                  verbose= False, 
-                                  plot= False, 
-                                  maximize=model._maximize, 
-                                  time_limit=model._time_limit,
-                                  save_cuts=model._save_cuts, 
-                                  crosses_constrain=model._crosses_constrain)
-        lp.write("outputs/Others/LP_Relaxation_Converged_Benders.sol")
-        lp.write("outputs/Others/LP_Relaxation_Converged_Benders.lp")
+        # The Benders LP relaxation path was removed when the codebase migrated to
+        # OAPBendersModel. Use OAPBendersModel.get_objval_lp() instead.
+        raise NotImplementedError(
+            "get_Objval_lp() does not support Benders models. "
+            "Use OAPBendersModel.get_objval_lp() (via OAPStatsMixin) instead."
+        )
 
 
     else: 
@@ -69,7 +63,7 @@ def get_Objval_lp(model: gp.Model) -> float:
         # 2. Optimizar (SIN asignar el resultado a la variable lp)
         lp.optimize()
 
-        os.makedirs("outpus/Others", exist_ok=True)
+        os.makedirs("outputs/Others", exist_ok=True)
     
         lp.write("outputs/Others/LP_Relaxation_Converged_Compact.sol")
         lp.write("outputs/Others/LP_Relaxation_Converged_Compact.lp")

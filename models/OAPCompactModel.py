@@ -79,8 +79,6 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
             self.inyectar_cliques_de_cruce()
 
         self.model.update()
-
-        self.model.update()  # Asegura que todas las variables y restricciones estén registradas en el modelo antes de optimizar
         
 
     def solve(self, 

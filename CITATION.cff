@@ -5,8 +5,8 @@ authors:
     given-names: "Álvaro"
     orcid: "https://orcid.org/0009-0001-1527-7833"
 title: "Optimal Area Polygonization (OAP) - MILP Framework"
-version: 0.1.0-alpha
-date-released: 2024-05-20
+version: 0.2.0
+date-released: 2026-04-22
 url: "https://github.com/aalvarogaarcia/OAP"
 repository-code: "https://github.com/aalvarogaarcia/OAP"
 abstract: >-

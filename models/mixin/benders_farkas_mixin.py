@@ -116,6 +116,7 @@ class BendersFarkasMixin:
                 cut_y_expr += farkas_global * rhs_global
                 cut_y_val += farkas_global * rhs_global
         
+        sense = None
         if cut_y_val > TOL:
             sense = "<="  # cut_expr <= 0
         elif cut_y_val < -TOL:

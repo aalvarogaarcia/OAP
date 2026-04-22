@@ -133,7 +133,7 @@ def main():
     if config['model_type'] == 'Compacto':
         print(f"\n[!] Construyendo OAPCompactModel...")
         modelo = OAPCompactModel(points, triangles, name=instance_name)
-        modelo.build(objective=config['objective'], maximize=config['maximize'], subtour_method=config['subtour'])
+        modelo.build(objective=config['objective'], maximize=config['maximize'], subtour=config['subtour'])
         
         print("\n[!] Resolviendo...")
         modelo.solve(relaxed=config['relaxed'], verbose=True)

@@ -8,7 +8,6 @@ from models.OAPCompactModel import OAPCompactModel
 from models.OAPBendersModel import OAPBendersModel
 
 # Silenciamos Gurobi por defecto para no saturar la consola durante los tests
-import gurobipy as gp
 gp.setParam('OutputFlag', 0)
 
 logger = logging.getLogger(__name__)
@@ -17,9 +16,12 @@ logger = logging.getLogger(__name__)
 # Carpeta donde están las instancias pequeñas
 INSTANCES_DIR = Path("instance/little-instances")
 
-# Obtenemos dinámicamente todas las instancias del directorio
-# Si la carpeta no existe o está vacía, pytest arrojará un aviso, pero no fallará catastróficamente
-INSTANCE_FILES = list(INSTANCES_DIR.glob("*.instance"))
+# Obtenemos dinámicamente todas las instancias del directorio.
+# Guarda contra OSError en CI donde instance/ es git-ignorado.
+INSTANCE_FILES = list(INSTANCES_DIR.glob("*.instance")) if INSTANCES_DIR.exists() else []
+
+if not INSTANCE_FILES:
+    pytest.skip("No instance files found in instance/little-instances/", allow_module_level=True)
 
 # =======================================================================
 # FIXTURES
@@ -88,7 +90,7 @@ def test_benders_lp_equivalence_min(instancia_cargada, objective, benders_method
     # 1. Resolver LP del Compacto
     compacto = OAPCompactModel(points, triangles, name=f"Compact_LP_{instance_name}_{objective}")
     compacto.build(objective=objective, maximize=False)  # Construimos el modelo en modo relajado
-    compacto.solve(time_limit=120, verbose=False, relaxed=True)  # Resolv
+    compacto.solve(time_limit=120, verbose=False, relaxed=True)  # Resolvemos la relajación LP
     
     # Asumo que tienes un método get_objval_lp() como mostrabas en tu test original. 
     # Si no, esto equivaldría a: lp_compacto = compacto.model.relax(); lp_compacto.optimize(); obj = lp_compacto.ObjVal
@@ -157,7 +159,7 @@ def test_benders_lp_equivalence_max(instancia_cargada, objective, benders_method
     # 1. Resolver LP del Compacto
     compacto = OAPCompactModel(points, triangles, name=f"Compact_LP_{instance_name}_{objective}")
     compacto.build(objective=objective, maximize=True)  # Construimos el modelo en modo relajado
-    compacto.solve(time_limit=120, verbose=False, relaxed=True)  # Resolv
+    compacto.solve(time_limit=120, verbose=False, relaxed=True)  # Resolvemos la relajación LP
     
     # Asumo que tienes un método get_objval_lp() como mostrabas en tu test original. 
     # Si no, esto equivaldría a: lp_compacto = compacto.model.relax(); lp_compacto.optimize(); obj = lp_compacto.ObjVal

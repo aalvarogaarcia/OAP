@@ -22,8 +22,9 @@ outputs/
 *.log
 *.dot
 *.ilp
-*csv
-*tsv
+*.csv
+*.tsv
+!test/**/*.tsv
 
 reference.py
 

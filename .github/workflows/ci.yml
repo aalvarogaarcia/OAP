@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "develop"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  lint-and-typecheck:
+    name: Lint & Type-check
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Install dependencies (no solver)
+        # gurobipy, cplex, and docplex require proprietary licences and are
+        # unavailable in the public runner.  We install everything else so
+        # that ruff and mypy can resolve the full dependency graph.
+        run: |
+          uv pip install --system \
+            ruff \
+            mypy \
+            numpy \
+            scipy \
+            matplotlib \
+            networkx \
+            seaborn \
+            pandas \
+            pandas-stubs \
+            openpyxl \
+            plotly \
+            scikit-learn \
+            umap-learn \
+            pytest
+
+      - name: Ruff – lint
+        run: ruff check .
+
+      - name: Ruff – format check
+        run: ruff format --check .
+
+      - name: Mypy – type check
+        # gurobipy ships its own stubs; ignore missing imports for solver libs
+        # that are absent in CI.
+        run: mypy . --ignore-missing-imports
+
+  # ---------------------------------------------------------------------------
+  # Tests require a valid Gurobi licence (GRB_LICENSE_FILE secret).
+  # Enable this job only on self-hosted runners or when the secret is available.
+  # ---------------------------------------------------------------------------
+  # test:
+  #   name: Pytest
+  #   runs-on: ubuntu-latest
+  #   needs: lint-and-typecheck
+  #   env:
+  #     GRB_LICENSE_FILE: ${{ secrets.GRB_LICENSE_FILE }}
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: actions/setup-python@v5
+  #       with:
+  #         python-version: "3.12"
+  #     - run: pip install uv && uv sync
+  #     - run: pytest -q

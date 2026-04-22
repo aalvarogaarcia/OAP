@@ -141,8 +141,9 @@ class BendersOptimizeMixin:
             self.model.Params.OutputFlag = 0
 
             # Limpiar el archivo si ya existía de una ejecución anterior
-            import os
-            os.makedirs(os.path.dirname(self.log_path), exist_ok=True)
+            _log_parent = os.path.dirname(self.log_path)
+            if _log_parent:
+                os.makedirs(_log_parent, exist_ok=True)
             with open(self.log_path, 'w') as f:
                 pass
         
@@ -173,7 +174,6 @@ class BendersOptimizeMixin:
         """
         logger.info("Iniciando resolución de la relajación LP con Benders...")
         self.verbose = verbose
-        self.save_cuts = save_cuts
         self.polihedral = polihedral
 
         # 1. Transformar el modelo a LP (in-place para mantener referencias a self.x)
@@ -190,7 +190,6 @@ class BendersOptimizeMixin:
                 if self.eta.LB < -1e12:
                     self.eta.LB = -1e12
         
-        self.model.update()
         self.model.update()
 
         # 2. Configurar parámetros para el bucle manual LP
@@ -254,6 +253,7 @@ class BendersOptimizeMixin:
                     self.model.addConstr(cut_expr <= 0, name=f"lp_cut_y_{self.iteration}")
                 elif cut_val < -TOL:
                     self.model.addConstr(cut_expr >= 0, name=f"lp_cut_y_{self.iteration}")
+                
 
             elif self.sub_y.Status == GRB.OPTIMAL and getattr(self, 'objective', 'Fekete') == "Internal":
                 if self.sub_y.ObjVal > eta_sol + TOL:
