@@ -1,11 +1,12 @@
-import numpy as np
+import json
+import logging
+
 import matplotlib.pyplot as plt
-from matplotlib.gridspec import GridSpec
+import numpy as np
 import umap
+from matplotlib.gridspec import GridSpec
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
-import logging
-import json
 
 # Ajusta el import a tu estructura
 from utils.utils import load_farkas_logs

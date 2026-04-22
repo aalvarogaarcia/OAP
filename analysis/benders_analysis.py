@@ -1,8 +1,10 @@
-import networkx as nx
-import matplotlib.pyplot as plt
 import itertools
+
+import matplotlib.pyplot as plt
+import networkx as nx
 import numpy as np
 from numpy.typing import NDArray
+
 from utils.utils import segments_intersect
 
 # --- 1. CONFIGURACIÓN DE ARCOS ---
@@ -26,7 +28,8 @@ def load_instance(filename):
         with open(filename, 'r') as f:
             for line in f:
                 line = line.strip()
-                if not line or line.startswith('#'): continue
+                if not line or line.startswith('#'):
+                    continue
                 parts = line.split()
                 if len(parts) == 3:
                     # Guardamos las coordenadas como arreglos de numpy para la función de intersección
@@ -57,7 +60,7 @@ def get_valid_cases(a_left, a_right, posiciones, constant: int = 0):
         if sum(comb) == 0:
             continue # Filtro trivial
         
-        d = dict(zip(all_vars, comb))
+        d = dict(zip(all_vars, comb, strict=False))
         
         # Filtro de antisimetría
         if any(d[v1] + d[v2] > 1 for v1, v2 in anti_pairs):

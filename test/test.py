@@ -1,8 +1,10 @@
+import time
+
+import networkx as nx
+
+from models import build_and_solve_model
 from utils.model_stats import get_model_stats, get_ObjVal_int
 from utils.utils import write_prefile
-from models import build_and_solve_model
-import time
-import networkx as nx
 
 """
 instance = "instance/euro-night-0000010.instance"

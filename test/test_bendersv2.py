@@ -1,11 +1,12 @@
-import pytest
-from pathlib import Path
-import gurobipy as gp
 import logging
+from pathlib import Path
 
-from utils.utils import read_indexed_instance, compute_triangles
-from models.OAPCompactModel import OAPCompactModel
+import gurobipy as gp
+import pytest
+
 from models.OAPBendersModel import OAPBendersModel
+from models.OAPCompactModel import OAPCompactModel
+from utils.utils import compute_triangles, read_indexed_instance
 
 # Silenciamos Gurobi por defecto para no saturar la consola durante los tests
 gp.setParam('OutputFlag', 0)

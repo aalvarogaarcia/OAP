@@ -1,13 +1,14 @@
-import gurobipy as gp
-import numpy as np
-from numpy.typing import NDArray
-from gurobipy import GRB
 from typing import Literal
-import matplotlib.pyplot as plt
 
+import gurobipy as gp
+import matplotlib.pyplot as plt
 import networkx as nx
-from models.mixin.oap_builder_mixin import OAPBuilderMixin
+import numpy as np
+from gurobipy import GRB
+from numpy.typing import NDArray
+
 from models.OAPBaseModel import OAPBaseModel
+from models.mixin.oap_builder_mixin import OAPBuilderMixin
 
 from utils.utils import (
     compute_convex_hull,

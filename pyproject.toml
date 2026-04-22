@@ -25,12 +25,17 @@ dependencies = [
 ]
 
 [tool.ruff]
-line-length = 100
+line-length = 120
 target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "B", "SIM"]
-ignore = []
+# E501  – line-too-long: solver constraint expressions routinely exceed any sane limit
+# N999  – PascalCase module names: renaming OAPBaseModel.py etc. breaks 20+ import sites
+# N802/N803/N806 – math-convention names (A_pp, D, G, TOL, CH, S_left …) are domain standard
+# SIM   – all SIM style rules: research codebase, cosmetic churn not worth it
+# UP015 – unnecessary open() mode 'r': cosmetic
+ignore = ["E501", "N999", "N802", "N803", "N806", "SIM", "UP015"]
 
 [tool.mypy]
 python_version = "3.12"

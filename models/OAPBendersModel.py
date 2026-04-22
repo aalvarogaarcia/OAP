@@ -1,9 +1,10 @@
 # models/OAPBendersModel.py
+import logging
+from typing import Literal
+
 import gurobipy as gp
 import numpy as np
 from numpy.typing import NDArray
-from typing import Literal
-import logging
 
 # --- Importamos la Base y todos nuestros Mixins ---
 from models.OAPBaseModel import OAPBaseModel

@@ -1,11 +1,10 @@
 # models/mixin/benders_optimize_mixin.py
+import logging
 import os
+from typing import Literal
 
 import gurobipy as gp
 from gurobipy import GRB
-import logging
-
-from typing import Literal
 
 logger = logging.getLogger(__name__)
 
@@ -100,10 +99,10 @@ class BendersOptimizeMixin:
             elif self.sub_y.Status == GRB.OPTIMAL and getattr(self, 'objective', 'Fekete') == "Internal":
                 rel_tol = max(TOL, 1e-5 * abs(eta_sol))
                 if self.sub_y.ObjVal > eta_sol + rel_tol:
-                    cut_expr, cut_val = self.get_optimality_cut_y(x_sol, TOL)
+                    cut_expr, _ = self.get_optimality_cut_y(x_sol, TOL)
                     model.cbLazy(self.eta >= cut_expr)
                 elif self.sub_y.ObjVal < eta_sol - rel_tol:
-                    cut_expr, cut_val = self.get_optimality_cut_y(x_sol, TOL)
+                    cut_expr, _ = self.get_optimality_cut_y(x_sol, TOL)
                     model.cbLazy(self.eta <= cut_expr)
 
 
@@ -257,10 +256,10 @@ class BendersOptimizeMixin:
 
             elif self.sub_y.Status == GRB.OPTIMAL and getattr(self, 'objective', 'Fekete') == "Internal":
                 if self.sub_y.ObjVal > eta_sol + TOL:
-                    cut_expr, cut_val = self.get_optimality_cut_y(x_sol, TOL)
+                    cut_expr, _ = self.get_optimality_cut_y(x_sol, TOL)
                     self.model.addConstr(self.eta >= cut_expr, name=f"lp_opt_cut_y_{self.iteration}")
                 elif self.sub_y.ObjVal < eta_sol - TOL:
-                    cut_expr, cut_val = self.get_optimality_cut_y(x_sol, TOL)
+                    cut_expr, _ = self.get_optimality_cut_y(x_sol, TOL)
                     self.model.addConstr(self.eta <= cut_expr, name=f"lp_opt_cut_y_{self.iteration}")
                 else:
                     converged_y = True

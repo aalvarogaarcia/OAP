@@ -1,15 +1,16 @@
-import gurobipy as gp
-from numpy.typing import NDArray
-import numpy as np
-import logging
-from gurobipy import GRB
-import cdd
 import json
+import logging
 import os
 
-from utils.utils import compute_convex_hull, compute_convex_hull_area, triangles_adjacency_list
+import cdd
+import gurobipy as gp
+import numpy as np
+from gurobipy import GRB
+from numpy.typing import NDArray
+
 from models.mixin.oap_stats_mixin import OAPStatsMixin
 from models.typing_oap import NumericArray
+from utils.utils import compute_convex_hull, compute_convex_hull_area, triangles_adjacency_list
 
 
 
@@ -31,11 +32,13 @@ class OAPBaseModel(OAPStatsMixin):
         self.name = name
         self.model = gp.Model(name)
 
-    def extract_subspace_facets(self, var_prefixes: str | list[str] = ['x'], verbose: bool = False) -> tuple[list[str], list[list[float]]]:
+    def extract_subspace_facets(self, var_prefixes: str | list[str] | None = None, verbose: bool = False) -> tuple[list[str], list[list[float]]]:
         """
         Extrae el poliedro N-dimensional correspondiente SOLO a las variables cuyos nombres
         empiezan por los prefijos indicados, fijando las demás variables a sus valores óptimos.
         """
+        if var_prefixes is None:
+            var_prefixes = ["x"]
         self.model.update()
         vars = self.model.getVars()
 
@@ -56,8 +59,8 @@ class OAPBaseModel(OAPStatsMixin):
             else:
                 try:
                     fixed_dict[i] = v.X # Congelamos las otras variables
-                except AttributeError:
-                    raise ValueError(f"El modelo no tiene solución para la variable {v.VarName}.")
+                except AttributeError as err:
+                    raise ValueError(f"El modelo no tiene solución para la variable {v.VarName}.") from err
 
         if verbose:
             logger.info(f"Dimensión del sub-espacio: {len(free_indices)} variables ({', '.join(var_prefixes)}) libres.")
@@ -104,7 +107,7 @@ class OAPBaseModel(OAPStatsMixin):
         return free_names, cdd_matrix
 
 
-    def extract_facets(self, var_prefixes: str | list[str] = ['x'], verbose: bool = False) -> tuple[list[str], list[list[float]], set]:
+    def extract_facets(self, var_prefixes: str | list[str] | None = None, verbose: bool = False) -> tuple[list[str], list[list[float]], set]:
         """
         Extrae las facetas mínimas del poliedro N-dimensional.
         Devuelve: (nombres_variables, matriz_filas, conjunto_igualdades)
@@ -127,7 +130,7 @@ class OAPBaseModel(OAPStatsMixin):
         return freenames, [mat[i] for i in range(mat.row_size)], lin_set
 
     
-    def log_facets(self, filepath: str, var_prefixes: str | list[str] = ['x'], verbose: bool = False, 
+    def log_facets(self, filepath: str, var_prefixes: str | list[str] | None = None, verbose: bool = False, 
                    freenames: list[str] | None = None, facets: list[list[float]] | None = None, lin_set: set | None = None) -> None:
         """
         Calcula las facetas y las guarda de forma estructurada (JSONL) en un archivo, 

@@ -1,8 +1,10 @@
 # models/mixin/benders_pi_mixin.py
-import gurobipy as gp
-from gurobipy import GRB
-import numpy as np
 import logging
+
+import gurobipy as gp
+import numpy as np
+from gurobipy import GRB
+
 from models.typing_oap import IndexArray, TrianglesAdjList
 
 # Instanciamos el logger para este módulo

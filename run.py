@@ -1,6 +1,7 @@
-from models import OAPBendersModel, OAPCompactModel
-from utils.utils import compute_triangles, read_indexed_instance
 import logging
+
+from models import OAPCompactModel
+from utils.utils import compute_triangles, read_indexed_instance
 
 logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s', datefmt='%H:%M:%S')
 

@@ -1,9 +1,11 @@
 # models/mixin/benders_master_mixin.py
+from typing import Literal
+
 import gurobipy as gp
 from gurobipy import GRB
-from utils.utils import cost_function_area, compute_crossing_edges
-from models.typing_oap import NumericArray, IndexArray, TrianglesAdjList
-from typing import Literal
+
+from models.typing_oap import IndexArray, NumericArray, TrianglesAdjList
+from utils.utils import compute_crossing_edges, cost_function_area
 
 class BendersMasterMixin:
     """Mixin exclusivo para construir el Problema Maestro de Benders."""
@@ -62,7 +64,8 @@ class BendersMasterMixin:
         # --- Limpieza de la CH ---
         for i in range(len(self.CH)):
             for j in range(i + 2, len(self.CH)):
-                if i == 0 and j == len(self.CH) - 1: continue
+                if i == 0 and j == len(self.CH) - 1:
+                    continue
                 for var_dict in [self.x, self.f]:
                     if (self.CH[i], self.CH[j]) in var_dict:
                         self.model.remove(var_dict[self.CH[i], self.CH[j]])

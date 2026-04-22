@@ -1,7 +1,8 @@
 import os
+
 import matplotlib.pyplot as plt
-from matplotlib.backends.backend_pdf import PdfPages
 import numpy as np
+from matplotlib.backends.backend_pdf import PdfPages
 from numpy.typing import NDArray
 
 # Importamos las funciones desde tu módulo utils

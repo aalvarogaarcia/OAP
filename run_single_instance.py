@@ -1,6 +1,7 @@
 import os
-import inquirer
 import time
+
+import inquirer
 
 from models import OAPBendersModel, OAPCompactModel
 from utils.utils import compute_triangles, read_indexed_instance
@@ -71,7 +72,8 @@ def get_experiment_config():
             )
         ]
         benders_config = inquirer.prompt(benders_questions)
-        if not benders_config: return None
+        if not benders_config:
+            return None
         config.update(benders_config) 
         
     else: # Modelo Compacto
@@ -95,7 +97,8 @@ def get_experiment_config():
             )
         ]
         compact_config = inquirer.prompt(compact_questions)
-        if not compact_config: return None
+        if not compact_config:
+            return None
         config.update(compact_config) 
         config['benders_method'] = None
         config['save_cuts'] = False

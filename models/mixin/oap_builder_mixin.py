@@ -1,9 +1,10 @@
 # oap_builder_mixin.py
 import gurobipy as gp
-from gurobipy import GRB
 import numpy as np
+from gurobipy import GRB
 from numpy.typing import NDArray
-from utils.utils import cost_function_area, signed_area # (Importa lo que necesites aquí)
+
+from utils.utils import cost_function_area, signed_area  # (Importa lo que necesites aquí)
 
 Arc = tuple[int, int]
 MCFArc = tuple[int, int, int]

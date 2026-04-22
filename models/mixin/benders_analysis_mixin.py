@@ -1,18 +1,17 @@
-import os
-import matplotlib.pyplot as plt
-from matplotlib.backends.backend_pdf import PdfPages
-import logging
-import numpy as np
-import networkx as nx
-import json
 import itertools
+import json
+import logging
+import os
 
+import matplotlib.pyplot as plt
+import networkx as nx
+import numpy as np
+from matplotlib.backends.backend_pdf import PdfPages
 
 from utils.utils import (
-    load_farkas_logs, 
-    plot_cut_heatmap, 
-    plot_farkas_ray_network, 
-    format_cut_string
+    format_cut_string,
+    load_farkas_logs,
+    plot_farkas_ray_network,
 )
 
 logger = logging.getLogger(__name__)
@@ -120,14 +119,16 @@ class BendersAnalysisMixin:
         logs = []
         with open(self.log_path, 'r') as f:
             for line in f:
-                if line.strip(): logs.append(json.loads(line))
+                if line.strip():
+                    logs.append(json.loads(line))
 
         print(f"🔍 Analizando combinaciones para {len(logs)} cortes...")
 
         with PdfPages(output_pdf_path) as pdf:
             for i, log in enumerate(logs):
                 cut_expr = log.get("cut_expr", {})
-                if not cut_expr: continue
+                if not cut_expr:
+                    continue
                 
                 coeffs = cut_expr.get("coeffs", {})
                 constant = cut_expr.get("constant", 0.0)
@@ -176,14 +177,16 @@ class BendersAnalysisMixin:
                 # 2. BÚSQUEDA COMBINATORIA
                 # ==========================================================
                 for comb in itertools.product([0, 1], repeat=len(all_vars)):
-                    if sum(comb) == 0: continue
+                    if sum(comb) == 0:
+                        continue
                     
-                    d = dict(zip(all_vars, comb))
+                    d = dict(zip(all_vars, comb, strict=False))
                     active_arcs = [all_arcs[idx] for idx, val in enumerate(comb) if val == 1]
                     
                     # Filtro Antisimetría
                     active_set = set(active_arcs)
-                    if any((v, u) in active_set for u, v in active_arcs): continue
+                    if any((v, u) in active_set for u, v in active_arcs):
+                        continue
                         
                     # Filtro Grado (Máx 1 in/out)
                     in_degree, out_degree = {}, {}
@@ -194,7 +197,8 @@ class BendersAnalysisMixin:
                         if out_degree[u] > 1 or in_degree[v] > 1:
                             invalido = True
                             break
-                    if invalido: continue
+                    if invalido:
+                        continue
                         
                     # Filtro Cruces
                     from utils.utils import segments_intersect
@@ -204,7 +208,8 @@ class BendersAnalysisMixin:
                                               self.points[e2[0]], self.points[e2[1]]):
                             has_intersect = True
                             break
-                    if has_intersect: continue
+                    if has_intersect:
+                        continue
 
                     # ==========================================================
                     # 3. FILTRO ESTRICTO DE LADOS Y EVALUACIÓN L >= R + C

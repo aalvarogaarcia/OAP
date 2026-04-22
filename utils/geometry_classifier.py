@@ -1,6 +1,7 @@
+import numpy as np
 from scipy.spatial import ConvexHull, Delaunay
 from scipy.spatial.distance import cdist
-import numpy as np
+
 from utils.utils import read_indexed_instance
 
 def compute_onion_layers(points: np.ndarray) -> dict[int, int]:

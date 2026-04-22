@@ -13,11 +13,10 @@ import gurobipy as gp
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
+import plotly.graph_objects as go
 import seaborn as sns
 from matplotlib.lines import Line2D
 from numpy.typing import NDArray
-
-import plotly.graph_objects as go
 
 from utils.benders_log import SerializedCoeffMap, SerializedExpr, SerializedRayData, parse_edge
 from utils.geometry import Arc, PointLookup, compute_convex_hull

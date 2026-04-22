@@ -2,11 +2,10 @@ import argparse
 import logging
 import os
 from pathlib import Path
-
-# Ajusta las rutas de importación a tu proyecto
-from models.OAPBendersModel import OAPBendersModel
-from utils.utils import read_indexed_instance, compute_triangles
 from typing import Literal
+
+from models.OAPBendersModel import OAPBendersModel
+from utils.utils import compute_triangles, read_indexed_instance
 # Configuración básica del logger para la consola
 logging.basicConfig(
     level=logging.INFO,
@@ -84,7 +83,8 @@ def run_batch(
             benders.solve(time_limit=time_limit, verbose=False, save_cuts=True)
             
             # 4. Generar Reporte PDF
-            pdf_path = f"outputs/Analysis/MILP/Report/{"MAX" if maximize else "MIN"}_{benders_method}_{instance_name}.pdf"
+            direction = "MAX" if maximize else "MIN"
+            pdf_path = f"outputs/Analysis/MILP/Report/{direction}_{benders_method}_{instance_name}.pdf"
 
             os.makedirs(os.path.dirname(pdf_path), exist_ok=True)
             benders.generate_benders_report(output_pdf_path=pdf_path)

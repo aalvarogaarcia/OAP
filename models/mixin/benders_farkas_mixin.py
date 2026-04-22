@@ -1,10 +1,11 @@
 # models/mixin/benders_farkas_mixin.py
-import gurobipy as gp
-from gurobipy import GRB
-import numpy as np
-from models.typing_oap import IndexArray, TrianglesAdjList
-from typing import Literal
 import logging
+
+import gurobipy as gp
+import numpy as np
+from gurobipy import GRB
+
+from models.typing_oap import IndexArray, TrianglesAdjList
 from utils.utils import signed_area
 
 

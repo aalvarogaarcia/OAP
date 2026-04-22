@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import argparse
 import glob
 import os
-import argparse
 from numbers import Real
 from typing import Any
 

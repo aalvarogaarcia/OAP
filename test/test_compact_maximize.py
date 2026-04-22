@@ -1,11 +1,12 @@
-import pytest
-import pandas as pd
-from pathlib import Path
 import logging
+from pathlib import Path
+
+import pandas as pd
+import pytest
 
 # Ajusta los imports según la estructura real de tus carpetas
 from models.OAPCompactModel import OAPCompactModel
-from utils.utils import read_indexed_instance, compute_triangles
+from utils.utils import compute_triangles, read_indexed_instance
 
 logger = logging.getLogger(__name__)
 
