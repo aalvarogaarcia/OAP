@@ -46,26 +46,42 @@ class OAPStatsMixin:
             
         return abs(obj_val)
 
+    def _shoelace_from_x_vars(self, x_dict: dict) -> float:
+        """Calcula el área de Shoelace a partir de un dict {(i,j): valor_fraccionario}."""
+        obj_val = 0.0
+        for (i, j), val in x_dict.items():
+            pi = self.points[i]
+            pj = self.points[j]
+            obj_val += (pi[0] * pj[1] - pj[0] * pi[1]) / 2.0 * val
+        return abs(obj_val)
+
     def get_objval_lp(self) -> float | str:
         """
         Recupera o calcula la Relajación Lineal de manera segura dependiendo de la arquitectura.
+        El valor LP se obtiene siempre a partir de la familia de variables x (fórmula de Shoelace).
         """
         # 1. Si ya calculamos el LP explícitamente y lo guardamos
         if hasattr(self, 'lp_objval') and self.lp_objval is not None:
             return self.lp_objval
-            
+
         # 2. Si el modelo actual ya es continuo (porque llamamos a solve_lp_relaxation)
         if not self.model.IsMIP:
-            return self.model.ObjVal if self.model.SolCount > 0 else "-"
-            
+            if self.model.SolCount == 0:
+                return "-"
+            x_vals = {k: v.X for k, v in self.x.items()}
+            return self._shoelace_from_x_vars(x_vals)
+
         # 3. Si es Benders MIP y no hemos calculado el LP previamente
         if hasattr(self, 'benders_method'):
             self.solve_lp_relaxation()
-            return self.model.ObjVal
+            if self.model.SolCount == 0:
+                return "-"
+            x_vals = {k: v.X for k, v in self.x.items()}
+            return self._shoelace_from_x_vars(x_vals)
 
-        # 4. Si es Compacto MIP (Comportamiento Clásico)
+        # 4. Si es Compacto MIP (Comportamiento Clásico) — resolver relajación y leer x
         lp = self.model.relax()
-        lp.Params.OutputFlag = 0 
+        lp.Params.OutputFlag = 0
         lp.optimize()
 
         os.makedirs("outputs/Others", exist_ok=True)
@@ -73,9 +89,19 @@ class OAPStatsMixin:
             lp.write("outputs/Others/LP_Relaxation_Converged_Compact.sol")
             lp.write("outputs/Others/LP_Relaxation_Converged_Compact.lp")
         except gp.GurobiError:
-            pass # Falla silenciosamente si no hay solución
-        
-        return lp.ObjVal if lp.SolCount > 0 else "-"
+            pass  # Falla silenciosamente si no hay solución
+
+        if lp.SolCount == 0:
+            return "-"
+
+        # Calcular Shoelace desde las x de la relajación
+        x_vals = {}
+        for v in lp.getVars():
+            if v.VarName.startswith("x_"):
+                parts = v.VarName.split("_")
+                i, j = int(parts[1]), int(parts[2])
+                x_vals[(i, j)] = v.X
+        return self._shoelace_from_x_vars(x_vals)
 
     def get_model_stats(self) -> tuple:
         """Extrae estadísticas clave: (LP_Val, Gap, IP_Val, Time, Nodes)."""

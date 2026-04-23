@@ -214,9 +214,9 @@ class BendersOptimizeMixin:
             # Resolver el Maestro relajado
             self.model.optimize()
             
-            # Evita fallo al acceder a `.X` si la relajación acaba infactible
-            if self.model.Status == GRB.INFEASIBLE:
-                logger.warning(f"El modelo Maestro LP se volvió INFACTIBLE en la iteración {self.iteration}.")
+            # Evita fallo al acceder a `.X` si la relajación acaba infactible o no tiene solución
+            if self.model.Status not in (GRB.OPTIMAL, GRB.SUBOPTIMAL):
+                logger.warning(f"El modelo Maestro LP terminó con estado {self.model.Status} en la iteración {self.iteration}.")
                 break
             
             # Extraer solución fraccional (v.X funciona perfectamente para continuas)

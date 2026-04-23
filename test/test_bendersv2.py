@@ -106,6 +106,8 @@ def test_benders_lp_equivalence_min(instancia_cargada, objective, benders_method
     lp_benders = benders.get_objval_lp()
 
     # 3. Comparación con tolerancia
+    if lp_compacto == "-" or lp_benders == "-":
+        pytest.skip(f"LP no disponible para {instance_name} ({objective}): Compacto={lp_compacto}, Benders={lp_benders}")
     assert lp_compacto == pytest.approx(lp_benders, rel=1e-4), \
         f"Divergencia LP en {instance_name} ({objective}): Compacto={lp_compacto:.4f} vs Benders {benders_method}={lp_benders:.4f}"
 

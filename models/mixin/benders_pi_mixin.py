@@ -197,7 +197,7 @@ class BendersPiMixin:
             logger.info("\n".join(log_msg))
 
         # 2. Registro JSON/Estructurado personalizado (para el Post-Mortem)
-        if self.save_cuts and hasattr(self, 'log_path'):
+        if getattr(self, 'save_cuts', False) and hasattr(self, 'log_path'):
             try:
                 # Nota: Uso log_benders_cut para mantener compatibilidad con tu código actual. 
                 # Si en el futuro la renombras a log_benders_cut en utils.py, actualízalo aquí.
