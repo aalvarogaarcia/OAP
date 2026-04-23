@@ -31,3 +31,6 @@ reference.py
 #Extras
 *Mac*
 .DS_Store
+
+#Agents
+AGENTS.*
