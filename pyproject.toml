@@ -5,10 +5,12 @@ description = "A MILP and Benders-Decomposition framework for the Optimal Area P
 readme = "README.md"
 requires-python = ">=3.11, <3.13"
 dependencies = [
+    "argparse>=1.4.0",
     "cplex>=22.1.2.0",
     "docplex>=2.31.254",
     "gurobipy>=13.0.0",
     "inquirer>=3.4.1",
+    "logging>=0.4.9.6",
     "matplotlib>=3.10.8",
     "networkx>=3.6.1",
     "numpy>=2.4.1",

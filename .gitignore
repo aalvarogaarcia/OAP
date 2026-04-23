@@ -32,3 +32,6 @@ reference.py
 *Mac*
 .DS_Store
 
+# Sprint planning notes (local only)
+sprints/
+

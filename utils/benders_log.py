@@ -138,6 +138,82 @@ def log_benders_cut(
         fh.write(json.dumps(record) + "\n")
 
 
+def log_inv_benders_cut(
+    filepath: str,
+    iteration: int,
+    node_depth: int,
+    y_sol: dict[int, float],
+    yp_sol: dict[int, float],
+    v_components: dict[str, Any],
+    cut_value: float,
+    tolerance: float = 1e-5,
+    cut_expr: gp.LinExpr | None = None,
+    sense: str | None = None,
+) -> None:
+    """Append an inverted-Benders cut record to a JSONL log file.
+
+    This is the counterpart of :func:`log_benders_cut` for
+    ``OAPInverseBendersModel``.  The master holds triangle-assignment
+    variables ``y`` / ``yp`` (not tour arcs), so the active-solution fields
+    are triangle-indexed rather than arc-indexed.
+
+    Args:
+        filepath: Path to the ``.jsonl`` log file (created if absent).
+        iteration: Cut counter or callback iteration number.
+        node_depth: B&B tree depth (0 = root / integer solution).
+        y_sol: Master triangle assignment ``{triangle_id: value}`` for ``y``.
+        yp_sol: Master triangle assignment ``{triangle_id: value}`` for ``yp``.
+        v_components: Farkas ray components, arc-keyed
+            ``{name: {(i,j): coeff} | scalar}`` — same shape as
+            :func:`log_benders_cut` so that ``plot_farkas_ray_network`` can
+            consume the ``dual_components`` field without modification.
+        cut_value: Farkas violation value (``v^T b(y*, yp*)``).
+        tolerance: Threshold below which triangle values are treated as zero.
+        cut_expr: Optional Gurobi ``LinExpr`` for the generated cut
+            (in master variables ``y`` / ``yp``).
+        sense: Cut sense (``'<='``, ``'>='``, or ``None``).
+    """
+    active_y: SerializedCoeffMap = {
+        str(t): round(val, 4)
+        for t, val in y_sol.items()
+        if abs(val) > tolerance
+    }
+    active_yp: SerializedCoeffMap = {
+        str(t): round(val, 4)
+        for t, val in yp_sol.items()
+        if abs(val) > tolerance
+    }
+
+    ray_data: SerializedRayData = {}
+    for comp_name, values in v_components.items():
+        if values:
+            if isinstance(values, dict):
+                typed = cast(dict[Arc, float], values)
+                ray_data[comp_name] = {
+                    f"{k[0]}_{k[1]}": round(v, 4) for k, v in typed.items()
+                }
+            else:
+                ray_data[comp_name] = round(cast(float, values), 4)
+
+    record: dict[str, Any] = {
+        "iteration":        iteration,
+        "node_depth":       node_depth,
+        "subproblem":       "X",
+        "cut_value":        round(cut_value, 6),
+        "sense":            sense,
+        "active_y":         active_y,
+        "active_yp":        active_yp,
+        "dual_components":  ray_data,
+        "cut_expr":         serialize_expr(cut_expr),
+    }
+
+    dir_name = os.path.dirname(filepath)
+    if dir_name:
+        os.makedirs(dir_name, exist_ok=True)
+    with open(filepath, "a") as fh:
+        fh.write(json.dumps(record) + "\n")
+
+
 # ---------------------------------------------------------------------------
 # Read
 # ---------------------------------------------------------------------------

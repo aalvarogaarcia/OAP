@@ -52,6 +52,7 @@ from utils.benders_log import (
     format_cut_string,
     load_farkas_logs,
     log_benders_cut,
+    log_inv_benders_cut,
     parse_edge,
     serialize_expr,
 )
@@ -102,6 +103,7 @@ __all__ = [
     "format_cut_string",
     "load_farkas_logs",
     "log_benders_cut",
+    "log_inv_benders_cut",
     "parse_edge",
     "serialize_expr",
     # --- visualization ---
