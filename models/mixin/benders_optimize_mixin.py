@@ -195,6 +195,11 @@ class BendersOptimizeMixin:
         self.model.Params.Presolve = 1
         self.model.Params.LazyConstraints = 0  # No usamos callbacks aquí
         self.model.Params.TimeLimit = time_limit
+        # DualReductions can cause Gurobi to report INF_OR_UNBD (status 4) instead of
+        # correctly solving the LP when eta is bounded. Disabling it forces Gurobi to
+        # distinguish infeasible from unbounded and solve correctly.
+        if hasattr(self, 'eta'):
+            self.model.Params.DualReductions = 0
         if not verbose:
             self.model.Params.OutputFlag = 0
 

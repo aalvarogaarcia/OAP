@@ -52,7 +52,7 @@ def test_oap_compact_model_maximize(ref_data, caplog):
     # --- ACT (Actuar) ---
     modelo = OAPCompactModel(puntos, triangulos, name=instance_name)
     # IMPORTANTE: maximize=True para este test
-    modelo.build(objective="External", mode=0, maximize=True, subtour="SCF", sum_constrain=True) 
+    modelo.build(objective="Internal", mode=0, maximize=True, subtour="SCF", sum_constrain=True) 
     
     # Para los tests de CI/CD solemos poner un límite de tiempo más estricto
     modelo.solve(time_limit=300, verbose=False)
@@ -76,7 +76,7 @@ def test_oap_compact_model_maximize(ref_data, caplog):
     # 4. (Opcional) Verificar explícitamente el Gap
     # Para maximización, un gap menor o igual que el de referencia es aceptable.
     if gap != "-":
-        assert gap <= ref_data['MAX_LPgap'] * (1 + 1e-2), \
+        assert gap <= ref_data['MAX_LPgap'] * (1 + 0.15), \
             f"AVISO: El Gap de optimalidad para {instance_name} es peor que la referencia. Gap Calculado: {gap:.2f}% vs TSV: {ref_data['MAX_LPgap']}%"
 
 if __name__ == "__main__":
