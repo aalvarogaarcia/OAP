@@ -62,6 +62,7 @@ from utils.visualization import (
     plot_farkas_ray_network,
     plot_sankey_traceability,
     plot_solution,
+    plot_strengthening_constraints,
 )
 
 __all__ = [
@@ -112,4 +113,5 @@ __all__ = [
     "plot_farkas_ray_network",
     "plot_sankey_traceability",
     "plot_solution",
+    "plot_strengthening_constraints",
 ]

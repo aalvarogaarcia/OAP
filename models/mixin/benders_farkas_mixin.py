@@ -6,7 +6,7 @@ import numpy as np
 from gurobipy import GRB
 
 from models.typing_oap import IndexArray, TrianglesAdjList
-from utils.utils import signed_area
+from utils.utils import plot_strengthening_constraints, signed_area
 
 
 # Instanciamos el logger para este módulo
@@ -36,7 +36,7 @@ class BendersFarkasMixin:
     constrs_yp: dict
     iteration: int
     
-    def build_farkas_subproblems(self, sum_constrain: bool = True) -> None:
+    def build_farkas_subproblems(self, sum_constrain: bool = True, strengthen: bool = False, plot_strengthen: bool = False) -> None:
         """Construye los Subproblemas (SP_Y y SP_YP) de factibilidad."""
         print("Construyendo subproblemas con método Farkas...")
 
@@ -71,9 +71,90 @@ class BendersFarkasMixin:
         # --- E'' y A'': Arcos no pertenecientes a la CH ---
         self._add_non_ch_constr_farkas()
 
+        if strengthen:
+            self._add_strengthening_farkas(plot=plot_strengthen)
+
         self.sub_y.update()
         self.sub_yp.update()
 
+
+    def _add_strengthening_farkas(self, plot: bool = False) -> None:
+        """Add LP-strengthening constraints to both Farkas subproblems.
+
+        Benders split of the compact-model constraints:
+          R1  Σ at*y_t  ≤ CH_area        (sub_y / sub_yp, fixed RHS)
+          R2  Σ_{t∈V_ij} y_t ≤ 1        (per arc, fixed RHS)
+          R3  Σ y_t[i,j] + Σ y_t[k,l] ≤ 1 - x[j,i] - x[k,l]  (sub_y, param. RHS)
+          R4  Σ yp_t[i,j] + Σ yp_t[k,l] ≤ 1 - x[i,j] - x[l,k] (sub_yp, param. RHS)
+        """
+        if not hasattr(self, '_abs_areas'):
+            self._abs_areas = [
+                abs(signed_area(self.points[tri[0]], self.points[tri[1]], self.points[tri[2]]))
+                for tri in self.triangles
+            ]
+        at = self._abs_areas
+
+        # R1: area balance
+        self.constrs_y['r1'] = self.sub_y.addConstr(
+            gp.quicksum(at[t] * self.y[t] for t in self.V_list) <= self.convex_hull_area,
+            name="r1_area_balance_y",
+        )
+        self.constrs_yp['r1_p'] = self.sub_yp.addConstr(
+            gp.quicksum(at[t] * self.yp[t] for t in self.V_list) <= self.convex_hull_area,
+            name="r1_area_balance_yp",
+        )
+
+        crossing_pairs = self._compute_crossing_arc_pairs()
+        self.constrs_y['r2'] = {}
+        self.constrs_yp['r2_p'] = {}
+        self.constrs_y['r3'] = {}
+        self.constrs_yp['r3_p'] = {}
+
+        for (i, j) in self.x.keys():
+            tris = self.triangles_adj_list[i][j]
+            if not tris:
+                continue
+
+            # R2: arc coverage
+            self.constrs_y['r2'][i, j] = self.sub_y.addConstr(
+                gp.quicksum(self.y[t] for t in tris) <= 1,
+                name=f"r2_arc_coverage_y_{i}_{j}",
+            )
+            self.constrs_yp['r2_p'][i, j] = self.sub_yp.addConstr(
+                gp.quicksum(self.yp[t] for t in tris) <= 1,
+                name=f"r2_arc_coverage_yp_{i}_{j}",
+            )
+
+            # R3 / R4: crossing exclusion (one constraint per ordered crossing pair)
+            for (k, l) in self.x.keys():
+                if (i, j) == (k, l) or ((i, j), (k, l)) not in crossing_pairs:
+                    continue
+                tris_kl = self.triangles_adj_list[k][l]
+                if not tris_kl:
+                    continue
+                key = (i, j, k, l)
+
+                # R3 in sub_y — RHS updated each iteration: 1 - x[j,i] - x[k,l]
+                self.constrs_y['r3'][key] = self.sub_y.addConstr(
+                    gp.quicksum(self.y[t] for t in tris)
+                    + gp.quicksum(self.y[t] for t in tris_kl) <= 1,
+                    name=f"r3_crossing_y_{i}_{j}_{k}_{l}",
+                )
+
+                # R4 in sub_yp — RHS updated each iteration: 1 - x[i,j] - x[l,k]
+                self.constrs_yp['r3_p'][key] = self.sub_yp.addConstr(
+                    gp.quicksum(self.yp[t] for t in tris)
+                    + gp.quicksum(self.yp[t] for t in tris_kl) <= 1,
+                    name=f"r3_crossing_yp_{i}_{j}_{k}_{l}",
+                )
+
+        if plot:
+            plot_strengthening_constraints(
+                points=self.points,
+                ch=self.CH,
+                x_keys=list(self.x.keys()),
+                crossing_pairs=crossing_pairs,
+            )
 
     def get_farkas_cut_y(self, x_sol: dict[Arc, float], TOL: float = 1e-10) -> tuple[gp.LinExpr, float]:
         """Extrae el rayo de Farkas del subproblema Y y genera el corte lineal."""
@@ -116,7 +197,28 @@ class BendersFarkasMixin:
                 v_comps['global'] = farkas_global
                 cut_y_expr += farkas_global * rhs_global
                 cut_y_val += farkas_global * rhs_global
-        
+
+        # R1: area balance (fixed RHS = CH_area)
+        if 'r1' in self.constrs_y:
+            f_r1 = self.constrs_y['r1'].FarkasDual
+            if abs(f_r1) > TOL:
+                cut_y_expr += f_r1 * self.convex_hull_area
+                cut_y_val += f_r1 * self.convex_hull_area
+
+        # R2: arc coverage (fixed RHS = 1)
+        for (i, j), constr in self.constrs_y.get('r2', {}).items():
+            f_r2 = constr.FarkasDual
+            if abs(f_r2) > TOL:
+                cut_y_expr += f_r2
+                cut_y_val += f_r2
+
+        # R3: crossing exclusion — RHS = 1 - x[j,i] - x[k,l]
+        for (i, j, k, l), constr in self.constrs_y.get('r3', {}).items():
+            f_r3 = constr.FarkasDual
+            if abs(f_r3) > TOL:
+                cut_y_expr += f_r3 * (1 - self.x[j, i] - self.x[k, l])
+                cut_y_val += f_r3 * (1 - x_sol.get((j, i), 0.0) - x_sol.get((k, l), 0.0))
+
         sense = None
         if cut_y_val > TOL:
             sense = "<="  # cut_expr <= 0
@@ -168,15 +270,36 @@ class BendersFarkasMixin:
                 v_comps_p['global_p'] = farkas_global_p
                 cut_yp_expr += farkas_global_p * rhs_global_p
                 cut_yp_val += farkas_global_p * rhs_global_p
-        
+
+        # R1_p: area balance (fixed RHS = CH_area)
+        if 'r1_p' in self.constrs_yp:
+            f_r1_p = self.constrs_yp['r1_p'].FarkasDual
+            if abs(f_r1_p) > TOL:
+                cut_yp_expr += f_r1_p * self.convex_hull_area
+                cut_yp_val += f_r1_p * self.convex_hull_area
+
+        # R2_p: arc coverage (fixed RHS = 1)
+        for (i, j), constr in self.constrs_yp.get('r2_p', {}).items():
+            f_r2_p = constr.FarkasDual
+            if abs(f_r2_p) > TOL:
+                cut_yp_expr += f_r2_p
+                cut_yp_val += f_r2_p
+
+        # R4: crossing exclusion — RHS = 1 - x[i,j] - x[l,k]
+        for (i, j, k, l), constr in self.constrs_yp.get('r3_p', {}).items():
+            f_r4 = constr.FarkasDual
+            if abs(f_r4) > TOL:
+                cut_yp_expr += f_r4 * (1 - self.x[i, j] - self.x[l, k])
+                cut_yp_val += f_r4 * (1 - x_sol.get((i, j), 0.0) - x_sol.get((l, k), 0.0))
+
         sense = None
         if cut_yp_val > TOL:
             sense = ">="  # 0 >= cut_expr
         elif cut_yp_val < -TOL:
             sense = "<="  # 0 <= cut_expr
-        
+
         self._log_and_print_farkas(v_comps_p, cut_yp_val, "Y'", TOL, x_sol, cut_yp_expr, sense)
-        
+
         return cut_yp_expr, cut_yp_val
 
     
@@ -222,9 +345,27 @@ class BendersFarkasMixin:
                 cut_y_expr += pi_global * rhs_global
                 cut_y_val += pi_global * rhs_global
 
+        if 'r1' in self.constrs_y:
+            pi_r1 = self.constrs_y['r1'].Pi
+            if abs(pi_r1) > TOL:
+                cut_y_expr += pi_r1 * self.convex_hull_area
+                cut_y_val += pi_r1 * self.convex_hull_area
+
+        for (i, j), constr in self.constrs_y.get('r2', {}).items():
+            pi_r2 = constr.Pi
+            if abs(pi_r2) > TOL:
+                cut_y_expr += pi_r2
+                cut_y_val += pi_r2
+
+        for (i, j, k, l), constr in self.constrs_y.get('r3', {}).items():
+            pi_r3 = constr.Pi
+            if abs(pi_r3) > TOL:
+                cut_y_expr += pi_r3 * (1 - self.x[j, i] - self.x[k, l])
+                cut_y_val += pi_r3 * (1 - x_sol.get((j, i), 0.0) - x_sol.get((k, l), 0.0))
+
         if hasattr(self, '_log_and_print_pi'):
             self._log_and_print_pi(v_comps, cut_y_val, "Y_OPT", TOL, x_sol, cut_y_expr, ">=")
-            
+
         return cut_y_expr, cut_y_val
 
     def get_optimality_cut_yp(self, x_sol: dict[Arc, float], TOL: float = 1e-10) -> tuple[gp.LinExpr, float]:
@@ -270,9 +411,27 @@ class BendersFarkasMixin:
                 cut_yp_expr += pi_global * rhs_global
                 cut_yp_val += pi_global * rhs_global
 
+        if 'r1_p' in self.constrs_yp:
+            pi_r1_p = self.constrs_yp['r1_p'].Pi
+            if abs(pi_r1_p) > TOL:
+                cut_yp_expr += pi_r1_p * self.convex_hull_area
+                cut_yp_val += pi_r1_p * self.convex_hull_area
+
+        for (i, j), constr in self.constrs_yp.get('r2_p', {}).items():
+            pi_r2_p = constr.Pi
+            if abs(pi_r2_p) > TOL:
+                cut_yp_expr += pi_r2_p
+                cut_yp_val += pi_r2_p
+
+        for (i, j, k, l), constr in self.constrs_yp.get('r3_p', {}).items():
+            pi_r4 = constr.Pi
+            if abs(pi_r4) > TOL:
+                cut_yp_expr += pi_r4 * (1 - self.x[i, j] - self.x[l, k])
+                cut_yp_val += pi_r4 * (1 - x_sol.get((i, j), 0.0) - x_sol.get((l, k), 0.0))
+
         if hasattr(self, '_log_and_print_pi'):
             self._log_and_print_pi(v_comps, cut_yp_val, "Y'_OPT", TOL, x_sol, cut_yp_expr, ">=")
-            
+
         return cut_yp_expr, cut_yp_val
     
 

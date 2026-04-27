@@ -108,6 +108,20 @@ class BendersMasterMixin:
         for i, j in self.x.keys():
             self.model.addConstr(self.f[i, j] <= M * self.x[i, j], name=f"flujo_capacidad_{i}_{j}")
 
+    def _compute_crossing_arc_pairs(self) -> set[tuple[tuple[int, int], tuple[int, int]]]:
+        if not hasattr(self, '_crossing_arc_pairs'):
+            A_II = compute_crossing_edges(self.triangles, self.points)
+            pairs: set[tuple[tuple[int, int], tuple[int, int]]] = set()
+            for p, q, r, s in A_II:
+                arc_1 = (int(p), int(q))
+                arc_2 = (int(r), int(s))
+                for a in (arc_1, (arc_1[1], arc_1[0])):
+                    for b in (arc_2, (arc_2[1], arc_2[0])):
+                        pairs.add((a, b))
+                        pairs.add((b, a))
+            self._crossing_arc_pairs = pairs
+        return self._crossing_arc_pairs
+
     def _add_crossing_constraints_master(self):
         """Método auxiliar para añadir restricciones de cruce al maestro."""
         crossing = compute_crossing_edges(self.triangles, self.points)

@@ -104,7 +104,7 @@ def main(
 
     all_results_for_excel: list[ResultRow] = []
     subtour_methods = [
-    #    0,
+        0,
     #    1,
         2]  # Los métodos que quieres comparar
     print(f"Subtour methods to compare: {subtour_methods}")
@@ -114,9 +114,12 @@ def main(
 
         st_suffix = f"_subtour{st_method}"
         output_filename = f"outputs/LaTex/resultados_tabla{st_suffix}.tex"
+        output_dir = os.path.dirname(output_filename)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
 
         data_list: list[ResultRow] = []
-
+        
         with open(output_filename, "w", encoding="utf-8") as f:
 
             # 1. Escribir Cabecera de LaTeX en el archivo
@@ -341,7 +344,9 @@ def main(
         ]
 
         output_excel = "outputs/Excel/Comparativa_Tecnica_Completa.xlsx"
-
+        output_dir = os.path.dirname(output_excel)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
         with pd.ExcelWriter(output_excel, engine="xlsxwriter") as writer:
             df_final.to_excel(writer, sheet_name="Comparativa", index=False)
 

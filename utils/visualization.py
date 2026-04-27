@@ -291,3 +291,108 @@ def plot_sankey_traceability(
         fig.write_image(save_path)
     elif show_plot:
         fig.show()
+
+
+# ---------------------------------------------------------------------------
+# Strengthening-constraint diagnostics
+# ---------------------------------------------------------------------------
+
+def plot_strengthening_constraints(
+    points: NDArray[np.int64],
+    ch: NDArray[np.int64],
+    x_keys: list[Arc],
+    crossing_pairs: set[tuple[Arc, Arc]],
+    save_path: str | None = None,
+    show_plot: bool = True,
+) -> None:
+    """Draw the point set annotated with R2 arcs and R3 crossing pairs.
+
+    Args:
+        points: (N, 2) array of point coordinates.
+        ch: Convex-hull node indices (ordered).
+        x_keys: All arcs present in the master model after CH cleanup.
+        crossing_pairs: Set of (arc_a, arc_b) ordered crossing pairs used for R3/R4.
+        save_path: If given, save to this path instead of displaying.
+        show_plot: Display interactively when *save_path* is None.
+    """
+    fig, ax = plt.subplots(figsize=(9, 8))
+
+    # Points
+    ax.scatter(points[:, 0], points[:, 1], color="steelblue", s=60, zorder=5)
+    ch_set = set(ch.tolist())
+    for i, pt in enumerate(points):
+        color = "crimson" if i in ch_set else "black"
+        ax.annotate(
+            str(i), (pt[0], pt[1]),
+            textcoords="offset points", xytext=(5, 5),
+            fontsize=8, color=color,
+        )
+
+    # Convex hull boundary
+    for idx in range(len(ch)):
+        u, v = int(ch[idx]), int(ch[(idx + 1) % len(ch)])
+        ax.plot(
+            [points[u, 0], points[v, 0]],
+            [points[u, 1], points[v, 1]],
+            color="green", linestyle="--", linewidth=1.2, alpha=0.6,
+        )
+
+    # All master arcs (light grey, undirected to reduce clutter)
+    drawn_undirected: set[tuple[int, int]] = set()
+    for (i, j) in x_keys:
+        key = (min(i, j), max(i, j))
+        if key not in drawn_undirected:
+            drawn_undirected.add(key)
+            ax.plot(
+                [points[i, 0], points[j, 0]],
+                [points[i, 1], points[j, 1]],
+                color="lightgrey", linewidth=0.6, alpha=0.5, zorder=1,
+            )
+
+    # R3 crossing pairs — draw each crossing pair once, colour-coded
+    already_drawn: set[frozenset[tuple[int, int]]] = set()
+    for (arc_a, arc_b) in crossing_pairs:
+        pair_key: frozenset[tuple[int, int]] = frozenset({arc_a, arc_b})
+        if pair_key in already_drawn:
+            continue
+        already_drawn.add(pair_key)
+        ia, ja = arc_a
+        ib, jb = arc_b
+        # Midpoint of first arc to midpoint of second arc
+        mx_a = (points[ia, 0] + points[ja, 0]) / 2
+        my_a = (points[ia, 1] + points[ja, 1]) / 2
+        mx_b = (points[ib, 0] + points[jb, 0]) / 2
+        my_b = (points[ib, 1] + points[jb, 1]) / 2
+        ax.plot(
+            [points[ia, 0], points[ja, 0]],
+            [points[ia, 1], points[ja, 1]],
+            color="darkorange", linewidth=1.5, alpha=0.7, zorder=3,
+        )
+        ax.plot(
+            [points[ib, 0], points[jb, 0]],
+            [points[ib, 1], points[jb, 1]],
+            color="darkorange", linewidth=1.5, alpha=0.7, zorder=3,
+        )
+        ax.plot([mx_a, mx_b], [my_a, my_b], color="darkorange", linewidth=0.8,
+                linestyle=":", alpha=0.5, zorder=2)
+
+    legend_handles = [
+        Line2D([0], [0], color="green", linestyle="--", lw=1.2, label="CH boundary"),
+        Line2D([0], [0], color="lightgrey", lw=1.0, label="Master arcs"),
+        Line2D([0], [0], color="darkorange", lw=1.5, label=f"R3 crossing pairs ({len(already_drawn)})"),
+    ]
+    ax.legend(handles=legend_handles, loc="best", fontsize=9)
+    ax.set_title(
+        f"Strengthening constraints — {len(x_keys)} arcs, "
+        f"{len(already_drawn)} crossing pairs",
+        fontsize=11,
+    )
+    ax.set_aspect("equal")
+    ax.axis("off")
+
+    if save_path:
+        _ensure_dir(save_path)
+        plt.savefig(save_path, bbox_inches="tight", dpi=150)
+        plt.close()
+    elif show_plot:
+        plt.show()

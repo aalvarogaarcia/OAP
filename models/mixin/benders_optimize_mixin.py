@@ -62,6 +62,13 @@ class BendersOptimizeMixin:
         for (i, j), constr in self.constrs_yp.get('delta_p', {}).items():
             constr.RHS = 1 - x_sol[i, j]
 
+        # R3 / R4 strengthening constraints (parameterised by x)
+        for (i, j, k, l), constr in self.constrs_y.get('r3', {}).items():
+            constr.RHS = 1 - x_sol.get((j, i), 0.0) - x_sol.get((k, l), 0.0)
+
+        for (i, j, k, l), constr in self.constrs_yp.get('r3_p', {}).items():
+            constr.RHS = 1 - x_sol.get((i, j), 0.0) - x_sol.get((l, k), 0.0)
+
     def _benders_callback(self, model: gp.Model, where: int) -> None:
         """
         Callback de Gurobi. Intercepta soluciones enteras candidatas (MIPSOL)

@@ -267,7 +267,9 @@ class OAPBuilderMixin:
             for (k, l) in self.x.keys():
                 if (i, j) == (k, l) or ((i, j), (k, l)) not in crossing_arc_pairs:
                     continue
+                
 
+                # QUE COJONES FUNCIONA ESTO (PERO AL REVES NO)
                 tris_kl = self.triangles_adj_list[k][l]
                 if not tris_kl:
                     continue
@@ -280,6 +282,19 @@ class OAPBuilderMixin:
                     <= 1,
                     name=f"crossing_edges_{i}_{j}_{k}_{l}",
                 )
+
+                self.model.addConstr(
+                    gp.quicksum(self.yp[t] for t in tris) +
+                    self.x[i,j] +
+                    gp.quicksum(self.yp[t] for t in tris_kl) +
+                    self.x[l, k] 
+                    <= 1,
+                    name = f"crossing_edges_prime_{i}_{j}_{k}_{l}"
+                )
+
+
+
+                
 
 
         

@@ -58,35 +58,37 @@ class OAPBendersModel(
         self.log_path = path
 
     def build(
-        self, 
-        objective: Literal["Fekete", "Internal", "External", "Diagonals"] = "Fekete", 
+        self,
+        objective: Literal["Fekete", "Internal", "External", "Diagonals"] = "Fekete",
         mode: int = 0,
-        maximize: bool = True, 
+        maximize: bool = True,
         benders_method: Literal["farkas", "pi"] = "farkas",
         sum_constrain: bool = True,
         crosses_constrain: bool = False,
+        strengthen: bool = True,
+        plot_strengthen: bool = False,
     ) -> None:
         """
         Orquesta la construcción del Problema Maestro y de los Subproblemas.
         """
         logger.info(f"=== Construyendo OAPBendersModel ({benders_method.upper()}) ===")
-        
+
         # Guardamos el método elegido para que el callback sepa qué cortes generar
         self.benders_method = benders_method
-        
+
         # 1. Construir el Maestro (Viene de BendersMasterMixin)
         self.build_master(
-            objective=objective, 
-            mode=mode, 
-            maximize=maximize, 
-            crosses_constrain=crosses_constrain
+            objective=objective,
+            mode=mode,
+            maximize=maximize,
+            crosses_constrain=crosses_constrain,
         )
-        
+
         # 2. Construir los Subproblemas (Viene de Farkas o Pi Mixin)
         if benders_method == "farkas":
-            self.build_farkas_subproblems(sum_constrain=sum_constrain)
+            self.build_farkas_subproblems(sum_constrain=sum_constrain, strengthen=strengthen, plot_strengthen=plot_strengthen)
         elif benders_method == "pi":
-            self.build_pi_subproblems(sum_constrain=sum_constrain)
+            self.build_pi_subproblems(sum_constrain=sum_constrain, strengthen=strengthen, plot_strengthen=plot_strengthen)
         else:
             raise ValueError(f"Método de Benders desconocido: {benders_method}")
 
