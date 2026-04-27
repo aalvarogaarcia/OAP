@@ -4,12 +4,13 @@ import numpy as np
 from gurobipy import GRB
 from numpy.typing import NDArray
 
-from utils.utils import cost_function_area, signed_area  # (Importa lo que necesites aquí)
+from utils.geometry import compute_crossing_edges
+from utils.utils import cost_function_area, signed_area
 
 Arc = tuple[int, int]
 MCFArc = tuple[int, int, int]
 Triangle = tuple[int, int, int]
-AdjList =  list[list[list[int]]]
+AdjList = list[list[list[int]]]
 
 
 class OAPBuilderMixin:
@@ -37,6 +38,7 @@ class OAPBuilderMixin:
     f_mcf: dict[MCFArc, gp.Var]
     z: dict[Arc, gp.Var]
     zp: dict[Arc, gp.Var]
+    _abs_areas: list[float]
 
     def _create_variables(self, subtour: str, objective: str, mode: int):
         """Crea todas las variables y limpia los arcos inválidos de la envolvente convexa (CH)."""
@@ -45,6 +47,7 @@ class OAPBuilderMixin:
                   for i in self.N_list for j in self.N_list if i != j}
         self.y = {i: self.model.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"y_{i}") for i in self.V_list}
         self.yp = {i: self.model.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"yp_{i}") for i in self.V_list}
+        self.c = cost_function_area(self.points, self.x, 0)
 
         # Variables de Subtours
         if subtour == "SCF":
@@ -92,11 +95,15 @@ class OAPBuilderMixin:
     def _set_objective(self, objective: str, mode: int, maximize: bool):
         """Define la función objetivo."""
         optimizer = GRB.MAXIMIZE if maximize else GRB.MINIMIZE
-        at = [np.abs(signed_area(self.points[tri[0]], self.points[tri[1]], self.points[tri[2]])) for tri in self.triangles]
+        if not hasattr(self, "_abs_areas"):
+            self._abs_areas = [
+                np.abs(signed_area(self.points[tri[0]], self.points[tri[1]], self.points[tri[2]]))
+                for tri in self.triangles
+            ]
+        at = self._abs_areas
 
         if objective == "Fekete":
-            c = cost_function_area(self.points, self.x.keys(), mode=mode)
-            self.model.setObjective(gp.quicksum(c[i] * self.x[i] for i in self.x.keys()), optimizer)
+            self.model.setObjective(gp.quicksum(self.c[i] * self.x[i] for i in self.x.keys()), optimizer)
         
         elif objective == "Internal":
             self.model.setObjective(gp.quicksum(self.y[i] * at[i] for i in self.V_list), optimizer)
@@ -212,7 +219,125 @@ class OAPBuilderMixin:
                 if (i not in self.CH or j not in self.CH) and i != j and (i, j) in self.x:
                     self.model.addConstr(self.x[i, j] <= gp.quicksum(self.y[t] for t in self.triangles_adj_list[i][j]))
                     self.model.addConstr(1 - self.x[j, i] >= gp.quicksum(self.y[t] for t in self.triangles_adj_list[i][j]))
-                    
+
                     self.model.addConstr(self.x[j, i] <= gp.quicksum(self.yp[t] for t in self.triangles_adj_list[i][j]))
                     self.model.addConstr(1 - self.x[i, j] >= gp.quicksum(self.yp[t] for t in self.triangles_adj_list[i][j]))
 
+    def _add_strengthening_constraints(self) -> None:
+        """
+        LP-strengthening constraints (Sec. 5.4 of Hernández-Pérez et al., 2025).
+
+        Redundant for the IP, but tighten the LP relaxation:
+
+          R1 – area balance:
+                Σ_t  c_t · (y_t + yp_t)  ==  area(CH)
+
+          R2 – arc triangle-fan upper bound:
+                Σ_{t ∈ V_ij}  (y_t + yp_t)  <=  1    ∀ (i,j) ∈ A
+
+              Each directed arc can be covered by at most one triangle on each
+              side, so the combined fan cannot exceed 1.  Skips arcs whose
+              adjacency list is empty (would add a vacuous 0 <= 1 which is
+              harmless but wasteful).
+
+          R3 – mixed crossing clique:
+                Σ_{t ∈ V_pq} (y_t + yp_t) + x[q,p] + x[r,s]
+                + Σ_{t ∈ V_rs} (y_t + yp_t)  <=  1
+                and its symmetric counterpart (R3b),
+                for every pair of crossing undirected edges {p,q} × {r,s}.
+
+              Couples triangle-fan activation with the routing decision;
+              tighter than a pure x-variable crossing cut.
+        """
+        # --- R1: Area balance ---
+        if not hasattr(self, "_abs_areas"):
+            self._abs_areas = [
+                abs(signed_area(self.points[tri[0]], self.points[tri[1]], self.points[tri[2]]))
+                for tri in self.triangles
+            ]
+        at = self._abs_areas
+
+        self.model.addConstr(
+            gp.quicksum(at[t] * (self.y[t] + self.yp[t]) for t in self.V_list)
+            == self.convex_hull_area,
+            name="R1_area_balance_CH",
+        )
+
+        # --- R2: Arc triangle-fan upper bound ---
+        for (i, j) in self.x.keys():
+            tris = self.triangles_adj_list[i][j]
+            if not tris:
+                continue
+            self.model.addConstr(
+                gp.quicksum(self.y[t] + self.yp[t] for t in tris) <= 1,
+                name=f"R2_arc_fan_{i}_{j}",
+            )
+
+        # --- R3: Mixed crossing clique ---
+        # For each pair of crossing undirected edges {p,q} x {r,s}, add:
+        #
+        #   Σ_{t ∈ V_pq} (y_t + yp_t) + x[q,p] + x[r,s]
+        #   + Σ_{t ∈ V_rs} (y_t + yp_t) <= 1
+        #
+        # and its symmetric counterpart with the two arcs swapped.
+        # This couples the triangle-fan activation with the routing decision
+        # and is tighter than a pure x-variable crossing cut alone.
+        #
+        # compute_crossing_edges already deduplicates pairs; each row
+        # [a,b,c,d] encodes undirected edges {a,b} and {c,d}.
+        crossing_rows = compute_crossing_edges(self.triangles, self.points)
+
+        # Materialise self.x keys once into a set for O(1) membership tests.
+        arc_set: set[Arc] = set(self.x.keys())
+
+        for row in crossing_rows:
+            p, q, r, s = int(row[0]), int(row[1]), int(row[2]), int(row[3])
+
+            tris_pq = self.triangles_adj_list[p][q]
+            tris_qp = self.triangles_adj_list[q][p]
+            tris_rs = self.triangles_adj_list[r][s]
+            tris_sr = self.triangles_adj_list[s][r]
+
+            # R3a: fan(p→q) + x[q,p] + x[r,s] + fan(s→r) <= 1
+            if tris_pq and (q, p) in arc_set and (r, s) in arc_set and tris_rs:
+                self.model.addConstr(
+                    gp.quicksum(self.y[t] for t in tris_pq)
+                    + self.x[q, p]
+                    + self.x[r, s]
+                    + gp.quicksum(self.y[t] for t in tris_sr)
+                    <= 1,
+                    name=f"R3a_{p}_{q}_{r}_{s}",
+                )
+
+            # R3b: fan(q→p) + x[p,q] + x[s,r] + fan(r→s) <= 1  (symmetric)
+            if tris_qp and (p, q) in arc_set and (s, r) in arc_set and tris_sr:
+                self.model.addConstr(
+                    gp.quicksum(self.y[t] for t in tris_qp)
+                    + self.x[p, q]
+                    + self.x[s, r]
+                    + gp.quicksum(self.y[t] for t in tris_rs)
+                    <= 1,
+                    name=f"R3b_{q}_{p}_{s}_{r}",
+                )
+
+            # R4a: fan(p→q) + x[p,q] + x[r,s] + fan(r→s) <= 1
+            if tris_pq and (q, p) in arc_set and (r, s) in arc_set and tris_rs:
+                self.model.addConstr(
+                    gp.quicksum(self.y[t] for t in tris_pq)
+                    + self.x[q, p]
+                    + self.x[r, s]
+                    + gp.quicksum(self.y[t] for t in tris_rs)
+                    <= 1,
+                    name=f"R3a_{p}_{q}_{r}_{s}",
+                )
+
+            # R4b: fan(q→p) + x[p,q] + x[s,r] + fan(s→r) <= 1  (symmetric)
+            if tris_qp and (p, q) in arc_set and (s, r) in arc_set and tris_sr:
+                self.model.addConstr(
+                    gp.quicksum(self.y[t] for t in tris_qp)
+                    + self.x[p, q]
+                    + self.x[s, r]
+                    + gp.quicksum(self.y[t] for t in tris_sr)
+                    <= 1,
+                    name=f"R3b_{q}_{p}_{s}_{r}",
+                )

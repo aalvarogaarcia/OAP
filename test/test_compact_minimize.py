@@ -76,13 +76,13 @@ def test_oap_compact_model_minimize(ref_data, caplog):
     # 3. Verificar el valor de la relajación lineal (LP Value)
     # Para minimización, LP es cota inferior: solo falla si el calculado es MAYOR que la referencia.
     if lp_val != "-":
-        assert lp_val <= ref_data['MIN_LPvalue'] * (1 + 0.01), \
+        assert lp_val <= ref_data['MIN_LPvalue'] * (1 + 1e-4), \
             f"ERROR: La relajación lineal (LP) para {instance_name} es peor que la referencia. LP Calculado: {lp_val:.4f} vs TSV: {ref_data['MIN_LPvalue']}"
 
     # 4. (Opcional) Verificar explícitamente el Gap
-    # Para minimización, un gap menor o igual que el de referencia es aceptable.
+    # Para minimización, un gap menor o igual que el de referencia (±0.5 pp) es aceptable.
     if gap != "-":
-        assert gap <= ref_data['MIN_LPgap'] * (1 + 0.05), \
+        assert gap <= ref_data['MIN_LPgap'] + 0.5, \
             f"AVISO: El Gap de optimalidad para {instance_name} es peor que la referencia. Gap Calculado: {gap:.2f}% vs TSV: {ref_data['MIN_LPgap']}%"
 
 

@@ -34,4 +34,8 @@ reference.py
 
 # Sprint planning notes (local only)
 sprints/
+reference/
 
+CLAUDE.md
+.claude/
+.opencode/

@@ -2,7 +2,7 @@
 
 ## Environment
 
-- **Python interpreter**: `.venv/Scripts/python.exe` (Windows venv, accessed via WSL interop). Never use bare `python` or `python3` — they resolve to the wrong interpreter in WSL.
+- **Python interpreter**: `.venv/bin/python` (native Linux venv). Use this path or activate the venv; never use bare `python` or `python3`.
 - **All commands must be run from the repo root.**
 - Python 3.12.12 (`requires-python = ">=3.11, <3.13"` in `pyproject.toml`).
 - Gurobi installation + valid licence required for any model execution or solver tests.
@@ -13,23 +13,23 @@
 
 ```bash
 # Batch run (all instances in a directory)
-.venv/Scripts/python.exe main.py instance/little-instances "*.instance" --time-limit 60 --obj 0
+.venv/bin/python main.py instance/little-instances "*.instance" --time-limit 60 --obj 0
 
 # Interactive single instance (uses inquirer prompts — NOT headless)
-.venv/Scripts/python.exe run_single_instance.py
+.venv/bin/python run_single_instance.py
 
 # Headless single instance (edit instance_name + model config directly in file)
-.venv/Scripts/python.exe run.py
+.venv/bin/python run.py
 
 # Tests (many auto-skip when instance files or TSV reference are absent)
-.venv/Scripts/python.exe -m pytest -q
+.venv/bin/python -m pytest -q
 
 # Lint
-.venv/Scripts/python.exe -m ruff check .
-.venv/Scripts/python.exe -m ruff format --check .
+.venv/bin/python -m ruff check .
+.venv/bin/python -m ruff format --check .
 
 # Type check
-.venv/Scripts/python.exe -m mypy . --ignore-missing-imports
+.venv/bin/python -m mypy . --ignore-missing-imports
 ```
 
 CI runs lint + type-check only. The test job in `.github/workflows/ci.yml` is commented out — it requires a `GRB_LICENSE_FILE` secret.

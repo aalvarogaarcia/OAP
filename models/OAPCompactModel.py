@@ -1,3 +1,4 @@
+#OAPCompactModel.py
 from typing import Literal
 
 import gurobipy as gp
@@ -38,9 +39,8 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
         self.x: ArcVarMap = {}
         self.y: dict[int, gp.Var] = {}
         self.yp: dict[int, gp.Var] = {}
-        
-        self.c = cost_function_area(points, self.x, 0)
-        
+        self.c: dict[Arc, float] = {}
+
         # Variables opcionales (dependientes del modo/subtour)
         self.f: ArcVarMap = {}
         self.u: dict[int, gp.Var] = {}
@@ -48,18 +48,24 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
         self.z: ArcVarMap = {}
         self.zp: ArcVarMap = {}
 
-    def build(self, 
+    def build(self,
               objective: Literal["Fekete", "Internal", "External", "Diagonals"] = "Fekete",
               mode: int = 0,
-              maximize: bool = True, 
+              maximize: bool = True,
               subtour: Literal["SCF", "MTZ", "MCF"] = "SCF",
               sum_constrain: bool = True,
+              strengthen: bool = True,
               semiplane: Literal[0,1,2] = 0,
               use_knapsack: bool = False,
               use_cliques: bool = False
               ) -> None:
         """
         Orquestador principal que construye el modelo paso a paso.
+
+        strengthen: si True añade R1 (balance de área vs CH), R2 (cota
+            superior de triángulos por arco) y R3 (exclusión de arcos
+            cruzados) — Sec. 5.4 del paper. Son redundantes para el IP
+            pero cierran sustancialmente el gap LP.
         """
         self._create_variables(subtour, objective, mode)
         self._set_objective(objective, mode, maximize)
@@ -69,6 +75,9 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
             self._add_sum_constraints()
         self._add_triangle_ch_constraints()
         self._add_variable_relation_constraints(objective, mode)
+
+        if strengthen:
+            self._add_strengthening_constraints()
 
         if semiplane > 0:
             self.add_restricciones_semiplano(version=semiplane)
@@ -82,51 +91,51 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
         self.model.update()
         
 
-    def solve(self, 
-              time_limit: int = 7200, 
-              verbose: bool = False, 
-              relaxed: bool = False, 
-              plot: bool = False) -> None:
-       """
-       Ejecuta la optimización del modelo, aplica relajación si es necesario 
-       y procesa los resultados.
-       """
-       if verbose:
-           print("Constraints added. \nOptimizing model...")
-       
-       # --- Configuración de Parámetros ---
-       self.model.setParam('OutputFlag', 1 if verbose else 0)
-       self.model.setParam('TimeLimit', time_limit)
-       self.model.Params.MIPGap = 0.00001
-       self.model.Params.NodeLimit = GRB.INFINITY
-       self.model.Params.SolutionLimit = GRB.MAXINT
-       
-       self.model.update()
+    def solve(
+        self,
+        time_limit: int = 7200,
+        verbose: bool = False,
+        relaxed: bool = False,
+        plot: bool = False,
+    ) -> None:
+        """Ejecuta la optimización del modelo, aplica relajación si es necesario
+        y procesa los resultados.
+        """
+        if verbose:
+            print("Constraints added. \nOptimizing model...")
 
-       # --- Relajación Lineal (LP Relaxation) ---
-       if relaxed:
-           for v in self.model.getVars():
-               if v.VType != GRB.CONTINUOUS:
-                   v.VType = GRB.CONTINUOUS
-           self.model.update()
+        # --- Configuración de Parámetros ---
+        self.model.setParam('OutputFlag', 1 if verbose else 0)
+        self.model.setParam('TimeLimit', time_limit)
+        self.model.Params.MIPGap = 0.00001
+        self.model.Params.NodeLimit = GRB.INFINITY
+        self.model.Params.SolutionLimit = GRB.MAXINT
 
-       # --- Optimización ---
-       self.model.optimize()
+        self.model.update()
 
-       # --- Extracción de Resultados ---
-       self.x_results = []
+        # --- Relajación Lineal (LP Relaxation) ---
+        if relaxed:
+            for v in self.model.getVars():
+                if v.VType != GRB.CONTINUOUS:
+                    v.VType = GRB.CONTINUOUS
+            self.model.update()
 
-       if self.model.SolCount > 0:
-           # Iteramos directamente sobre nuestro diccionario de variables self.x
-           self.x_results = [arc for arc, var in self.x.items() if var.X > 0.5]
+        # --- Optimización ---
+        self.model.optimize()
 
-       # --- Visualización ---
-       if plot:
-           if self.model.SolCount > 0:
-               title = "Optimal Tour" if self.model.Status == GRB.OPTIMAL else "Best Found Tour"
-               self.plot(title=title)
-           elif verbose:
-               print("No feasible solution found to plot.")
+        # --- Extracción de Resultados ---
+        self.x_results: list[Arc] = []
+
+        if self.model.SolCount > 0:
+            self.x_results = [arc for arc, var in self.x.items() if var.X > 0.5]
+
+        # --- Visualización ---
+        if plot:
+            if self.model.SolCount > 0:
+                title = "Optimal Tour" if self.model.Status == GRB.OPTIMAL else "Best Found Tour"
+                self.plot(title=title)
+            elif verbose:
+                print("No feasible solution found to plot.")
 
     def plot(self, title: str = "Solution") -> None:
         """Dibuja la solución del modelo utilizando los resultados almacenados en la clase."""

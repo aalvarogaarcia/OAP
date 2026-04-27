@@ -1,4 +1,7 @@
 import logging
+import os
+
+from gurobipy import GRB
 
 from models import OAPCompactModel
 from utils.utils import compute_triangles, read_indexed_instance
@@ -28,6 +31,21 @@ if __name__ == "__main__":
     # 3. Resolver (Obligatorio save_cuts=True para el análisis)
     # El mixin se encargará de guardar el JSON en outputs/Logs/benders_{name}.json
     compact.solve(time_limit=300, verbose=True)
+
+    # Si el modelo acaba infactible, exporta el IIS para depuración.
+    status = compact.model.Status
+    if status == GRB.INF_OR_UNBD:
+        compact.model.setParam("DualReductions", 0)
+        compact.model.optimize()
+        status = compact.model.Status
+
+    if status == GRB.INFEASIBLE:
+        os.makedirs("outputs/IIS", exist_ok=True)
+        iis_path = f"outputs/IIS/{instance_name}_compact.ilp"
+        compact.model.computeIIS()
+        compact.model.write(iis_path)
+        print(f"IIS exportado en: {iis_path}")
+
     #benders.solve(time_limit=300, verbose=False, save_cuts=True)
 
     print(compact)
