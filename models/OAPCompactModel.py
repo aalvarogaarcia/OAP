@@ -54,11 +54,11 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
               maximize: bool = True,
               subtour: Literal["SCF", "MTZ", "MCF"] = "SCF",
               sum_constrain: bool = True,
-              strengthen: bool = True,
+              strengthen: bool = False,
               semiplane: Literal[0,1,2] = 0,
               use_knapsack: bool = False,
               use_cliques: bool = False,
-              crossing_constrain: bool = True
+              crossing_constrain: bool = False
               ) -> None:
         """
         Orquestador principal que construye el modelo paso a paso.
