@@ -1,9 +1,128 @@
+import argparse
+import sys
 import time
 
 import inquirer
 
 from models import OAPBendersModel, OAPCompactModel
 from utils.utils import compute_triangles, read_indexed_instance
+
+
+def _parse_args() -> argparse.Namespace:
+    """Parse command-line arguments for CLI mode."""
+    p = argparse.ArgumentParser(
+        prog="run_single_instance.py",
+        description="OAP single-instance solver (interactive or CLI mode)",
+    )
+    p.add_argument(
+        "instance_name",
+        nargs="?",
+        default=None,
+        help="Instance name without extension (e.g. london-0000020). "
+        "Omit to use interactive prompts.",
+    )
+    p.add_argument("--instance-dir", default="instance", metavar="DIR")
+    p.add_argument(
+        "--model",
+        dest="model_type",
+        choices=["Compacto", "Benders"],
+        default="Compacto",
+    )
+    p.add_argument("--time-limit", type=int, default=3600, metavar="SECONDS")
+    p.add_argument("--maximize", action="store_true", default=True)
+    p.add_argument("--no-maximize", action="store_false", dest="maximize")
+    p.add_argument("--relaxed", action="store_true", default=False)
+    p.add_argument("--polyhedral", action="store_true", default=False)
+    p.add_argument(
+        "--mode", type=int, choices=[0, 1, 2, 3], default=0, metavar="0-3"
+    )
+
+    # Compacto-only
+    p.add_argument(
+        "--objective",
+        choices=["Fekete", "Internal", "External", "Diagonals"],
+        default="Fekete",
+    )
+    p.add_argument(
+        "--subtour", choices=["SCF", "MTZ", "MCF"], default="SCF"
+    )
+    p.add_argument("--sum-constrain", action="store_true", default=False)
+    p.add_argument("--strengthen", action="store_true", default=True)
+    p.add_argument("--no-strengthen", action="store_false", dest="strengthen")
+    p.add_argument(
+        "--semiplane", type=int, choices=[0, 1, 2], default=0, metavar="0-2"
+    )
+    p.add_argument("--use-knapsack", action="store_true", default=False)
+    p.add_argument("--use-cliques", action="store_true", default=False)
+    p.add_argument("--crossing-constrain", action="store_true", default=False)
+
+    # Benders-only
+    p.add_argument(
+        "--benders-method", choices=["farkas", "pi"], default="farkas"
+    )
+    p.add_argument("--save-cuts", action="store_true", default=False)
+    p.add_argument("--crosses-constrain", action="store_true", default=False)
+
+    return p.parse_args()
+
+
+def _build_config_from_args(args: argparse.Namespace) -> dict[str, object]:
+    """Build config dict from argparse Namespace."""
+    # Validate: Compacto-only flags not used with Benders
+    if args.model_type == "Benders":
+        if (
+            args.objective != "Fekete"
+            or args.subtour != "SCF"
+            or args.semiplane != 0
+            or args.use_knapsack
+            or args.use_cliques
+            or args.crossing_constrain
+        ):
+            print(
+                "ERROR: --objective, --subtour, --semiplane, --use-knapsack, "
+                "--use-cliques, --crossing-constrain are Compacto-only flags. "
+                "Remove them when --model Benders is set.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+    return {
+        "instance_dir": args.instance_dir,
+        "instance_name": args.instance_name,
+        "model_type": args.model_type,
+        "maximize": args.maximize,
+        "relaxed": args.relaxed,
+        "polihedral": args.polyhedral,
+        # Compacto keys
+        "objective": args.objective if args.model_type == "Compacto" else None,
+        "subtour": args.subtour if args.model_type == "Compacto" else None,
+        "mode": args.mode,
+        "sum_constrain": args.sum_constrain,
+        "strengthen": args.strengthen if args.model_type == "Compacto" else False,
+        "semiplane": args.semiplane if args.model_type == "Compacto" else 0,
+        "use_knapsack": (
+            args.use_knapsack if args.model_type == "Compacto" else False
+        ),
+        "use_cliques": (
+            args.use_cliques if args.model_type == "Compacto" else False
+        ),
+        "crossing_constrain": (
+            args.crossing_constrain if args.model_type == "Compacto" else False
+        ),
+        # Benders keys
+        "benders_method": (
+            args.benders_method if args.model_type == "Benders" else None
+        ),
+        "save_cuts": args.save_cuts if args.model_type == "Benders" else False,
+        "crosses_constrain": (
+            args.crosses_constrain if args.model_type == "Benders" else False
+        ),
+        # Shared
+        "time_limit": args.time_limit,
+        # Interactive-only (not exposed in CLI)
+        "modify_log_path": False,
+        "Extra_Constraints": False,
+    }
 
 
 def get_experiment_config():
@@ -116,13 +235,23 @@ def get_experiment_config():
         config["benders_method"] = None
         config["save_cuts"] = False
         config["modify_log_path"] = False
+        config.setdefault("strengthen", True)
+        config.setdefault("semiplane", 0)
+        config.setdefault("use_knapsack", False)
+        config.setdefault("use_cliques", False)
+        config.setdefault("crossing_constrain", False)
 
     return config
 
 
-def main():
-    # 1. Capturar la configuración del usuario
-    config = get_experiment_config()
+def main() -> None:
+    args = _parse_args()
+    if args.instance_name is None:
+        # Interactive mode
+        config = get_experiment_config()
+    else:
+        # CLI mode
+        config = _build_config_from_args(args)
 
     if not config:
         print("\nEjecución cancelada por el usuario.")
@@ -155,7 +284,12 @@ def main():
             maximize=config["maximize"],
             subtour=config["subtour"],
             sum_constrain=config["sum_constrain"],
+            strengthen=config["strengthen"],
             mode=config["mode"],
+            semiplane=config["semiplane"],
+            use_knapsack=config["use_knapsack"],
+            use_cliques=config["use_cliques"],
+            crossing_constrain=config["crossing_constrain"],
         )
 
         print("\n[!] Resolviendo...")

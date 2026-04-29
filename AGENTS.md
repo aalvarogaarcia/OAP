@@ -12,11 +12,14 @@
 ## Key Commands
 
 ```bash
-# Batch run (all instances in a directory)
-.venv/bin/python main.py instance/little-instances "*.instance" --time-limit 60 --obj 0
+# Batch run (all instances in a directory) — interactive CLI
+.venv/bin/python main.py
 
-# Interactive single instance (uses inquirer prompts — NOT headless)
+# Single instance — interactive CLI
 .venv/bin/python run_single_instance.py
+
+# Single instance — CLI mode with flags
+.venv/bin/python run_single_instance.py instance-name --model Compacto --objective Fekete --maximize
 
 # Headless single instance (edit instance_name + model config directly in file)
 .venv/bin/python run.py
@@ -33,6 +36,33 @@
 ```
 
 CI runs lint + type-check only. The test job in `.github/workflows/ci.yml` is commented out — it requires a `GRB_LICENSE_FILE` secret.
+
+---
+
+## Batch Runner (`main.py`)
+
+The batch runner processes multiple instances and produces both LaTeX and CSV outputs. It is fully interactive — no CLI flags needed. When executed, it prompts for:
+
+1. Instance directory path (default: `instance`)
+2. File glob pattern (default: `*.instance`)
+3. Subtour-elimination method: `SCF`, `MTZ`, `MCF`
+4. Objective function: `Fekete`, `Internal`, `External`, `Diagonals`
+5. Maximize objective (boolean)
+6. Objective mode (0–3, shoelace variants)
+7. Triangle-sum constraints (boolean)
+8. Strengthening constraints (boolean)
+9. Semiplane constraints: `0 (off)`, `1 (V1)`, `2 (V2)`
+10. Local knapsack constraints (boolean)
+11. Clique constraints (boolean)
+12. Crossing arc constraints (boolean)
+13. Output file name base (default: `resultados`)
+14. Time limit in seconds (default: `7200`)
+
+**Output format:**
+- LaTeX table: `outputs/LaTex/{output_name}.tex` (beamer presentation format)
+- CSV spreadsheet: `outputs/CSV/{output_name}.csv` (with columns: Instance, |N|, Convex Hull Area, Cols, Rows, LP Value, Gap (%), IP Value, Time (s), Nodes)
+
+Both outputs contain the same data; LaTeX is for reporting, CSV is for further analysis.
 
 ---
 
@@ -170,7 +200,7 @@ Subtour in `main.py` is controlled by the `subtour_methods` list (line ~106), cu
 
 - **`model._x` is a plain dict, not a Gurobi attribute.** The codebase attaches `model._x`, `model._x_results`, and `model._points_` as Python attributes on the `gp.Model` object. This is the established pattern — continue it.
 
-- **`run_single_instance.py` is interactive only** (uses `inquirer`). Use `run.py` for scripted/headless execution.
+- **`run_single_instance.py` supports both interactive and CLI modes.** Omit `instance_name` argument to use interactive `inquirer` prompts; provide it with optional flags for CLI mode (e.g., `run_single_instance.py my-instance --model Benders`). Use `run.py` for fully headless execution without any prompts.
 
 - **Mutable default arguments in `OAPBaseModel.extract_subspace_facets` and `extract_facets`** use `var_prefixes: str | list[str] = ['x']`. Do not mutate the default. Pass an explicit list when calling.
 
@@ -178,4 +208,4 @@ Subtour in `main.py` is controlled by the `subtour_methods` list (line ~106), cu
 
 - **Benders cut log default path**: `outputs/Others/Benders/{name}/log.json` — the `outputs/` directory is git-ignored. CI will never have this file.
 
-- **`main.py` output directories** (`outputs/LaTex/`, `outputs/Excel/`) must exist or be created before writing. The script does not create them itself — they are produced by solver runs and are git-ignored.
+- **`main.py` output directories** (`outputs/LaTex/`, `outputs/CSV/`) are created automatically by the script. They are produced by solver batch runs and are git-ignored.

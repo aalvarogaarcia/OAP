@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import glob
 import os
 from numbers import Real
@@ -23,6 +24,31 @@ _OBJECTIVE_MAP: dict[int, str] = {
     1: "Internal",
     2: "External",
     3: "Diagonals",
+}
+
+_CSV_FIELDNAMES: list[str] = [
+    "Instance",
+    "N",
+    "Convex Hull Area",
+    "Cols",
+    "Rows",
+    "LP Value",
+    "Gap (%)",
+    "IP Value",
+    "Time (s)",
+    "Nodes",
+]
+_CSV_KEY_MAP: dict[str, str] = {
+    "Instance": "Instance",
+    "N": "N",
+    "Convex_Hull_Area": "Convex Hull Area",
+    "Cols": "Cols",
+    "Rows": "Rows",
+    "LP": "LP Value",
+    "Gap": "Gap (%)",
+    "IP": "IP Value",
+    "Time": "Time (s)",
+    "Nodes": "Nodes",
 }
 
 
@@ -321,6 +347,21 @@ def main(
 """)
 
     print(f"\nResults written to: {output_filename}")
+
+    # --- CSV export ---
+    csv_filename = f"outputs/CSV/{output_name}.csv"
+    csv_dir = os.path.dirname(csv_filename)
+    if csv_dir:
+        os.makedirs(csv_dir, exist_ok=True)
+
+    csv_rows = [{_CSV_KEY_MAP[k]: v for k, v in row.items()} for row in data_list]
+
+    with open(csv_filename, "w", newline="", encoding="utf-8") as cf:
+        writer = csv.DictWriter(cf, fieldnames=_CSV_FIELDNAMES, quoting=csv.QUOTE_MINIMAL)
+        writer.writeheader()
+        writer.writerows(csv_rows)
+
+    print(f"CSV results written to: {csv_filename}")
 
 
 if __name__ == "__main__":

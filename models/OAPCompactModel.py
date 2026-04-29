@@ -57,7 +57,8 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
               strengthen: bool = True,
               semiplane: Literal[0,1,2] = 0,
               use_knapsack: bool = False,
-              use_cliques: bool = False
+              use_cliques: bool = False,
+              crossing_constrain: bool = True
               ) -> None:
         """
         Orquestador principal que construye el modelo paso a paso.
