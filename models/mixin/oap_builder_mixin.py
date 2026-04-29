@@ -225,6 +225,7 @@ class OAPBuilderMixin:
         Redundant for the IP, but tighten the LP relaxation:
           R1 area balance:    Σ_t c_t · (y_t + yp_t) == area(CH)
           R2 arc coverage:    Σ_{t ∈ V_ij} (y_t + yp_t) <= 1   ∀ (i,j) ∈ A
+          R3 crossing arcs:   Σ_{t ∈ V_ij} (y_t + yp_t) + Σ_{t ∈ V_kl} (y_t + yp_t) <= 1   ∀ (i,j),(k,l) ∈ A s.t. (i,j) y (k,l) se cruzan
 
         Skips R2 for arcs whose triangle adjacency list is empty (some CH
         arcs after cleanup have no orienting triangle); adding Σ ∅ ≥ 1
@@ -242,18 +243,6 @@ class OAPBuilderMixin:
             == self.convex_hull_area,
             name="area_balance_CH",
         )
-        
-        A_II = compute_crossing_edges(self.triangles, self.points)
-        crossing_arc_pairs: set[tuple[Arc, Arc]] = set()
-        for u, v, w, z in A_II:
-            arc_1 = (int(u), int(v))
-            arc_2 = (int(w), int(z))
-            arc_1_rev = (arc_1[1], arc_1[0])
-            arc_2_rev = (arc_2[1], arc_2[0])
-            for a in (arc_1, arc_1_rev):
-                for b in (arc_2, arc_2_rev):
-                    crossing_arc_pairs.add((a, b))
-                    crossing_arc_pairs.add((b, a))
 
         for (i, j) in self.x.keys():
             tris = self.triangles_adj_list[i][j]
@@ -264,34 +253,20 @@ class OAPBuilderMixin:
                 name=f"arc_coverage_{i}_{j}",
             )
 
-            for (k, l) in self.x.keys():
-                if (i, j) == (k, l) or ((i, j), (k, l)) not in crossing_arc_pairs:
-                    continue
-                
-
-                # QUE COJONES FUNCIONA ESTO (PERO AL REVES NO)
-                tris_kl = self.triangles_adj_list[k][l]
-                if not tris_kl:
-                    continue
-
-                self.model.addConstr(
-                    gp.quicksum(self.y[t] for t in tris)
-                    + self.x[j, i]
-                    + self.x[k, l]
-                    + gp.quicksum(self.y[t] for t in tris_kl)
-                    <= 1,
-                    name=f"crossing_edges_{i}_{j}_{k}_{l}",
-                )
+    
+    def _add_crossing_constraints(self):
+        """Agrega restricciones para eliminar soluciones con arcos cruzados."""
+        A_II = compute_crossing_edges(self.triangles, self.points)
+        for a, b, c, d in A_II:
+            if (a, b) in self.x and (c, d) in self.x:
+                tris_ab = self.triangles_adj_list[int(a)][int(b)]
+                tris_cd = self.triangles_adj_list[int(c)][int(d)]
 
                 self.model.addConstr(
-                    gp.quicksum(self.yp[t] for t in tris) +
-                    self.x[i,j] +
-                    gp.quicksum(self.yp[t] for t in tris_kl) +
-                    self.x[l, k] 
-                    <= 1,
-                    name = f"crossing_edges_prime_{i}_{j}_{k}_{l}"
+                    gp.quicksum(self.y[t] for t in tris_ab) + 
+                    gp.quicksum(self.y[t] for t in tris_cd) <= 1,
+                    name=f"crossing_constraint_{a}_{b}_{c}_{d}"
                 )
-
 
 
                 

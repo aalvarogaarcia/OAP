@@ -88,6 +88,9 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
         if use_cliques:
             self.inyectar_cliques_de_cruce()
 
+        if crossing_constrain:
+            self._add_crossing_constraints()
+
         self.model.update()
         
 

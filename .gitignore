@@ -26,6 +26,7 @@ outputs/
 *.tsv
 !test/**/*.tsv
 
+test/TablaResultadosA4.tsv
 reference.py
 
 #Extras
@@ -39,3 +40,5 @@ reference/
 CLAUDE.md
 .claude/
 .opencode/
+.claude-flow/
+.swarm/

@@ -65,7 +65,7 @@ class OAPBendersModel(
         benders_method: Literal["farkas", "pi"] = "farkas",
         sum_constrain: bool = True,
         crosses_constrain: bool = False,
-        strengthen: bool = True,
+        strengthen: bool = False,
         plot_strengthen: bool = False,
     ) -> None:
         """

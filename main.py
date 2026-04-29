@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-import argparse
 import glob
 import os
 from numbers import Real
 from typing import Any
 
+import inquirer
 import pandas as pd
 
 from models import OAPCompactModel
 from utils.utils import compute_triangles, read_indexed_instance
-
 
 # ---------------------------------------------------------------------------
 # Type aliases
@@ -27,6 +26,7 @@ _OBJECTIVE_MAP: dict[int, str] = {
     2: "External",
     3: "Diagonals",
 }
+_SUBTOUR_NAME_TO_INT: dict[str, int] = {"SCF": 0, "MTZ": 1, "MCF": 2}
 
 # Default objective indices used when --obj is not supplied.
 _DEFAULT_OBJ_MAX: int = 1  # Internal (maximise internal area)
@@ -36,6 +36,7 @@ _DEFAULT_OBJ_MIN: int = 2  # External (minimise external area)
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _fmt(value: Any, spec: str = ".2f") -> str:
     """Format *value* with *spec* when it is numeric; fall back to str() for
@@ -67,11 +68,7 @@ def build_and_solve(
     Returns:
         A solved (or timed-out) ``OAPCompactModel`` instance.
     """
-    instance_name = (
-        os.path.basename(instance_path)
-        .replace(".instance", "")
-        .replace(".txt", "")
-    )
+    instance_name = os.path.basename(instance_path).replace(".instance", "").replace(".txt", "")
     points = read_indexed_instance(instance_path)
     triangles = compute_triangles(points)
     model = OAPCompactModel(points, triangles, name=instance_name)
@@ -87,26 +84,115 @@ def build_and_solve(
 
 
 # ---------------------------------------------------------------------------
+# Interactive batch configurator
+# ---------------------------------------------------------------------------
+
+
+def get_batch_config() -> dict[str, object] | None:
+    _LABEL_TO_OBJ: dict[str, int | None] = {
+        "Auto (min=External, max=Internal)": None,
+        "Fekete": 0,
+        "Internal": 1,
+        "External": 2,
+        "Diagonals": 3,
+    }
+
+    print("\n" + "=" * 50)
+    print(" BATCH RUNNER - OAP")
+    print("=" * 50 + "\n")
+
+    questions = [
+        inquirer.Text(
+            "dir_path",
+            message="Instance directory",
+            default="instance",
+        ),
+        inquirer.Text(
+            "ext",
+            message="File glob pattern",
+            default="*.instance",
+        ),
+        inquirer.Checkbox(
+            "subtour_names",
+            message="Subtour-elimination methods to run (space to toggle)",
+            choices=["SCF", "MTZ", "MCF"],
+            default=["SCF", "MCF"],
+            validate=lambda answers, current: len(current) > 0,
+        ),
+        inquirer.List(
+            "objective_label",
+            message="Objective function",
+            choices=[
+                "Auto (min=External, max=Internal)",
+                "Fekete",
+                "Internal",
+                "External",
+                "Diagonals",
+            ],
+            default="Auto (min=External, max=Internal)",
+        ),
+        inquirer.List(
+            "mode",
+            message="Objective mode (0-3)",
+            choices=["0", "1", "2", "3"],
+            default="0",
+        ),
+        inquirer.Confirm(
+            "sum_constrain",
+            message="Enable triangle-sum constraints?",
+            default=False,
+        ),
+        inquirer.Text(
+            "time_limit_str",
+            message="Time limit (seconds)",
+            default="7200",
+            validate=lambda answers, current: current.strip().isdigit() and int(current.strip()) > 0,
+        ),
+        inquirer.Text(
+            "tsv_ref",
+            message="Reference TSV path",
+            default="test/TablaResultadosA4.tsv",
+        ),
+    ]
+
+    config = inquirer.prompt(questions)
+    if config is None:
+        return None
+
+    config["subtour_methods"] = [_SUBTOUR_NAME_TO_INT[name] for name in config["subtour_names"]]
+    del config["subtour_names"]
+
+    config["obj"] = _LABEL_TO_OBJ[config["objective_label"]]
+    del config["objective_label"]
+
+    config["mode"] = int(config["mode"])
+    config["time_limit"] = int(config["time_limit_str"].strip())
+    del config["time_limit_str"]
+
+    return config
+
+
+# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
+
 def main(
-    dir_path: str = "data",
-    ext: str = "*.txt",
-    sum_constrain: bool = True,
+    dir_path: str = "instance",
+    ext: str = "*.instance",
+    sum_constrain: bool = False,
     time_limit: int = 7200,
     obj: int | None = None,
     mode: int = 0,
-    tsv_ref: str = "data/instances_reference.tsv",
+    tsv_ref: str = "test/TablaResultadosA4.tsv",
+    subtour_methods: list[int] | None = None,
 ) -> None:
     files = glob.glob(os.path.join(dir_path, ext))
     files.sort()
 
     all_results_for_excel: list[ResultRow] = []
-    subtour_methods = [
-        0,
-    #    1,
-        2]  # Los métodos que quieres comparar
+    if subtour_methods is None:
+        subtour_methods = [0, 2]
     print(f"Subtour methods to compare: {subtour_methods}")
 
     for st_method in subtour_methods:
@@ -119,9 +205,8 @@ def main(
             os.makedirs(output_dir, exist_ok=True)
 
         data_list: list[ResultRow] = []
-        
-        with open(output_filename, "w", encoding="utf-8") as f:
 
+        with open(output_filename, "w", encoding="utf-8") as f:
             # 1. Escribir Cabecera de LaTeX en el archivo
             f.write(r"""
 \documentclass{beamer}					% Document class\usepackage[english]{babel}				% Set language
@@ -169,12 +254,7 @@ def main(
                 filename = os.path.basename(file)
                 print(f"Procesando archivo: {filename} ...")
 
-                instance_name = (
-                    filename
-                    .replace(".txt", "")
-                    .replace("_", "-")
-                    .replace(".instance", "")
-                )
+                instance_name = filename.replace(".txt", "").replace("_", "-").replace(".instance", "")
                 print(f"[{st_method}] Procesando: {filename}...")
 
                 # Resolve objective index, guarding against obj=0 (Fekete) being falsy.
@@ -205,26 +285,10 @@ def main(
                 min_lp, min_gap, min_ip, min_time, min_nodes = modMin.get_model_stats()
 
                 # Use each model's own SolCount — do NOT cross-reference min with max.
-                min_ip_str = (
-                    f"{min_ip:.0f}"
-                    if isinstance(min_ip, Real) and modMin.model.SolCount > 0
-                    else str(min_ip)
-                )
-                max_ip_str = (
-                    f"{max_ip:.0f}"
-                    if isinstance(max_ip, Real) and modMax.model.SolCount > 0
-                    else str(max_ip)
-                )
-                min_time_str = (
-                    f"{min_time:.2f}"
-                    if isinstance(min_time, Real) and min_time < time_limit
-                    else "Timeout"
-                )
-                max_time_str = (
-                    f"{max_time:.2f}"
-                    if isinstance(max_time, Real) and max_time < time_limit
-                    else "Timeout"
-                )
+                min_ip_str = f"{min_ip:.0f}" if isinstance(min_ip, Real) and modMin.model.SolCount > 0 else str(min_ip)
+                max_ip_str = f"{max_ip:.0f}" if isinstance(max_ip, Real) and modMax.model.SolCount > 0 else str(max_ip)
+                min_time_str = f"{min_time:.2f}" if isinstance(min_time, Real) and min_time < time_limit else "Timeout"
+                max_time_str = f"{max_time:.2f}" if isinstance(max_time, Real) and max_time < time_limit else "Timeout"
 
                 size_n: int = len(modMax.points)
                 conv_hull_area_str: str = f"{modMax.convex_hull_area:.2f}"
@@ -239,10 +303,16 @@ def main(
                     "Convex_Hull_Area": modMax.convex_hull_area,
                     "Cols": modMax.model.NumVars,
                     "Rows": modMax.model.NumConstrs,
-                    "Min_LP": min_lp, "Min_Gap": min_gap,
-                    "Min_IP": min_ip, "Min_Time": min_time, "Min_Nodes": min_nodes,
-                    "Max_LP": max_lp, "Max_Gap": max_gap,
-                    "Max_IP": max_ip, "Max_Time": max_time, "Max_Nodes": max_nodes,
+                    "Min_LP": min_lp,
+                    "Min_Gap": min_gap,
+                    "Min_IP": min_ip,
+                    "Min_Time": min_time,
+                    "Min_Nodes": min_nodes,
+                    "Max_LP": max_lp,
+                    "Max_Gap": max_gap,
+                    "Max_IP": max_ip,
+                    "Max_Time": max_time,
+                    "Max_Nodes": max_nodes,
                 }
                 data_list.append(res_row)
                 all_results_for_excel.append(res_row)
@@ -272,9 +342,7 @@ def main(
     try:
         df_tsv = pd.read_csv(tsv_ref, sep="\t")
 
-        df_final = pd.merge(
-            df_tsv, df_pivot, left_on="instance", right_on="Instance", how="left"
-        )
+        df_final = pd.merge(df_tsv, df_pivot, left_on="instance", right_on="Instance", how="left")
 
         # --- CÁLCULO DE COMPARATIVAS ---
         if 0 in subtour_methods:
@@ -339,8 +407,7 @@ def main(
 
         # --- LIMPIEZA DE FORMATO PARA EXCEL ---
         df_final.columns = [
-            f"{col[0]}_ST{col[1]}" if isinstance(col, tuple) and col[1] != "" else col
-            for col in df_final.columns
+            f"{col[0]}_ST{col[1]}" if isinstance(col, tuple) and col[1] != "" else col for col in df_final.columns
         ]
 
         output_excel = "outputs/Excel/Comparativa_Tecnica_Completa.xlsx"
@@ -363,78 +430,19 @@ def main(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Run optimization models on instance files with configurable constraints and time limits",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  python main.py instance *.instance
-  python main.py instance *.instance --sum
-  python main.py instance *.instance --time-limit 3600
-  python main.py instance *.instance --sum --time-limit 1800
-        """,
-    )
-
-    # Positional arguments
-    parser.add_argument(
-        "dir_path",
-        nargs="?",
-        default="instance",
-        help="Directory path containing instance files",
-    )
-    parser.add_argument(
-        "ext",
-        nargs="?",
-        default="*.instance",
-        help="File extension pattern (default: *.instance)",
-    )
-
-    # Optional flags
-    parser.add_argument(
-        "--sum",
-        action="store_true",
-        dest="sum_constrain",
-        help="Enable sum constraints on triangles",
-    )
-    parser.add_argument(
-        "--time-limit",
-        type=int,
-        default=7200,
-        dest="time_limit",
-        help="Time limit in seconds (default: 7200)",
-    )
-    parser.add_argument(
-        "--obj",
-        type=int,
-        default=None,
-        dest="obj",
-        help=(
-            "Objective function type: "
-            "0=FEKETE, 1=INTERNALAREA, 2=EXTERNALAREA, 3=DIAGONAL "
-            "(defaults to 1 for maximise, 2 for minimise)"
-        ),
-    )
-    parser.add_argument(
-        "--mode",
-        type=int,
-        default=0,
-        dest="mode",
-        help=(
-            "Mode for objective function (default: 0)\n"
-            "FEKETE: 0=Standard, 1=Trapeze, 2=Polygons, 3=Polygons prime\n"
-            "INTERNALAREA/EXTERNALAREA: 0=Standard\n"
-            "DIAGONAL: 0=Internal, 1=External (Not implemented yet)"
-        ),
-    )
-
-    args = parser.parse_args()
-
-    main(
-        dir_path=args.dir_path,
-        ext=args.ext,
-        sum_constrain=args.sum_constrain,
-        time_limit=args.time_limit,
-        obj=args.obj,
-        mode=args.mode,
-        tsv_ref="test/TablaResultadosA4.tsv",
-    )
+    _cfg = get_batch_config()
+    if _cfg is None:
+        print("\nCancelled.")
+    elif not _cfg["subtour_methods"]:
+        print("\nNo subtour methods selected — nothing to run.")
+    else:
+        main(
+            dir_path=_cfg["dir_path"],
+            ext=_cfg["ext"],
+            sum_constrain=_cfg["sum_constrain"],
+            time_limit=_cfg["time_limit"],
+            obj=_cfg["obj"],
+            mode=_cfg["mode"],
+            tsv_ref=_cfg["tsv_ref"],
+            subtour_methods=_cfg["subtour_methods"],
+        )
