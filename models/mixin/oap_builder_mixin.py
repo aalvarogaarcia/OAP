@@ -4,7 +4,7 @@ import numpy as np
 from gurobipy import GRB
 from numpy.typing import NDArray
 
-from utils.geometry import compute_crossing_edges
+from utils.geometry import compute_crossing_edges, iter_directed_crossing_pairs
 from utils.utils import cost_function_area, signed_area  # (Importa lo que necesites aquí)
 
 Arc = tuple[int, int]
@@ -254,20 +254,152 @@ class OAPBuilderMixin:
             )
 
     
-    def _add_crossing_constraints(self):
-        """Agrega restricciones para eliminar soluciones con arcos cruzados."""
+    def _emit_crossing_constraint(
+        self,
+        version: int,
+        u: int,
+        v: int,
+        w: int,
+        z: int,
+    ) -> None:
+        """Emit one crossing constraint candidate for a directed arc pair.
+
+        Version-specific guards:
+        - v1: requires (u, v) and (w, z) in ``self.x``.
+        - v2: backward-compatible behavior; requires (u, v) and (w, z) in
+          ``self.x`` and applies the y+yp coverage form.
+        - v3: requires reverse arcs (v, u) and (z, w) in ``self.x``.
+        - v4: requires (u, v) and (w, z) in ``self.x``.
+        """
+        if version == 1:
+            if (u, v) not in self.x or (w, z) not in self.x:
+                return
+            self.model.addConstr(
+                self.x[u, v] + self.x[w, z] <= 1,
+                name=f"crossing_v{version}_{u}_{v}__{w}_{z}",
+            )
+            return
+
+        if version == 2:
+            if (u, v) not in self.x or (w, z) not in self.x:
+                return
+            tris_uv = self.triangles_adj_list[int(u)][int(v)]
+            if not tris_uv:
+                return
+            tris_wz = self.triangles_adj_list[int(w)][int(z)]
+            if not tris_wz:
+                return
+            self.model.addConstr(
+                gp.quicksum(self.y[t] + self.yp[t] for t in tris_uv)
+                + gp.quicksum(self.y[t] + self.yp[t] for t in tris_wz)
+                <= 1,
+                name=f"crossing_v{version}_{u}_{v}__{w}_{z}",
+            )
+            return
+
+        if version == 3:
+            if (v, u) not in self.x or (z, w) not in self.x:
+                return
+            tris_uv = self.triangles_adj_list[int(u)][int(v)]
+            if not tris_uv:
+                return
+            tris_wz = self.triangles_adj_list[int(w)][int(z)]
+            if not tris_wz:
+                return
+            self.model.addConstr(
+                gp.quicksum(self.y[t] for t in tris_uv)
+                + self.x[v, u]
+                + gp.quicksum(self.y[t] for t in tris_wz)
+                + self.x[z, w]
+                <= 1,
+                name=f"crossing_v{version}_{u}_{v}__{w}_{z}",
+            )
+            return
+
+        if version == 4:
+            if (u, v) not in self.x or (w, z) not in self.x:
+                return
+            tris_uv = self.triangles_adj_list[int(u)][int(v)]
+            tris_wz = self.triangles_adj_list[int(w)][int(z)]
+            self.model.addConstr(
+                gp.quicksum(self.yp[t] for t in tris_uv)
+                + self.x[u, v]
+                + gp.quicksum(self.yp[t] for t in tris_wz)
+                + self.x[w, z]
+                <= 1,
+                name=f"crossing_v{version}_{u}_{v}__{w}_{z}",
+            )
+
+            return
+        
+        if version == 5:
+            if (u, v) not in self.x or (w, z) not in self.x:
+                return
+            tris_uv = self.triangles_adj_list[int(u)][int(v)]
+            tris_wz = self.triangles_adj_list[int(w)][int(z)]
+
+            self.model.addConstr(
+                gp.quicksum(self.y[t] + self.yp[t] for t in tris_uv)
+                + self.x[v, u]
+                + gp.quicksum(self.y[t] + self.yp[t] for t in tris_wz)
+                + self.x[z, w]
+                <= 1,
+                name=f"crossing_v{version}_y_{u}_{v}__{w}_{z}",
+            )
+
+            self.model.addConstr(
+                gp.quicksum(self.yp[t]  for t in tris_uv)
+                + self.x[u, v]
+                + gp.quicksum(self.yp[t] for t in tris_wz)
+                + self.x[w, z]
+                <= 1,
+                name=f"crossing_v{version}_yp_{u}_{v}__{w}_{z}",
+            )
+
+            return
+
+        raise ValueError(f"Unsupported crossing-constraint version: {version}")
+
+    def _add_crossing_constraints(self, version: int = 4) -> None:
+        """Add non-crossing constraints using one of four formulations.
+
+        Parameters
+        ----------
+        version : int, default=3
+            Supported variants:
+            - ``1``: arc-binary form ``x_uv + x_wz <= 1``.
+            - ``2``: triangle-coverage form using ``y + yp`` on each arc's
+              adjacency list. Uses the canonical pairs from
+              ``compute_crossing_edges`` only (no directed expansion), matching
+              legacy behavior.
+            - ``3``: ``y``-based form plus reverse-arc binaries ``x_vu`` and
+              ``x_zw``.
+            - ``4``: ``yp``-based form plus forward-arc binaries ``x_uv`` and
+              ``x_wz``.
+
+        Notes
+        -----
+        - Crossing candidates come from ``compute_crossing_edges``.
+        - For version ``2``, emit only canonical pairings
+          ``(a,b) <-> (c,d)``.
+        - For versions ``1``, ``3``, and ``4``, expand each crossing pair into
+          four directed combinations via ``iter_directed_crossing_pairs``.
+        - Arc-membership checks are centralized in
+          ``_emit_crossing_constraint``.
+        """
         A_II = compute_crossing_edges(self.triangles, self.points)
-        for a, b, c, d in A_II:
-            if (a, b) in self.x and (c, d) in self.x:
-                tris_ab = self.triangles_adj_list[int(a)][int(b)]
-                tris_cd = self.triangles_adj_list[int(c)][int(d)]
 
-                self.model.addConstr(
-                    gp.quicksum(self.y[t] for t in tris_ab) + 
-                    gp.quicksum(self.y[t] for t in tris_cd) <= 1,
-                    name=f"crossing_constraint_{a}_{b}_{c}_{d}"
-                )
+        if version == 2:
+            for a, b, c, d in A_II:
+                self._emit_crossing_constraint(version, int(a), int(b), int(c), int(d))
+            return
 
+        if version in {1, 3, 4, 5}:
+            for (u, v), (w, z) in iter_directed_crossing_pairs(A_II):
+                self._emit_crossing_constraint(version, u, v, w, z)
+            return
+
+        raise ValueError(f"Unsupported crossing-constraint version: {version}")
 
                 
 

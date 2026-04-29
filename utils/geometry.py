@@ -403,6 +403,48 @@ def compute_crossing_edges(
     return arr[ind]
 
 
+def iter_directed_crossing_pairs(
+    crossing_edges: NDArray[np.int64],
+) -> Iterable[tuple[Arc, Arc]]:
+    """Expand each undirected crossing pair into four directed arc combos.
+
+    Preconditions
+    -------------
+    - ``crossing_edges`` has shape ``(M, 4)`` and dtype ``np.int64``.
+    - Each row ``(a, b, c, d)`` is in canonical lex order as produced by
+      :func:`compute_crossing_edges`: ``a >= b``, ``c >= d``, ``a >= c``,
+      and if ``a == c`` then ``b <= d``.
+
+    Postconditions
+    --------------
+    For each row ``(a, b, c, d)`` the generator yields exactly 4 tuples in
+    the following order:
+
+    1. ``((a, b), (c, d))``   — forward / forward   (F/F)
+    2. ``((b, a), (d, c))``   — reverse / reverse   (R/R)
+    3. ``((a, b), (d, c))``   — forward / reverse   (F/R)
+    4. ``((b, a), (c, d))``   — reverse / forward   (R/F)
+
+    If ``crossing_edges`` is empty (shape ``(0, 4)``), nothing is yielded.
+
+    The caller is responsible for filtering out arcs that are absent from the
+    model's ``x`` dictionary — this function is a pure geometry helper with no
+    Gurobi dependency.
+
+    Yields
+    ------
+    tuple[Arc, Arc]
+        Pairs of directed arcs ``((u, v), (w, z))`` representing a directed
+        crossing pair candidate.
+    """
+    for row in crossing_edges:
+        a, b, c, d = int(row[0]), int(row[1]), int(row[2]), int(row[3])
+        yield (a, b), (c, d)   # F/F
+        yield (b, a), (d, c)   # R/R
+        yield (a, b), (d, c)   # F/R
+        yield (b, a), (c, d)   # R/F
+
+
 # ---------------------------------------------------------------------------
 # Triangle metrics
 # ---------------------------------------------------------------------------
