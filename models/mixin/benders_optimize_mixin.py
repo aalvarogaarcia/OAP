@@ -63,21 +63,30 @@ class BendersOptimizeMixin:
             constr.RHS = 1 - x_sol[i, j]
 
         # R3 / R4 strengthening constraints (parameterised by x)
-        for (i, j, k, l), constr in self.constrs_y.get('r3', {}).items():
-            constr.RHS = 1 - x_sol.get((j, i), 0.0) - x_sol.get((k, l), 0.0)
+        for (i, j, k, s), constr in self.constrs_y.get('r3', {}).items():
+            constr.RHS = 1 - x_sol.get((j, i), 0.0) - x_sol.get((k, s), 0.0)
 
-        for (i, j, k, l), constr in self.constrs_yp.get('r3_p', {}).items():
-            constr.RHS = 1 - x_sol.get((i, j), 0.0) - x_sol.get((l, k), 0.0)
+        for (i, j, k, s), constr in self.constrs_yp.get('r3_p', {}).items():
+            constr.RHS = 1 - x_sol.get((i, j), 0.0) - x_sol.get((s, k), 0.0)
 
     def _benders_callback(self, model: gp.Model, where: int) -> None:
         """
         Callback de Gurobi. Intercepta soluciones enteras candidatas (MIPSOL)
         y comprueba su factibilidad en los subproblemas.
+
+        Dispatch logic
+        --------------
+        When self.use_deepest_cuts is True (requires BendersCGSPMixin in MRO),
+        the callback calls get_cgsp_cut_yp / get_cgsp_cut_y to obtain the
+        deepest cut via a Cut-Generating Subproblem (CGSP).
+
+        When self.use_deepest_cuts is False (default, backward compatible),
+        the existing Farkas / Pi logic is used unchanged.
         """
         if where == GRB.Callback.MIPSOL:
             # 1. Extraer la solución actual del Maestro (x_bar)
             x_sol = model.cbGetSolution(self.x)
-            
+
             eta_sol = model.cbGetSolution(self.eta) if hasattr(self, 'objective') and self.objective == "Internal" else 0.0
 
             # 2. Inyectar x_bar en los RHS de los subproblemas
@@ -89,42 +98,68 @@ class BendersOptimizeMixin:
 
             TOL = 1e-6
 
+            use_deepest = getattr(self, "use_deepest_cuts", False)
+
             # 4. Análisis del Subproblema Y
-            if self.sub_y.Status == GRB.INFEASIBLE or (self.benders_method == "pi" and self.sub_y.ObjVal > TOL):
-                # Generar corte según el método elegido
-                if self.benders_method == "farkas":
-                    cut_expr, cut_val = self.get_farkas_cut_y(x_sol, TOL)
-                else:
-                    cut_expr, cut_val = self.get_pi_cut_y(x_sol, TOL)
+            if use_deepest and (
+                self.sub_y.Status == GRB.INFEASIBLE
+                or (self.benders_method == "pi" and self.sub_y.Status == GRB.OPTIMAL and self.sub_y.ObjVal > TOL)
+                or (self.sub_y.Status == GRB.OPTIMAL and getattr(self, "objective", "Fekete") == "Internal")
+            ):
+                # --- CGSP / deepest-cut branch ---
+                cut_expr_y, cut_rhs_y, witness_y = self.get_cgsp_cut_y(x_sol, eta_sol=eta_sol, TOL=TOL)
+                if cut_expr_y.size() > 0 or cut_rhs_y != 0.0:
+                    if witness_y.get("is_optimality_cut") and hasattr(self, "eta"):
+                        # Optimality cut: η >= cut_expr (rhs moved to left)
+                        model.cbLazy(self.eta >= cut_expr_y - cut_rhs_y)
+                    else:
+                        model.cbLazy(cut_expr_y <= cut_rhs_y)
+            elif not use_deepest:
+                # --- Legacy Farkas / Pi branch ---
+                if self.sub_y.Status == GRB.INFEASIBLE or (self.benders_method == "pi" and self.sub_y.ObjVal > TOL):
+                    # Generar corte según el método elegido
+                    if self.benders_method == "farkas":
+                        cut_expr, cut_val = self.get_farkas_cut_y(x_sol, TOL)
+                    else:
+                        cut_expr, cut_val = self.get_pi_cut_y(x_sol, TOL)
 
-                # Inyectar el corte lazy en el Maestro
-                if cut_val > TOL:
-                    model.cbLazy(cut_expr <= 0)
-                elif cut_val < -TOL:
-                    model.cbLazy(cut_expr >= 0)
+                    # Inyectar el corte lazy en el Maestro
+                    if cut_val > TOL:
+                        model.cbLazy(cut_expr <= 0)
+                    elif cut_val < -TOL:
+                        model.cbLazy(cut_expr >= 0)
 
-            elif self.sub_y.Status == GRB.OPTIMAL and getattr(self, 'objective', 'Fekete') == "Internal":
-                rel_tol = max(TOL, 1e-5 * abs(eta_sol))
-                if self.sub_y.ObjVal > eta_sol + rel_tol:
-                    cut_expr, _ = self.get_optimality_cut_y(x_sol, TOL)
-                    model.cbLazy(self.eta >= cut_expr)
-                elif self.sub_y.ObjVal < eta_sol - rel_tol:
-                    cut_expr, _ = self.get_optimality_cut_y(x_sol, TOL)
-                    model.cbLazy(self.eta <= cut_expr)
-
+                elif self.sub_y.Status == GRB.OPTIMAL and getattr(self, 'objective', 'Fekete') == "Internal":
+                    rel_tol = max(TOL, 1e-5 * abs(eta_sol))
+                    if self.sub_y.ObjVal > eta_sol + rel_tol:
+                        cut_expr, _ = self.get_optimality_cut_y(x_sol, TOL)
+                        model.cbLazy(self.eta >= cut_expr)
+                    elif self.sub_y.ObjVal < eta_sol - rel_tol:
+                        cut_expr, _ = self.get_optimality_cut_y(x_sol, TOL)
+                        model.cbLazy(self.eta <= cut_expr)
 
             # 5. Análisis del Subproblema Y'
-            if self.sub_yp.Status == GRB.INFEASIBLE or (self.benders_method == "pi" and self.sub_yp.ObjVal > TOL):
-                if self.benders_method == "farkas":
-                    cut_expr, cut_val = self.get_farkas_cut_yp(x_sol, TOL)
-                else:
-                    cut_expr, cut_val = self.get_pi_cut_yp(x_sol, TOL)
+            if use_deepest and (
+                self.sub_yp.Status == GRB.INFEASIBLE
+                or (self.benders_method == "pi" and self.sub_yp.Status == GRB.OPTIMAL and self.sub_yp.ObjVal > TOL)
+            ):
+                # --- CGSP / deepest-cut branch ---
+                cut_expr_yp, cut_rhs_yp, _witness_yp = self.get_cgsp_cut_yp(x_sol, TOL=TOL)
+                if cut_expr_yp.size() > 0 or cut_rhs_yp != 0.0:
+                    model.cbLazy(cut_expr_yp <= cut_rhs_yp)
+            elif not use_deepest:
+                # --- Legacy Farkas / Pi branch ---
+                if self.sub_yp.Status == GRB.INFEASIBLE or (self.benders_method == "pi" and self.sub_yp.ObjVal > TOL):
+                    if self.benders_method == "farkas":
+                        cut_expr, cut_val = self.get_farkas_cut_yp(x_sol, TOL)
+                    else:
+                        cut_expr, cut_val = self.get_pi_cut_yp(x_sol, TOL)
 
-                # Inyectar el corte lazy en el Maestro
-                if cut_val > TOL:
-                    model.cbLazy(cut_expr <= 0)
-                elif cut_val < -TOL:
-                    model.cbLazy(cut_expr >= 0)
+                    # Inyectar el corte lazy en el Maestro
+                    if cut_val > TOL:
+                        model.cbLazy(cut_expr <= 0)
+                    elif cut_val < -TOL:
+                        model.cbLazy(cut_expr >= 0)
 
     def solve(self, save_cuts: bool = False, time_limit: int = 7200, verbose: bool = False, relaxed: bool = False, polihedral: bool = False) -> None:
         """
@@ -150,7 +185,7 @@ class BendersOptimizeMixin:
             _log_parent = os.path.dirname(self.log_path)
             if _log_parent:
                 os.makedirs(_log_parent, exist_ok=True)
-            with open(self.log_path, 'w') as f:
+            with open(self.log_path, 'w'):
                 pass
         
         # Dentro del Solver / Callback de Benders:
@@ -252,8 +287,26 @@ class BendersOptimizeMixin:
             converged_y = False
             converged_yp = False
 
+            use_deepest = getattr(self, "use_deepest_cuts", False)
+
             # --- Análisis del Subproblema Y ---
-            if self.sub_y.Status == GRB.INFEASIBLE or (self.benders_method == "pi" and self.sub_y.ObjVal > TOL):
+            needs_cut_y = (
+                self.sub_y.Status == GRB.INFEASIBLE
+                or (self.benders_method == "pi" and self.sub_y.Status == GRB.OPTIMAL and self.sub_y.ObjVal > TOL)
+                or (self.sub_y.Status == GRB.OPTIMAL and getattr(self, "objective", "Fekete") == "Internal")
+            )
+            if use_deepest and needs_cut_y:
+                cut_expr_y, cut_rhs_y, witness_y = self.get_cgsp_cut_y(x_sol, eta_sol=eta_sol, TOL=TOL)
+                if cut_expr_y.size() > 0 or cut_rhs_y != 0.0:
+                    if witness_y.get("is_optimality_cut") and hasattr(self, "eta"):
+                        self.model.addConstr(self.eta >= cut_expr_y - cut_rhs_y, name=f"lp_cgsp_opt_y_{self.iteration}")
+                    else:
+                        self.model.addConstr(cut_expr_y <= cut_rhs_y, name=f"lp_cgsp_y_{self.iteration}")
+                else:
+                    converged_y = True
+            elif use_deepest and not needs_cut_y:
+                converged_y = True
+            elif self.sub_y.Status == GRB.INFEASIBLE or (self.benders_method == "pi" and self.sub_y.ObjVal > TOL):
                 if self.benders_method == "farkas":
                     cut_expr, cut_val = self.get_farkas_cut_y(x_sol, TOL)
                 else:
@@ -264,7 +317,6 @@ class BendersOptimizeMixin:
                     self.model.addConstr(cut_expr <= 0, name=f"lp_cut_y_{self.iteration}")
                 elif cut_val < -TOL:
                     self.model.addConstr(cut_expr >= 0, name=f"lp_cut_y_{self.iteration}")
-                
 
             elif self.sub_y.Status == GRB.OPTIMAL and getattr(self, 'objective', 'Fekete') == "Internal":
                 if self.sub_y.ObjVal > eta_sol + TOL:
@@ -279,9 +331,20 @@ class BendersOptimizeMixin:
             else:
                 converged_y = True
 
-           
             # --- Análisis del Subproblema Y' ---
-            if self.sub_yp.Status == GRB.INFEASIBLE or (self.benders_method == "pi" and self.sub_yp.ObjVal > TOL):
+            needs_cut_yp = (
+                self.sub_yp.Status == GRB.INFEASIBLE
+                or (self.benders_method == "pi" and self.sub_yp.Status == GRB.OPTIMAL and self.sub_yp.ObjVal > TOL)
+            )
+            if use_deepest and needs_cut_yp:
+                cut_expr_yp, cut_rhs_yp, _witness_yp = self.get_cgsp_cut_yp(x_sol, TOL=TOL)
+                if cut_expr_yp.size() > 0 or cut_rhs_yp != 0.0:
+                    self.model.addConstr(cut_expr_yp <= cut_rhs_yp, name=f"lp_cgsp_yp_{self.iteration}")
+                else:
+                    converged_yp = True
+            elif use_deepest and not needs_cut_yp:
+                converged_yp = True
+            elif self.sub_yp.Status == GRB.INFEASIBLE or (self.benders_method == "pi" and self.sub_yp.ObjVal > TOL):
                 if self.benders_method == "farkas":
                     cut_expr, cut_val = self.get_farkas_cut_yp(x_sol, TOL)
                 else:

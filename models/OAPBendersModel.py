@@ -6,21 +6,24 @@ import gurobipy as gp
 import numpy as np
 from numpy.typing import NDArray
 
+from models.mixin.benders_analysis_mixin import BendersAnalysisMixin
+from models.mixin.benders_cgsp_mixin import BendersCGSPMixin
+from models.mixin.benders_farkas_mixin import BendersFarkasMixin
+from models.mixin.benders_master_mixin import BendersMasterMixin
+from models.mixin.benders_optimize_mixin import BendersOptimizeMixin
+from models.mixin.benders_pi_mixin import BendersPiMixin
+
 # --- Importamos la Base y todos nuestros Mixins ---
 from models.OAPBaseModel import OAPBaseModel
-from models.mixin.benders_master_mixin import BendersMasterMixin
-from models.mixin.benders_farkas_mixin import BendersFarkasMixin
-from models.mixin.benders_pi_mixin import BendersPiMixin
-from models.mixin.benders_optimize_mixin import BendersOptimizeMixin
-from models.mixin.benders_analysis_mixin import BendersAnalysisMixin
 
 logger = logging.getLogger(__name__)
 
 # ¡La herencia múltiple en todo su esplendor!
 class OAPBendersModel(
-    BendersMasterMixin, 
-    BendersFarkasMixin, 
-    BendersPiMixin, 
+    BendersMasterMixin,
+    BendersCGSPMixin,
+    BendersFarkasMixin,
+    BendersPiMixin,
     BendersOptimizeMixin,
     BendersAnalysisMixin,
     OAPBaseModel
@@ -46,7 +49,12 @@ class OAPBendersModel(
         self.iteration = 0
         self.cortes_añadidos = 0
         self.benders_method = "farkas" # Valor por defecto
-        
+
+        # CGSP (deepest cuts) configuration — defaults to off for backward compat
+        self.use_deepest_cuts: bool = False
+        self.cut_weights_y: dict | None = None
+        self.cut_weights_yp: dict | None = None
+
         # Para el logger de Farkas/Pi si deseas guardar archivos JSON
         self.log_path = f"outputs/Others/Benders/{name}/log.json"
         print(f"Ruta por defecto para log de cortes: {self.log_path}")
@@ -67,14 +75,36 @@ class OAPBendersModel(
         crosses_constrain: bool = False,
         strengthen: bool = False,
         plot_strengthen: bool = False,
+        use_deepest_cuts: bool = False,
+        cut_weights_y: dict | None = None,
+        cut_weights_yp: dict | None = None,
     ) -> None:
         """
         Orquesta la construcción del Problema Maestro y de los Subproblemas.
+
+        Parameters
+        ----------
+        use_deepest_cuts : bool
+            When True, the callback dispatches to CGSP-based cut generation
+            (deepest cuts) instead of Farkas/Pi.  Defaults to False for
+            backward compatibility.
+        cut_weights_y : dict | None
+            Optional L₁ normalisation weights for Y-subproblem CGSP.
+            Keys mirror the constraint groups ('alpha', 'beta', 'gamma', 'delta',
+            'global', 'r1', 'r2', 'r3', 'pi0').  Defaults to all-ones.
+        cut_weights_yp : dict | None
+            Optional L₁ normalisation weights for Y'-subproblem CGSP.
+            Same key structure as cut_weights_y (suffixed with '_p').
         """
         logger.info(f"=== Construyendo OAPBendersModel ({benders_method.upper()}) ===")
 
         # Guardamos el método elegido para que el callback sepa qué cortes generar
         self.benders_method = benders_method
+
+        # CGSP / deepest-cuts configuration
+        self.use_deepest_cuts = use_deepest_cuts
+        self.cut_weights_y = cut_weights_y
+        self.cut_weights_yp = cut_weights_yp
 
         # 1. Construir el Maestro (Viene de BendersMasterMixin)
         self.build_master(
