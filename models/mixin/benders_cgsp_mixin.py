@@ -541,17 +541,13 @@ class BendersCGSPMixin:
             # π₀ is free: split as π₀ = π₀_pos - π₀_neg
             pi0_pos = cgsp.addVar(lb=0.0, name="pi0_pos")
             pi0_neg = cgsp.addVar(lb=0.0, name="pi0_neg")
-            # Objective term: π₀ * (f^T x_bar − η_bar)
-            # f^T x_bar is the primal objective value of x_sol under the cost
-            # function stored in self.model (not re-computed here); the subproblem
-            # ObjVal already reflects this via eta_sol in the master.
-            # We approximate: contribution is π₀ * (sub_y.ObjVal − η_bar) but
-            # since the primal sub_y may not be solved yet, we use the sign from
-            # the previously computed sub_y.ObjVal if available, else 0.
-            sub_y_obj: float = 0.0
-            if hasattr(self, "sub_y") and self.sub_y.Status == GRB.OPTIMAL:
-                sub_y_obj = float(self.sub_y.ObjVal)
-            pi0_contribution = sub_y_obj - eta_sol
+            # Objective term: π₀ * (f^T x̄ − η̄)
+            # f^T x̄ is computed directly from the cached master cost vector
+            # self._cost_x (NEVER from self.sub_y.ObjVal, which is the
+            # artificial-slack minimum, not the area).
+            cost_x: dict = getattr(self, "_cost_x", {})
+            f_dot_x = sum(cost_x.get(arc, 0.0) * x_sol.get(arc, 0.0) for arc in cost_x)
+            pi0_contribution = f_dot_x - eta_sol
             w_pi0 = float(weights.get("pi0", 1.0))
             obj_expr.addTerms([pi0_contribution, -pi0_contribution], [pi0_pos, pi0_neg])
             norm_expr.addTerms([w_pi0, w_pi0], [pi0_pos, pi0_neg])
@@ -580,7 +576,7 @@ class BendersCGSPMixin:
         self,
         x_sol: dict[Arc, float],
         TOL: float = _CGSP_TOL,
-    ) -> tuple[gp.LinExpr, float, dict]:
+    ) -> tuple[gp.LinExpr, float, dict] | tuple[None, None, dict]:
         """Generate the deepest feasibility cut for Y' via CGSP.
 
         Parameters
@@ -592,13 +588,16 @@ class BendersCGSPMixin:
 
         Returns
         -------
-        cut_expr : gp.LinExpr
-            Left-hand side of the cut over master variables x.
-            The cut is:  cut_expr <= cut_rhs
-        cut_rhs : float
-            Right-hand side (0.0 for feasibility cuts).
-        witness : dict
-            Non-zero dual components (for logging and analysis).
+        (cut_expr, cut_rhs, witness) when a violated cut is found:
+            cut_expr : gp.LinExpr
+                Left-hand side of the cut over master variables x.
+                The cut is:  cut_expr <= cut_rhs
+            cut_rhs : float
+                Right-hand side (0.0 for feasibility cuts).
+            witness : dict
+                Non-zero dual components (for logging and analysis).
+        (None, None, {'aborted': reason}) when no cut is emitted.
+            Callers must check ``cut_expr is not None`` before adding the cut.
         """
         cgsp, pi_vars = self._build_cgsp_yp(x_sol, TOL=TOL)
         cgsp.optimize()
@@ -609,11 +608,11 @@ class BendersCGSPMixin:
 
         if cgsp.Status not in (GRB.OPTIMAL, GRB.SUBOPTIMAL):
             logger.warning("CGSP (Y') did not solve to optimality (status=%d).", cgsp.Status)
-            return cut_expr, cut_rhs, witness
+            return None, None, {"aborted": "solve_failed", "status": cgsp.Status}
 
         if cgsp.ObjVal <= TOL:
             # No violated cut found
-            return cut_expr, cut_rhs, witness
+            return None, None, {"aborted": "no_violation"}
 
         # ---- Reconstruct the Benders cut in the master variable space ----
         # The cut is: Σ_i π_i * (b_i(x) - 0) ≤ 0  ↔  Σ_i π_i * b_i(x) ≤ 0
@@ -702,12 +701,13 @@ class BendersCGSPMixin:
         x_sol: dict[Arc, float],
         eta_sol: float = 0.0,
         TOL: float = _CGSP_TOL,
-    ) -> tuple[gp.LinExpr, float, dict]:
+    ) -> tuple[gp.LinExpr, float, dict] | tuple[None, None, dict]:
         """Generate the deepest feasibility (or optimality) cut for Y via CGSP.
 
         For Fekete objective: returns a feasibility cut  cut_expr <= cut_rhs.
         For Internal objective: if the subproblem optimal value exceeds eta_sol,
-            returns an optimality cut; otherwise a feasibility cut.
+            returns an optimality cut (scaled by 1/π₀, with η moved to LHS);
+            otherwise a feasibility cut.
 
         Parameters
         ----------
@@ -720,12 +720,16 @@ class BendersCGSPMixin:
 
         Returns
         -------
-        cut_expr : gp.LinExpr
-            Left-hand side of the cut (over x and optionally eta).
-        cut_rhs : float
-            Right-hand side.
-        witness : dict
-            Non-zero dual components.
+        (cut_expr, cut_rhs, witness) when a cut is found:
+            For feasibility cuts: cut_expr <= cut_rhs (over x variables).
+            For optimality cuts:  cut_expr <= cut_rhs where cut_expr already
+                includes the -η term, i.e.  (π^T B x)/π₀ - η <= (π^T b)/π₀.
+                The caller adds as ``model.cbLazy(cut_expr <= cut_rhs)``.
+        (None, None, {'aborted': reason}) when no cut is emitted:
+            - 'no_violation': CGSP objective <= TOL
+            - 'solve_failed': CGSP did not solve to optimality
+            - 'pi0_negative': π₀ < -TOL (numerical sign anomaly)
+            Callers must check ``cut_expr is not None`` before adding the cut.
         """
         cgsp, pi_vars, pi0_var = self._build_cgsp_y(x_sol, eta_sol=eta_sol, TOL=TOL)
         cgsp.optimize()
@@ -736,11 +740,11 @@ class BendersCGSPMixin:
 
         if cgsp.Status not in (GRB.OPTIMAL, GRB.SUBOPTIMAL):
             logger.warning("CGSP (Y) did not solve to optimality (status=%d).", cgsp.Status)
-            return cut_expr, cut_rhs, witness
+            return None, None, {"aborted": "solve_failed", "status": cgsp.Status}
 
         if cgsp.ObjVal <= TOL:
             # No violated cut
-            return cut_expr, cut_rhs, witness
+            return None, None, {"aborted": "no_violation"}
 
         def _net(u_key: str, v_key: str) -> dict:
             out: dict = {}
@@ -833,24 +837,26 @@ class BendersCGSPMixin:
         # Cut form: π₀ η ≥ π^T b(x) - π^T B x  →  if π₀ > 0: η ≥ (π^T b - π^T B x) / π₀
         # We return the normalised form: cut_expr (involving x and eta) and cut_rhs
         if is_optimality_cut and is_internal:
-            # Return as: eta >= (cut_expr - cut_rhs_const) / pi0_net
-            # Or equivalently in linear form: pi0_net * eta >= cut_expr - cut_rhs_const
-            # Caller handles via: model.addConstr(pi0_net * self.eta >= cut_expr - cut_rhs)
-            if abs(pi0_net) > TOL:
-                # Scale cut by 1/pi0_net to get standard: eta >= rhs_expr
-                factor = 1.0 / pi0_net
-                # multiply all coefficients
-                new_cut_expr = gp.LinExpr()
-                for i_var in range(cut_expr.size()):
-                    new_cut_expr.addTerms(
-                        cut_expr.getCoeff(i_var) * factor,
-                        cut_expr.getVar(i_var),
-                    )
-                new_cut_rhs = cut_rhs * factor
+            if pi0_net < -TOL:
+                # Pathological dual: π₀ < 0 would invert the cut direction.
+                # Refuse to emit a cut this iteration.
+                logger.warning(
+                    "CGSP-Y: pi0_net=%.3e < -TOL; skipping cut "
+                    "(numerical sign anomaly).",
+                    pi0_net,
+                )
+                return None, None, {"aborted": "pi0_negative", "pi0_net": pi0_net}
+            if pi0_net > TOL:
+                # Optimality cut. Scale by 1/pi0_net to get standard form:
+                #   eta >= (cut_expr - cut_rhs) / pi0_net
+                # Rearranged: (cut_expr / pi0_net) - eta <= cut_rhs / pi0_net
+                # Return as: scaled_expr <= scaled_rhs  where
+                #   scaled_expr = cut_expr * (1/pi0_net) - eta
+                scale = 1.0 / pi0_net
+                scaled_expr = scale * cut_expr - self.eta  # gp.LinExpr supports * float
+                scaled_rhs = cut_rhs * scale
                 witness["is_optimality_cut"] = True
-                # Add eta term: the cut is eta >= new_cut_expr (moved to LHS)
-                # Return (new_cut_expr, new_cut_rhs, witness) where caller does:
-                #   self.eta >= new_cut_expr OR new_cut_expr <= self.eta
-                return new_cut_expr, new_cut_rhs, witness
+                return scaled_expr, scaled_rhs, witness
+            # |pi0_net| <= TOL → fall through to feasibility-cut return below.
 
         return cut_expr, cut_rhs, witness

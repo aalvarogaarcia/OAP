@@ -7,9 +7,10 @@ from gurobipy import GRB
 from models.typing_oap import IndexArray, NumericArray, TrianglesAdjList
 from utils.utils import compute_crossing_edges, cost_function_area
 
+
 class BendersMasterMixin:
     """Mixin exclusivo para construir el Problema Maestro de Benders."""
-    
+
     # Pistas de tipado para el linter (sabemos que vendrán de OAPBaseModel)
     model: gp.Model
     N_list: range
@@ -21,6 +22,7 @@ class BendersMasterMixin:
     x: dict
     f: dict
     eta: gp.Var
+    _cost_x: dict[tuple[int, int], float]  # per-arc Fekete area coefficients
 
     def build_master(
         self, 
@@ -83,9 +85,15 @@ class BendersMasterMixin:
     def _add_function_objective_master(self, objective: Literal["Fekete", "Internal"], mode: int, maximize: bool):
         """Método auxiliar para configurar la función objetivo del maestro."""
         opt_sense = GRB.MAXIMIZE if maximize else GRB.MINIMIZE
+        # Always compute and cache the per-arc area coefficient even for
+        # "Internal" — it is needed by the CGSP-Y optimality cut as f in
+        # f^T x̄.
+        self._cost_x = cost_function_area(self.points, self.x.keys(), mode=mode)
         if objective == "Fekete":
-            c = cost_function_area(self.points, self.x.keys(), mode=mode)
-            self.model.setObjective(gp.quicksum(c[i] * self.x[i] for i in self.x.keys()), opt_sense)
+            self.model.setObjective(
+                gp.quicksum(self._cost_x[i] * self.x[i] for i in self.x.keys()),
+                opt_sense,
+            )
         elif objective == "Internal":
             self.model.setObjective(self.eta, opt_sense)
 

@@ -42,6 +42,8 @@ class OAPBendersModel(
         # Apagar el output de los subproblemas para que no ensucien la consola
         self.sub_y.setParam('OutputFlag', 0)
         self.sub_yp.setParam('OutputFlag', 0)
+        self.model.Params.MIPGapAbs = 1.99
+
         
         # 3. Estructuras de datos para la orquestación
         self.constrs_y = {}

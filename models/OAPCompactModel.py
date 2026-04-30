@@ -111,7 +111,7 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
         # --- Configuración de Parámetros ---
         self.model.setParam('OutputFlag', 1 if verbose else 0)
         self.model.setParam('TimeLimit', time_limit)
-        self.model.Params.MIPGap = 0.00001
+        self.model.Params.MIPGapAbs = 1.99
         self.model.Params.NodeLimit = GRB.INFINITY
         self.model.Params.SolutionLimit = GRB.MAXINT
 
