@@ -1,9 +1,52 @@
 import argparse
+import json
 import sys
 import time
 
 from models import OAPBendersModel, OAPCompactModel
 from utils.utils import compute_triangles, read_indexed_instance
+
+
+def _parse_weight_dict(s: str | None, flag: str) -> dict | None:
+    """Parse a weight-dict string into a Python dict.
+
+    Accepted formats:
+    - JSON: ``'{"alpha": 1.5, "beta": 2.0}'``
+    - Flat key=value pairs: ``'alpha=1.5,beta=2.0'``  (values coerced to float)
+
+    Nested arc-keyed weights (e.g. ``{"alpha": {"[0,3]": 2.0}}``) **require** JSON.
+    Unknown group keys are not rejected here; ``_resolve_weights`` handles them
+    silently via its ``.get(..., 1.0)`` fallback.
+
+    Parameters
+    ----------
+    s:
+        Raw string from argparse, or ``None``.
+    flag:
+        CLI flag name used in error messages (e.g. ``"--cut-weights-y"``).
+
+    Returns
+    -------
+    dict | None
+        Parsed dict, or ``None`` when *s* is ``None`` or empty.
+    """
+    if not s:
+        return None
+    # JSON path (required for nested / arc-keyed weights)
+    try:
+        return json.loads(s)  # type: ignore[no-any-return]
+    except json.JSONDecodeError:
+        pass
+    # Flat key=value fallback: "alpha=1.5,beta=2.0"
+    try:
+        return {k.strip(): float(v) for k, v in (pair.split("=", 1) for pair in s.split(","))}
+    except ValueError:
+        print(
+            f"ERROR: {flag} is not valid JSON or key=value pairs. "
+            f"Got: {s!r}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -57,6 +100,40 @@ def _parse_args() -> argparse.Namespace:
     )
     p.add_argument("--save-cuts", action="store_true", default=False)
     p.add_argument("--crosses-constrain", action="store_true", default=False)
+    p.add_argument(
+        "--use-deepest-cuts",
+        action="store_true",
+        default=False,
+        help="Enable Deepest Benders Cuts (CGSP) for Benders model",
+    )
+    p.add_argument(
+        "--no-deepest-cuts",
+        action="store_false",
+        dest="use_deepest_cuts",
+        help="Disable Deepest Benders Cuts (CGSP); this is the default",
+    )
+    p.add_argument(
+        "--cut-weights-y",
+        type=str,
+        default=None,
+        metavar="JSON_OR_PAIRS",
+        help=(
+            "L1 normalisation weights for Y-subproblem CGSP. "
+            "Accepts JSON (required for nested arc keys, e.g. "
+            "'{\"alpha\": 1.5}') or flat key=value pairs "
+            "('alpha=1.5,beta=2.0'). Unknown keys fall back to 1.0 silently."
+        ),
+    )
+    p.add_argument(
+        "--cut-weights-yp",
+        type=str,
+        default=None,
+        metavar="JSON_OR_PAIRS",
+        help=(
+            "L1 normalisation weights for Y'-subproblem CGSP. "
+            "Same format as --cut-weights-y."
+        ),
+    )
 
     return p.parse_args()
 
@@ -94,6 +171,13 @@ def _build_config_from_args(args: argparse.Namespace) -> dict[str, object]:
                 file=sys.stderr,
             )
             sys.exit(1)
+        if args.use_deepest_cuts or args.cut_weights_y or args.cut_weights_yp:
+            print(
+                "ERROR: --use-deepest-cuts, --cut-weights-y, --cut-weights-yp "
+                "are Benders-only flags. Remove them when --model Compacto is set.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
     return {
         "instance_dir": args.instance_dir,
@@ -125,6 +209,18 @@ def _build_config_from_args(args: argparse.Namespace) -> dict[str, object]:
         "save_cuts": args.save_cuts if args.model_type == "Benders" else False,
         "crosses_constrain": (
             args.crosses_constrain if args.model_type == "Benders" else False
+        ),
+        # CGSP flags (Benders-only)
+        "use_deepest_cuts": args.use_deepest_cuts if args.model_type == "Benders" else False,
+        "cut_weights_y": (
+            _parse_weight_dict(args.cut_weights_y, "--cut-weights-y")
+            if args.model_type == "Benders"
+            else None
+        ),
+        "cut_weights_yp": (
+            _parse_weight_dict(args.cut_weights_yp, "--cut-weights-yp")
+            if args.model_type == "Benders"
+            else None
         ),
         # Shared
         "time_limit": args.time_limit,
@@ -196,6 +292,9 @@ def main() -> None:
             maximize=config["maximize"],
             sum_constrain=config["sum_constrain"],
             crosses_constrain=config["crosses_constrain"],
+            use_deepest_cuts=config["use_deepest_cuts"],
+            cut_weights_y=config["cut_weights_y"],
+            cut_weights_yp=config["cut_weights_yp"],
         )
 
         if config["modify_log_path"]:
