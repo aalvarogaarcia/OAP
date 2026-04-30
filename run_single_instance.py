@@ -322,6 +322,9 @@ def main() -> None:
 
     print("=" * 50 + "\n")
 
+    print("✅ Resumen de Resultados:")
+    print(modelo)
+
 
 if __name__ == "__main__":
     main()
