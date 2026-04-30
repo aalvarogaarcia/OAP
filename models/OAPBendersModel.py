@@ -18,6 +18,7 @@ from models.OAPBaseModel import OAPBaseModel
 
 logger = logging.getLogger(__name__)
 
+
 # ¡La herencia múltiple en todo su esplendor!
 class OAPBendersModel(
     BendersMasterMixin,
@@ -26,7 +27,7 @@ class OAPBendersModel(
     BendersPiMixin,
     BendersOptimizeMixin,
     BendersAnalysisMixin,
-    OAPBaseModel
+    OAPBaseModel,
 ):
     def __init__(self, points: NDArray[np.int64], triangles: NDArray[np.int64], name: str = "OAPBendersModel"):
         """
@@ -34,23 +35,22 @@ class OAPBendersModel(
         """
         # 1. Inicializa la Base (Crea self.model, self.points, self.CH, etc.)
         super().__init__(points, triangles, name)
-        
+
         # 2. Modelos adicionales exclusivos de Benders
         self.sub_y = gp.Model(f"{name}_Sub_Y")
         self.sub_yp = gp.Model(f"{name}_Sub_YP")
-        
+
         # Apagar el output de los subproblemas para que no ensucien la consola
-        self.sub_y.setParam('OutputFlag', 0)
-        self.sub_yp.setParam('OutputFlag', 0)
+        self.sub_y.setParam("OutputFlag", 0)
+        self.sub_yp.setParam("OutputFlag", 0)
         self.model.Params.MIPGapAbs = 1.99
 
-        
         # 3. Estructuras de datos para la orquestación
         self.constrs_y = {}
         self.constrs_yp = {}
         self.iteration = 0
         self.cortes_añadidos = 0
-        self.benders_method = "farkas" # Valor por defecto
+        self.benders_method = "farkas"  # Valor por defecto
 
         # CGSP (deepest cuts) configuration — defaults to off for backward compat
         self.use_deepest_cuts: bool = False
@@ -80,6 +80,7 @@ class OAPBendersModel(
         use_deepest_cuts: bool = False,
         cut_weights_y: dict | None = None,
         cut_weights_yp: dict | None = None,
+        semiplane: Literal[0, 1] = 0,
     ) -> None:
         """
         Orquesta la construcción del Problema Maestro y de los Subproblemas.
@@ -97,6 +98,22 @@ class OAPBendersModel(
         cut_weights_yp : dict | None
             Optional L₁ normalisation weights for Y'-subproblem CGSP.
             Same key structure as cut_weights_y (suffixed with '_p').
+        semiplane : Literal[0, 1], default 0
+            Master-side half-plane (semiplane) constraints (Hernandez-Perez §5.2).
+            - 0: off (default; preserves backward compatibility with all existing
+                 experiments and CLI scripts).
+            - 1: V1 — arc-ordering inequality x[i,j] <= x[j, j_next] for every
+                 interior->hull arc whose left half-plane is empty of other interior
+                 points.  Pure x-space; does NOT affect the Y / Y' subproblems or
+                 the Farkas / Pi / CGSP cut derivations (see design note
+                 2026-04-30-benders-semiplane-master.md §"Decomposition invariance").
+            V2 is reserved for future work.
+
+        Notes
+        -----
+        Default value 0 is binding: every existing benchmark, every cached
+        experiment artefact, and every callback in BendersOptimizeMixin must
+        behave bit-identically when this kwarg is omitted (NFR-5 / NFR-6).
         """
         logger.info(f"=== Construyendo OAPBendersModel ({benders_method.upper()}) ===")
 
@@ -114,13 +131,18 @@ class OAPBendersModel(
             mode=mode,
             maximize=maximize,
             crosses_constrain=crosses_constrain,
+            semiplane=semiplane,
         )
 
         # 2. Construir los Subproblemas (Viene de Farkas o Pi Mixin)
         if benders_method == "farkas":
-            self.build_farkas_subproblems(sum_constrain=sum_constrain, strengthen=strengthen, plot_strengthen=plot_strengthen)
+            self.build_farkas_subproblems(
+                sum_constrain=sum_constrain, strengthen=strengthen, plot_strengthen=plot_strengthen
+            )
         elif benders_method == "pi":
-            self.build_pi_subproblems(sum_constrain=sum_constrain, strengthen=strengthen, plot_strengthen=plot_strengthen)
+            self.build_pi_subproblems(
+                sum_constrain=sum_constrain, strengthen=strengthen, plot_strengthen=plot_strengthen
+            )
         else:
             raise ValueError(f"Método de Benders desconocido: {benders_method}")
 

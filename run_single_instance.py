@@ -42,8 +42,7 @@ def _parse_weight_dict(s: str | None, flag: str) -> dict | None:
         return {k.strip(): float(v) for k, v in (pair.split("=", 1) for pair in s.split(","))}
     except ValueError:
         print(
-            f"ERROR: {flag} is not valid JSON or key=value pairs. "
-            f"Got: {s!r}",
+            f"ERROR: {flag} is not valid JSON or key=value pairs. Got: {s!r}",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -71,9 +70,7 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--no-maximize", action="store_false", dest="maximize")
     p.add_argument("--relaxed", action="store_true", default=False)
     p.add_argument("--polyhedral", action="store_true", default=False)
-    p.add_argument(
-        "--mode", type=int, choices=[0, 1, 2, 3], default=0, metavar="0-3"
-    )
+    p.add_argument("--mode", type=int, choices=[0, 1, 2, 3], default=0, metavar="0-3")
 
     # Compacto-only
     p.add_argument(
@@ -81,25 +78,30 @@ def _parse_args() -> argparse.Namespace:
         choices=["Fekete", "Internal", "External", "Diagonals"],
         default="Fekete",
     )
-    p.add_argument(
-        "--subtour", choices=["SCF", "MTZ", "MCF"], default="SCF"
-    )
+    p.add_argument("--subtour", choices=["SCF", "MTZ", "MCF"], default="SCF")
     p.add_argument("--sum-constrain", action="store_true", default=False)
     p.add_argument("--strengthen", action="store_true", default=True)
     p.add_argument("--no-strengthen", action="store_false", dest="strengthen")
-    p.add_argument(
-        "--semiplane", type=int, choices=[0, 1, 2], default=0, metavar="0-2"
-    )
+    p.add_argument("--semiplane", type=int, choices=[0, 1, 2], default=0, metavar="0-2")
     p.add_argument("--use-knapsack", action="store_true", default=False)
     p.add_argument("--use-cliques", action="store_true", default=False)
     p.add_argument("--crossing-constrain", action="store_true", default=False)
 
     # Benders-only
-    p.add_argument(
-        "--benders-method", choices=["farkas", "pi"], default="farkas"
-    )
+    p.add_argument("--benders-method", choices=["farkas", "pi"], default="farkas")
     p.add_argument("--save-cuts", action="store_true", default=False)
     p.add_argument("--crosses-constrain", action="store_true", default=False)
+    p.add_argument(
+        "--benders-semiplane",
+        type=int,
+        choices=[0, 1],
+        default=0,
+        metavar="0-1",
+        help=(
+            "V1 half-plane constraints for the Benders master (Benders-only). "
+            "0=off (default), 1=V1 arc-ordering.  Does NOT affect subproblems."
+        ),
+    )
     p.add_argument(
         "--use-deepest-cuts",
         action="store_true",
@@ -129,10 +131,7 @@ def _parse_args() -> argparse.Namespace:
         type=str,
         default=None,
         metavar="JSON_OR_PAIRS",
-        help=(
-            "L1 normalisation weights for Y'-subproblem CGSP. "
-            "Same format as --cut-weights-y."
-        ),
+        help=("L1 normalisation weights for Y'-subproblem CGSP. Same format as --cut-weights-y."),
     )
 
     return p.parse_args()
@@ -160,11 +159,7 @@ def _build_config_from_args(args: argparse.Namespace) -> dict[str, object]:
 
     # Validate: Benders-only flags not used with Compacto
     if args.model_type == "Compacto":
-        if (
-            args.benders_method != "farkas"
-            or args.save_cuts
-            or args.crosses_constrain
-        ):
+        if args.benders_method != "farkas" or args.save_cuts or args.crosses_constrain:
             print(
                 "ERROR: --benders-method, --save-cuts, --crosses-constrain "
                 "are Benders-only flags. Remove them when --model Compacto is set.",
@@ -175,6 +170,12 @@ def _build_config_from_args(args: argparse.Namespace) -> dict[str, object]:
             print(
                 "ERROR: --use-deepest-cuts, --cut-weights-y, --cut-weights-yp "
                 "are Benders-only flags. Remove them when --model Compacto is set.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        if args.benders_semiplane != 0:
+            print(
+                "ERROR: --benders-semiplane is a Benders-only flag. Remove it when --model Compacto is set.",
                 file=sys.stderr,
             )
             sys.exit(1)
@@ -193,35 +194,23 @@ def _build_config_from_args(args: argparse.Namespace) -> dict[str, object]:
         "sum_constrain": args.sum_constrain,
         "strengthen": args.strengthen if args.model_type == "Compacto" else False,
         "semiplane": args.semiplane if args.model_type == "Compacto" else 0,
-        "use_knapsack": (
-            args.use_knapsack if args.model_type == "Compacto" else False
-        ),
-        "use_cliques": (
-            args.use_cliques if args.model_type == "Compacto" else False
-        ),
-        "crossing_constrain": (
-            args.crossing_constrain if args.model_type == "Compacto" else False
-        ),
+        "use_knapsack": (args.use_knapsack if args.model_type == "Compacto" else False),
+        "use_cliques": (args.use_cliques if args.model_type == "Compacto" else False),
+        "crossing_constrain": (args.crossing_constrain if args.model_type == "Compacto" else False),
         # Benders keys
-        "benders_method": (
-            args.benders_method if args.model_type == "Benders" else None
-        ),
+        "benders_method": (args.benders_method if args.model_type == "Benders" else None),
         "save_cuts": args.save_cuts if args.model_type == "Benders" else False,
-        "crosses_constrain": (
-            args.crosses_constrain if args.model_type == "Benders" else False
-        ),
+        "crosses_constrain": (args.crosses_constrain if args.model_type == "Benders" else False),
         # CGSP flags (Benders-only)
         "use_deepest_cuts": args.use_deepest_cuts if args.model_type == "Benders" else False,
         "cut_weights_y": (
-            _parse_weight_dict(args.cut_weights_y, "--cut-weights-y")
-            if args.model_type == "Benders"
-            else None
+            _parse_weight_dict(args.cut_weights_y, "--cut-weights-y") if args.model_type == "Benders" else None
         ),
         "cut_weights_yp": (
-            _parse_weight_dict(args.cut_weights_yp, "--cut-weights-yp")
-            if args.model_type == "Benders"
-            else None
+            _parse_weight_dict(args.cut_weights_yp, "--cut-weights-yp") if args.model_type == "Benders" else None
         ),
+        # Benders semiplane (master-side V1, Benders-only)
+        "benders_semiplane": args.benders_semiplane if args.model_type == "Benders" else 0,
         # Shared
         "time_limit": args.time_limit,
         # Kept for compatibility with downstream logic
@@ -295,6 +284,7 @@ def main() -> None:
             use_deepest_cuts=config["use_deepest_cuts"],
             cut_weights_y=config["cut_weights_y"],
             cut_weights_yp=config["cut_weights_yp"],
+            semiplane=config["benders_semiplane"],
         )
 
         if config["modify_log_path"]:
