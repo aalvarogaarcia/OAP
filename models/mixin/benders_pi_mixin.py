@@ -234,6 +234,8 @@ class BendersPiMixin:
             sense = "<="
         elif cut_y_val < -TOL:
             sense = ">="
+        else:
+            sense = "=="
         self._log_and_print_pi(v_comps, cut_y_val, "Y", TOL, x_sol, cut_y_expr, sense)
 
         return cut_y_expr, cut_y_val
