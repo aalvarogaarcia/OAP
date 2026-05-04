@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 # experiments/benchmark_benders_semiplane.py
 """
-Benchmark: Compact vs Benders-Farkas vs Benders-Pi (plain + semiplane V1)
-on the CG:SHOP-2019 instance set, sizes 10/15/20/25/30/35.
+Benchmark: Basic theory — Compact vs Benders-Farkas vs Benders-Pi
+(semiplane=0, no CGSP) on the CG:SHOP-2019 instance set, sizes 10/15/20/25/30/35.
 
 Protocol (FR-9 compliant):
   - Hardware: logged via get_system_info()
   - Solver: Gurobi 13.0.1, Seed=0, Threads=1
-  - MIPGapAbs overridden to 0 (the model default of 1.99 distorts gaps)
   - MIPGapAbs: 1.99
   - Time limit per solve: 60,000 s (FR-9 / HP25 protocol)
   - Skip rule: any (instance, method) exceeding 10 h wall-clock is recorded
@@ -17,12 +16,15 @@ Protocol (FR-9 compliant):
   - Instances sorted smallest-first, stars-* last within each size group.
 
 Metrics per row:
-  instance, n_nodes, family, model, benders_method, semiplane,
+  instance, n_nodes, family, model, benders_method,
   root_lp, final_ip, gap_pct, time_s, nodes, n_master_constrs, status
 
 Output:
-  outputs/CSV/benchmark_benders_semiplane_phase1.csv  — Compact + Benders plain
-  outputs/CSV/benchmark_benders_semiplane_phase2.csv  — Benders + semiplane V1
+  outputs/CSV/benchmark_basic_theory.csv
+
+Profiling output:
+  outputs/profiling/profile_{method}_{stem}.csv    (per-instance)
+  outputs/profiling/profile_summary_{method}.csv   (aggregated top-20)
 
 Invocation:
   .venv/bin/python experiments/benchmark_benders_semiplane.py [--smoke-test]
@@ -34,9 +36,12 @@ Invocation:
 from __future__ import annotations
 
 import argparse
+import cProfile
 import csv
+import io
 import logging
 import platform
+import pstats
 import subprocess
 import sys
 import time
@@ -70,70 +75,29 @@ TIME_LIMIT_DEFAULT = 60_000  # seconds — FR-9 / HP25
 SKIP_WALL_CLOCK_S = 10 * 3600  # 10 h soft cap per solve
 MIPGAPABS = 1.99  # override OAPBendersModel default of 1.99
 
-# Phase-1 methods: Compact (semiplane=1 by default per plan) + Benders plain
-# Phase-2 methods: Benders + semiplane V1 in master
-# Both phases are collected in a single run; the split into two CSVs is by
-# the `semiplane` column value.
-
 METHODS: list[dict[str, Any]] = [
-    # --- Phase 1 ---
-    {
-        "label": "compact_default",
-        "model": "compact",
-        "benders_method": None,
-        "semiplane": 1,  # Compact ALWAYS with semiplane per plan M.3
-        "phase": 1,
-    },
-    {
-        "label": "benders_farkas_plain",
-        "model": "benders",
-        "benders_method": "farkas",
-        "semiplane": 0,
-        "phase": 1,
-    },
-    {
-        "label": "benders_pi_plain",
-        "model": "benders",
-        "benders_method": "pi",
-        "semiplane": 0,
-        "phase": 1,
-    },
-    # --- Phase 2 ---
-    {
-        "label": "benders_farkas_sp1",
-        "model": "benders",
-        "benders_method": "farkas",
-        "semiplane": 1,
-        "phase": 2,
-    },
-    {
-        "label": "benders_pi_sp1",
-        "model": "benders",
-        "benders_method": "pi",
-        "semiplane": 1,
-        "phase": 2,
-    },
+    {"label": "compact",        "model": "compact",  "benders_method": None},
+    {"label": "benders_farkas", "model": "benders",  "benders_method": "farkas"},
+    {"label": "benders_pi",     "model": "benders",  "benders_method": "pi"},
 ]
 
 CSV_FIELDNAMES = [
-    "instance",
-    "n_nodes",
-    "family",
-    "size",
-    "method_label",
-    "model",
-    "benders_method",
-    "semiplane",
-    "root_lp",
-    "final_ip",
-    "gap_pct",
-    "time_s",
-    "nodes",
-    "n_master_constrs",
-    "status",
-    "phase",
-    "timestamp",
+    "instance", "n_nodes", "family", "size", "method_label",
+    "model", "benders_method",
+    "root_lp", "final_ip", "gap_pct", "time_s", "nodes",
+    "n_master_constrs", "status", "timestamp",
 ]
+
+PROFILE_FIELDNAMES = [
+    "ncalls", "tottime", "percall_tot", "cumtime", "percall_cum",
+    "filename", "lineno", "function",
+]
+PROFILE_SUMMARY_FIELDNAMES = [
+    "function", "filename", "lineno",
+    "total_ncalls", "total_tottime", "total_cumtime", "n_instances",
+]
+PROFILING_OUT_DIR = REPO_ROOT / "outputs" / "profiling"
+RESULTS_CSV_PATH  = REPO_ROOT / "outputs" / "CSV" / "benchmark_basic_theory.csv"
 
 
 # ---------------------------------------------------------------------------
@@ -165,8 +129,8 @@ def get_system_info() -> dict:
         "gurobi_version": "13.0.1",
         "seed": 0,
         "threads": 1,
-        "mipgapabs": MIPGAPABS
-        }
+        "mipgapabs": MIPGAPABS,
+    }
 
 
 def parse_family(stem: str) -> str:
@@ -213,209 +177,200 @@ def collect_instances(instance_dir: Path, sizes: list[int]) -> list[Path]:
     return candidates
 
 
-def run_compact_solve(
-    instance_path: Path,
-    semiplane: int,
-    time_limit: int,
-) -> dict:
-    """Run OAPCompactModel on one instance and return a result row."""
+def _is_project_func(filename: str) -> bool:
+    return str(REPO_ROOT) in filename
+
+
+def _dump_profile_csv(
+    profiler: cProfile.Profile,
+    method_label: str,
+    stem: str,
+    out_dir: Path,
+) -> list[dict]:
+    """Dump per-instance profiling data to CSV; return rows for summary accumulation."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stream = io.StringIO()
+    stats = pstats.Stats(profiler, stream=stream)
+    stats.calc_callees()
+
+    rows = []
+    for (filename, lineno, funcname), (prim_calls, total_calls, tottime, cumtime, _callers) in stats.stats.items():
+        if not _is_project_func(filename):
+            continue
+        row = {
+            "ncalls":      total_calls,
+            "tottime":     round(tottime, 6),
+            "percall_tot": round(tottime / total_calls, 6) if total_calls else 0.0,
+            "cumtime":     round(cumtime, 6),
+            "percall_cum": round(cumtime / prim_calls, 6) if prim_calls else 0.0,
+            "filename":    Path(filename).name,
+            "lineno":      lineno,
+            "function":    funcname,
+        }
+        rows.append(row)
+
+    rows.sort(key=lambda r: r["cumtime"], reverse=True)
+
+    out_path = out_dir / f"profile_{method_label}_{stem}.csv"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=PROFILE_FIELDNAMES)
+        writer.writeheader()
+        writer.writerows(rows)
+    logger.info("Profile CSV written: %s (%d functions)", out_path, len(rows))
+    return rows
+
+
+def _write_profile_summary(accumulated: dict[str, list[dict]], out_dir: Path) -> None:
+    """Aggregate per-instance profile rows by function and write summary CSVs."""
+    for method_label, all_rows in accumulated.items():
+        agg: dict[tuple, dict] = {}
+        for row in all_rows:
+            key = (row["function"], row["filename"], row["lineno"])
+            if key not in agg:
+                agg[key] = {
+                    "function":      row["function"],
+                    "filename":      row["filename"],
+                    "lineno":        row["lineno"],
+                    "total_ncalls":  0,
+                    "total_tottime": 0.0,
+                    "total_cumtime": 0.0,
+                    "n_instances":   0,
+                }
+            agg[key]["total_ncalls"]  += row["ncalls"]
+            agg[key]["total_tottime"] += row["tottime"]
+            agg[key]["total_cumtime"] += row["cumtime"]
+            agg[key]["n_instances"]   += 1
+
+        summary_rows = sorted(agg.values(), key=lambda r: r["total_cumtime"], reverse=True)[:20]
+        for r in summary_rows:
+            r["total_tottime"] = round(r["total_tottime"], 6)
+            r["total_cumtime"] = round(r["total_cumtime"], 6)
+
+        out_path = out_dir / f"profile_summary_{method_label}.csv"
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(out_path, "w", newline="", encoding="utf-8") as fh:
+            writer = csv.DictWriter(fh, fieldnames=PROFILE_SUMMARY_FIELDNAMES)
+            writer.writeheader()
+            writer.writerows(summary_rows)
+        logger.info("Profile summary written: %s", out_path)
+
+
+def run_compact_solve(instance_path: Path, time_limit: int) -> tuple[dict, list[dict]]:
+    """Run OAPCompactModel. Returns (result_row, profile_rows)."""
     from models import OAPCompactModel
     from utils.utils import compute_triangles, read_indexed_instance
 
     stem = instance_path.stem
-    label = "compact_default"
+    label = "compact"
     timestamp = datetime.now().isoformat()
-    logger.info("[%s] Compact semiplane=%d starting (limit=%ds)", stem, semiplane, time_limit)
+    logger.info("[%s] Compact starting (limit=%ds)", stem, time_limit)
 
     try:
         points = read_indexed_instance(str(instance_path))
         triangles = compute_triangles(points)
         n_nodes = len(points)
 
+        profiler = cProfile.Profile()
+        profiler.enable()
+
         model = OAPCompactModel(points, triangles, name=f"bench-{stem}-compact")
         model.build(
             objective="Fekete",
-            maximize=False,  # MinArea — the harder direction per HP25
+            maximize=False,
             subtour="SCF",
             sum_constrain=True,
             strengthen=False,
-            semiplane=semiplane,
+            semiplane=0,
             use_knapsack=False,
             use_cliques=False,
         )
-
-        # Deterministic settings (NFR-2)
         model.model.Params.Seed = 0
         model.model.Params.Threads = 1
-
         n_master_constrs = model.model.NumConstrs
 
         wall_start = time.time()
         model.solve(time_limit=time_limit, verbose=False)
         wall_elapsed = time.time() - wall_start
 
-        lp, gap, ip, time_s, nodes = model.get_model_stats()
+        profiler.disable()
 
+        lp, gap, ip, time_s, nodes = model.get_model_stats()
         status = "OK"
         if wall_elapsed >= SKIP_WALL_CLOCK_S:
             status = "SKIPPED_TIMEOUT_10H"
 
-        logger.info(
-            "[%s] Compact semiplane=%d: ip=%.2f gap=%.2f%% time=%.1fs nodes=%s",
-            stem,
-            semiplane,
-            ip or float("nan"),
-            gap or float("nan"),
-            time_s or float("nan"),
-            nodes,
-        )
-        return _make_row(
-            stem,
-            n_nodes,
-            label,
-            "compact",
-            None,
-            semiplane,
-            1,
-            lp,
-            ip,
-            gap,
-            time_s or wall_elapsed,
-            nodes,
-            n_master_constrs,
-            status,
-            timestamp,
-        )
+        logger.info("[%s] Compact: ip=%s gap=%s time=%.1fs", stem, ip, gap, time_s or wall_elapsed)
+
+        profile_rows = _dump_profile_csv(profiler, label, stem, PROFILING_OUT_DIR)
+
+        return _make_row(stem, n_nodes, label, "compact", None, lp, ip, gap,
+                         time_s or wall_elapsed, nodes, n_master_constrs, status, timestamp), profile_rows
 
     except Exception as exc:
-        logger.error("[%s] Compact semiplane=%d FAILED: %s", stem, semiplane, exc)
-        return _make_row(
-            stem,
-            parse_n_nodes(instance_path.stem),
-            label,
-            "compact",
-            None,
-            semiplane,
-            1,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            f"FAILED: {str(exc)[:80]}",
-            timestamp,
-        )
+        logger.error("[%s] Compact FAILED: %s", stem, exc)
+        return _make_row(stem, parse_n_nodes(instance_path.stem), label, "compact", None,
+                         None, None, None, None, None, None, f"FAILED: {str(exc)[:80]}", timestamp), []
 
 
 def run_benders_solve(
-    instance_path: Path,
-    benders_method: str,
-    semiplane: int,
-    time_limit: int,
-) -> dict:
-    """Run OAPBendersModel on one instance and return a result row."""
+    instance_path: Path, benders_method: str, time_limit: int
+) -> tuple[dict, list[dict]]:
+    """Run OAPBendersModel. Returns (result_row, profile_rows)."""
     from models import OAPBendersModel
     from utils.utils import compute_triangles, read_indexed_instance
 
     stem = instance_path.stem
-    phase = 1 if semiplane == 0 else 2
-    label = f"benders_{benders_method}_{'plain' if semiplane == 0 else 'sp1'}"
+    label = f"benders_{benders_method}"
     timestamp = datetime.now().isoformat()
-    logger.info(
-        "[%s] Benders(%s) semiplane=%d starting (limit=%ds)",
-        stem,
-        benders_method,
-        semiplane,
-        time_limit,
-    )
+    logger.info("[%s] Benders(%s) starting (limit=%ds)", stem, benders_method, time_limit)
 
     try:
         points = read_indexed_instance(str(instance_path))
         triangles = compute_triangles(points)
         n_nodes = len(points)
 
-        model = OAPBendersModel(points, triangles, name=f"bench-{stem}-{benders_method}-sp{semiplane}")
+        profiler = cProfile.Profile()
+        profiler.enable()
+
+        model = OAPBendersModel(points, triangles, name=f"bench-{stem}-{benders_method}")
         model.build(
             objective="Fekete",
-            maximize=False,  # MinArea
+            maximize=False,
             benders_method=benders_method,
             sum_constrain=True,
             crosses_constrain=False,
             strengthen=False,
             use_deepest_cuts=False,
-            semiplane=semiplane,
+            semiplane=0,
         )
-
-        # Deterministic settings (NFR-2)
         model.model.Params.Seed = 0
         model.model.Params.Threads = 1
-        # Override MIPGapAbs=1.99 default for honest gap reporting (plan §M.3)
         model.model.Params.MIPGapAbs = MIPGAPABS
-
         n_master_constrs = model.model.NumConstrs
 
         wall_start = time.time()
-        model.solve(
-            time_limit=time_limit,
-            verbose=False,
-            save_cuts=False,  # Disable JSONL logging for campaign runs (plan R-7)
-        )
+        model.solve(time_limit=time_limit, verbose=False, save_cuts=False)
         wall_elapsed = time.time() - wall_start
 
-        lp, gap, ip, time_s, nodes = model.get_model_stats()
+        profiler.disable()
 
+        lp, gap, ip, time_s, nodes = model.get_model_stats()
         status = "OK"
         if wall_elapsed >= SKIP_WALL_CLOCK_S:
             status = "SKIPPED_TIMEOUT_10H"
 
-        logger.info(
-            "[%s] Benders(%s) semiplane=%d: ip=%.2f gap=%.2f%% time=%.1fs nodes=%s",
-            stem,
-            benders_method,
-            semiplane,
-            ip or float("nan"),
-            gap or float("nan"),
-            time_s or float("nan"),
-            nodes,
-        )
-        return _make_row(
-            stem,
-            n_nodes,
-            label,
-            "benders",
-            benders_method,
-            semiplane,
-            phase,
-            lp,
-            ip,
-            gap,
-            time_s or wall_elapsed,
-            nodes,
-            n_master_constrs,
-            status,
-            timestamp,
-        )
+        logger.info("[%s] Benders(%s): ip=%s gap=%s time=%.1fs", stem, benders_method, ip, gap, time_s or wall_elapsed)
+
+        profile_rows = _dump_profile_csv(profiler, label, stem, PROFILING_OUT_DIR)
+
+        return _make_row(stem, n_nodes, label, "benders", benders_method, lp, ip, gap,
+                         time_s or wall_elapsed, nodes, n_master_constrs, status, timestamp), profile_rows
 
     except Exception as exc:
-        logger.error("[%s] Benders(%s) semiplane=%d FAILED: %s", stem, benders_method, semiplane, exc)
-        return _make_row(
-            stem,
-            parse_n_nodes(instance_path.stem),
-            label,
-            "benders",
-            benders_method,
-            semiplane,
-            phase,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            f"FAILED: {str(exc)[:80]}",
-            timestamp,
-        )
+        logger.error("[%s] Benders(%s) FAILED: %s", stem, benders_method, exc)
+        return _make_row(stem, parse_n_nodes(instance_path.stem), label, "benders", benders_method,
+                         None, None, None, None, None, None, f"FAILED: {str(exc)[:80]}", timestamp), []
 
 
 def _make_row(
@@ -424,8 +379,6 @@ def _make_row(
     label: str,
     model: str,
     benders_method: str | None,
-    semiplane: int,
-    phase: int,
     root_lp: float | None,
     final_ip: float | None,
     gap_pct: float | None,
@@ -443,15 +396,13 @@ def _make_row(
         "method_label": label,
         "model": model,
         "benders_method": benders_method or "",
-        "semiplane": semiplane,
-        "root_lp": round(root_lp, 4) if root_lp is not None else "",
-        "final_ip": round(final_ip, 4) if final_ip is not None else "",
-        "gap_pct": round(gap_pct, 4) if gap_pct is not None else "",
-        "time_s": round(time_s, 2) if time_s is not None else "",
-        "nodes": int(nodes) if nodes is not None else "",
+        "root_lp":   round(root_lp,  4) if isinstance(root_lp,  (int, float)) else "",
+        "final_ip":  round(final_ip, 4) if isinstance(final_ip, (int, float)) else "",
+        "gap_pct":   round(gap_pct,  4) if isinstance(gap_pct,  (int, float)) else "",
+        "time_s":    round(time_s,   2) if isinstance(time_s,   (int, float)) else "",
+        "nodes":     int(nodes) if nodes is not None else "",
         "n_master_constrs": int(n_master_constrs) if n_master_constrs is not None else "",
         "status": status,
-        "phase": phase,
         "timestamp": timestamp,
     }
 
@@ -473,7 +424,7 @@ def write_csv(rows: list[dict], path: Path) -> None:
 def main(args: argparse.Namespace) -> int:
     sys_info = get_system_info()
     logger.info("=" * 70)
-    logger.info("Benchmark: Benders semiplane sweep (Compact + Farkas + Pi)")
+    logger.info("Benchmark: Basic theory (Compact vs Farkas vs Pi, semiplane=0, no CGSP)")
     logger.info("Date: %s", sys_info["timestamp"])
     logger.info("Hardware: %s / %.1f GB RAM", sys_info["cpu_model"], sys_info["ram_gb"])
     logger.info(
@@ -517,53 +468,40 @@ def main(args: argparse.Namespace) -> int:
     logger.info("=" * 70)
 
     all_rows: list[dict] = []
+    profile_accumulated: dict[str, list[dict]] = {}
 
     for inst_path in instances:
         logger.info("")
         logger.info("--- Instance: %s ---", inst_path.stem)
         for method_cfg in METHODS:
-            m_model = method_cfg["model"]
+            m_model   = method_cfg["model"]
             m_benders = method_cfg["benders_method"]
-            m_semiplane = method_cfg["semiplane"]
+            m_label   = method_cfg["label"]
 
             if m_model == "compact":
-                row = run_compact_solve(inst_path, m_semiplane, time_limit)
+                row, prof_rows = run_compact_solve(inst_path, time_limit)
             else:
-                assert m_benders is not None
-                row = run_benders_solve(inst_path, m_benders, m_semiplane, time_limit)
+                row, prof_rows = run_benders_solve(inst_path, m_benders, time_limit)
 
             all_rows.append(row)
+            profile_accumulated.setdefault(m_label, []).extend(prof_rows)
 
-            # Write incrementally so a crash mid-run doesn't lose all data
-            phase1_rows = [r for r in all_rows if r["phase"] == 1]
-            phase2_rows = [r for r in all_rows if r["phase"] == 2]
+            # Incremental write
+            write_csv(all_rows, RESULTS_CSV_PATH)
 
-            if phase1_rows:
-                write_csv(
-                    phase1_rows,
-                    REPO_ROOT / "outputs" / "CSV" / "benchmark_benders_semiplane_phase1.csv",
-                )
-            if phase2_rows:
-                write_csv(
-                    phase2_rows,
-                    REPO_ROOT / "outputs" / "CSV" / "benchmark_benders_semiplane_phase2.csv",
-                )
-
-    logger.info("")
-    logger.info("=" * 70)
-    logger.info("Benchmark complete.  Total solves: %d", len(all_rows))
-
-    ok = sum(1 for r in all_rows if r["status"] == "OK")
-    failed = sum(1 for r in all_rows if r["status"].startswith("FAILED"))
+    logger.info("Benchmark complete. Total solves: %d", len(all_rows))
+    ok      = sum(1 for r in all_rows if r["status"] == "OK")
+    failed  = sum(1 for r in all_rows if r["status"].startswith("FAILED"))
     timeout = sum(1 for r in all_rows if r["status"] == "SKIPPED_TIMEOUT_10H")
     logger.info("  OK: %d  FAILED: %d  TIMEOUT-10H: %d", ok, failed, timeout)
-    logger.info("=" * 70)
+
+    _write_profile_summary(profile_accumulated, PROFILING_OUT_DIR)
 
     return 0
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Benders semiplane benchmark (Compact + Farkas + Pi, sizes 10-35)")
+    parser = argparse.ArgumentParser(description="Basic theory benchmark (Compact vs Farkas vs Pi, semiplane=0)")
     parser.add_argument(
         "--smoke-test",
         action="store_true",
