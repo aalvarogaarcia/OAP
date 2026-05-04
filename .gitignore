@@ -44,3 +44,5 @@ CLAUDE.md
 .swarm/
 .hive-mind/
 DeepestBendersCuts.md
+.mcp.json
+bench_output.txt

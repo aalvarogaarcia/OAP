@@ -4,6 +4,7 @@ import gurobipy as gp
 import numpy as np
 from gurobipy import GRB
 
+
 class OAPStatsMixin:
     """
     Mixin para la extracción de estadísticas, cálculo geométrico de áreas 
@@ -68,6 +69,8 @@ class OAPStatsMixin:
         if not self.model.IsMIP:
             if self.model.SolCount == 0:
                 return "-"
+            if not getattr(self, '_lp_converged', True):
+                return "-"  # LP bound unreliable: degenerate PI cuts or MAX_LP_ITER reached
             x_vals = {k: v.X for k, v in self.x.items()}
             return self._shoelace_from_x_vars(x_vals)
 
@@ -76,6 +79,8 @@ class OAPStatsMixin:
             self.solve_lp_relaxation()
             if self.model.SolCount == 0:
                 return "-"
+            if not getattr(self, '_lp_converged', True):
+                return "-"  # LP bound unreliable: degenerate PI cuts or MAX_LP_ITER reached
             x_vals = {k: v.X for k, v in self.x.items()}
             return self._shoelace_from_x_vars(x_vals)
 
@@ -114,7 +119,8 @@ class OAPStatsMixin:
         # Si resolvimos puramente el LP (ej. solve_lp_relaxation)
         if not self.model.IsMIP:
             lp_val = self.get_objval_lp()
-            return lp_val, 0.0, "-", time_s, nodes
+            gap = 0.0 if isinstance(lp_val, (int, float)) else "-"
+            return lp_val, gap, "-", time_s, nodes
 
         # Si es MIP (Compacto o Benders entero)
         ip_val = self.get_objval_int()

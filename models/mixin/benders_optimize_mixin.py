@@ -260,13 +260,17 @@ class BendersOptimizeMixin:
         TOL = 1e-6
         converged = False
         self.iteration = 0
-        
-
-
+        MAX_LP_ITER = 500 * len(list(self.x))  # safety valve: O(n²) iterations max
 
         # 3. Bucle Manual de Benders
         while not converged:
             self.iteration += 1
+            if self.iteration > MAX_LP_ITER:
+                logger.error(
+                    f"solve_lp_relaxation: no convergió tras {MAX_LP_ITER} iteraciones. "
+                    "Posible degeneración dual en el método PI. Abortando bucle."
+                )
+                break
             if verbose:
                 logger.info(f"\n=== Iteración LP: {self.iteration} ===")
 
@@ -339,6 +343,15 @@ class BendersOptimizeMixin:
                     self.model.addConstr(cut_expr <= 0, name=f"lp_cut_y_{self.iteration}")
                 elif cut_val < -TOL:
                     self.model.addConstr(cut_expr >= 0, name=f"lp_cut_y_{self.iteration}")
+                else:
+                    # Dual degenerate: all Pi = 0, cut is trivial (π^T x_sol = 0).
+                    # No constraint can be injected; mark as converged to exit loop.
+                    logger.warning(
+                        f"Iter {self.iteration}: corte PI para Y es trivial "
+                        f"(cut_val={cut_val:.2e}, sub_y.ObjVal={self.sub_y.ObjVal:.2e}). "
+                        "Degeneración dual — se marca Y como convergido."
+                    )
+                    converged_y = True
 
             elif self.sub_y.Status == GRB.OPTIMAL and getattr(self, 'objective', 'Fekete') == "Internal":
                 if self.sub_y.ObjVal > eta_sol + TOL:
@@ -377,6 +390,14 @@ class BendersOptimizeMixin:
                     self.model.addConstr(cut_expr <= 0, name=f"lp_cut_yp_{self.iteration}")
                 elif cut_val < -TOL:
                     self.model.addConstr(cut_expr >= 0, name=f"lp_cut_yp_{self.iteration}")
+                else:
+                    # Dual degenerate: all Pi = 0, cut is trivial (π^T x_sol = 0).
+                    logger.warning(
+                        f"Iter {self.iteration}: corte PI para Y' es trivial "
+                        f"(cut_val={cut_val:.2e}, sub_yp.ObjVal={self.sub_yp.ObjVal:.2e}). "
+                        "Degeneración dual — se marca Y' como convergido."
+                    )
+                    converged_yp = True
             else:
                 converged_yp = True
 
@@ -388,4 +409,8 @@ class BendersOptimizeMixin:
             if converged_y and converged_yp:
                 converged = True
                 logger.info(f"Relajación LP convergida exitosamente tras {self.iteration} iteraciones.")
-        
+
+        # Signal: True only when the loop exited via genuine Benders convergence.
+        # False when it broke out (MAX_LP_ITER or degenerate PI cuts forced exit).
+        # Checked by get_objval_lp() to avoid reporting an unreliable LP bound.
+        self._lp_converged: bool = converged

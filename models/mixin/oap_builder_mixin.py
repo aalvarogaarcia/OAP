@@ -265,7 +265,6 @@ class OAPBuilderMixin:
         """Emit one crossing constraint candidate for a directed arc pair.
 
         Version-specific guards:
-        - v1: requires (u, v) and (w, z) in ``self.x``.
         - v2: backward-compatible behavior; requires (u, v) and (w, z) in
           ``self.x`` and applies the y+yp coverage form.
         - v3: requires reverse arcs (v, u) and (z, w) in ``self.x``.

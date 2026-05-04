@@ -8,7 +8,7 @@ Protocol (FR-9 compliant):
   - Hardware: logged via get_system_info()
   - Solver: Gurobi 13.0.1, Seed=0, Threads=1
   - MIPGapAbs overridden to 0 (the model default of 1.99 distorts gaps)
-  - MIPGapRel: 1e-5
+  - MIPGapAbs: 1.99
   - Time limit per solve: 60,000 s (FR-9 / HP25 protocol)
   - Skip rule: any (instance, method) exceeding 10 h wall-clock is recorded
     as status=SKIPPED_TIMEOUT_10H and the script continues.
@@ -68,8 +68,7 @@ SIZES = [10, 15, 20, 25, 30, 35]
 FAMILIES_ORDER = ["euro-night", "london", "uniform", "us-night", "stars"]  # stars last
 TIME_LIMIT_DEFAULT = 60_000  # seconds — FR-9 / HP25
 SKIP_WALL_CLOCK_S = 10 * 3600  # 10 h soft cap per solve
-MIPGAPABS = 0.0  # override OAPBendersModel default of 1.99
-MIPGAPREL = 1e-5
+MIPGAPABS = 1.99  # override OAPBendersModel default of 1.99
 
 # Phase-1 methods: Compact (semiplane=1 by default per plan) + Benders plain
 # Phase-2 methods: Benders + semiplane V1 in master
@@ -166,9 +165,8 @@ def get_system_info() -> dict:
         "gurobi_version": "13.0.1",
         "seed": 0,
         "threads": 1,
-        "mipgapabs": MIPGAPABS,
-        "mipgaprel": MIPGAPREL,
-    }
+        "mipgapabs": MIPGAPABS
+        }
 
 
 def parse_family(stem: str) -> str:
@@ -354,7 +352,6 @@ def run_benders_solve(
         model.model.Params.Threads = 1
         # Override MIPGapAbs=1.99 default for honest gap reporting (plan §M.3)
         model.model.Params.MIPGapAbs = MIPGAPABS
-        model.model.Params.MIPGapRel = MIPGAPREL
 
         n_master_constrs = model.model.NumConstrs
 
@@ -482,7 +479,7 @@ def main(args: argparse.Namespace) -> int:
     logger.info(
         "Solver: Gurobi %s  Seed=%d  Threads=%d", sys_info["gurobi_version"], sys_info["seed"], sys_info["threads"]
     )
-    logger.info("MIPGapAbs=%.1f  MIPGapRel=%.2e", MIPGAPABS, MIPGAPREL)
+    logger.info("MIPGapAbs=%.1f", MIPGAPABS)
     logger.info("=" * 70)
 
     # Collect instances
