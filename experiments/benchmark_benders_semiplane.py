@@ -263,6 +263,10 @@ def run_compact_solve(
     time_limit: int,
     objective: str = "Fekete",
     maximize: bool = False,
+    semiplane: int = 0,
+    strengthen: bool = False,
+    use_knapsack: bool = False,
+    use_cliques: bool = False,
     profiling: bool = True,
 ) -> tuple[dict, list[dict]]:
     """Run OAPCompactModel. Returns (result_row, profile_rows)."""
@@ -272,7 +276,10 @@ def run_compact_solve(
     stem = instance_path.stem
     label = "compact"
     timestamp = datetime.now().isoformat()
-    logger.info("[%s] Compact starting (limit=%ds, obj=%s, max=%s)", stem, time_limit, objective, maximize)
+    logger.info(
+        "[%s] Compact starting (limit=%ds, obj=%s, max=%s, sp=%d, str=%s, knap=%s, cliq=%s)",
+        stem, time_limit, objective, maximize, semiplane, strengthen, use_knapsack, use_cliques,
+    )
 
     try:
         points = read_indexed_instance(str(instance_path))
@@ -288,10 +295,10 @@ def run_compact_solve(
             maximize=maximize,
             subtour="SCF",
             sum_constrain=True,
-            strengthen=False,
-            semiplane=0,
-            use_knapsack=False,
-            use_cliques=False,
+            strengthen=strengthen,
+            semiplane=semiplane,
+            use_knapsack=use_knapsack,
+            use_cliques=use_cliques,
         )
         model.model.Params.Seed = 0
         model.model.Params.Threads = 1
@@ -328,6 +335,11 @@ def run_benders_solve(
     objective: str = "Fekete",
     maximize: bool = False,
     mipgapabs: float = MIPGAPABS,
+    semiplane: int = 0,
+    strengthen: bool = False,
+    crosses_constrain: bool = False,
+    use_knapsack: bool = False,
+    use_cliques: bool = False,
     profiling: bool = True,
 ) -> tuple[dict, list[dict]]:
     """Run OAPBendersModel. Returns (result_row, profile_rows)."""
@@ -337,7 +349,18 @@ def run_benders_solve(
     stem = instance_path.stem
     label = f"benders_{benders_method}"
     timestamp = datetime.now().isoformat()
-    logger.info("[%s] Benders(%s) starting (limit=%ds, obj=%s, max=%s)", stem, benders_method, time_limit, objective, maximize)
+    benders_semiplane = min(semiplane, 1)  # Benders master only supports V1
+    if use_knapsack or use_cliques:
+        logger.warning(
+            "[%s] Benders(%s): use_knapsack=%s, use_cliques=%s not yet implemented "
+            "in BendersMasterMixin — ignored. TODO: add to benders_master_mixin.py.",
+            stem, benders_method, use_knapsack, use_cliques,
+        )
+    logger.info(
+        "[%s] Benders(%s) starting (limit=%ds, obj=%s, max=%s, sp=%d, str=%s, cross=%s)",
+        stem, benders_method, time_limit, objective, maximize,
+        benders_semiplane, strengthen, crosses_constrain,
+    )
 
     try:
         points = read_indexed_instance(str(instance_path))
@@ -353,10 +376,10 @@ def run_benders_solve(
             maximize=maximize,
             benders_method=benders_method,
             sum_constrain=True,
-            crosses_constrain=False,
-            strengthen=False,
+            crosses_constrain=crosses_constrain,
+            strengthen=strengthen,
             use_deepest_cuts=False,
-            semiplane=0,
+            semiplane=benders_semiplane,
         )
         model.model.Params.Seed = 0
         model.model.Params.Threads = 1
@@ -447,15 +470,20 @@ def resolve_config(args: argparse.Namespace) -> dict[str, Any]:
     """
     if args.smoke_test:
         return {
-            "methods":      ["compact", "benders_farkas"],
-            "objective":    "Fekete",
-            "maximize":     False,
-            "sizes":        [6, 8, 10],
-            "time_limit":   60,
-            "instance_dir": str(REPO_ROOT / "instance" / "little-instances"),
-            "mipgapabs":    MIPGAPABS,
-            "profiling":    True,
-            "smoke_test":   True,
+            "methods":           ["compact", "benders_farkas"],
+            "objective":         "Fekete",
+            "maximize":          False,
+            "sizes":             [6, 8, 10],
+            "time_limit":        60,
+            "instance_dir":      str(REPO_ROOT / "instance" / "little-instances"),
+            "mipgapabs":         MIPGAPABS,
+            "semiplane":         0,
+            "strengthen":        False,
+            "crosses_constrain": False,
+            "use_knapsack":      False,
+            "use_cliques":       False,
+            "profiling":         True,
+            "smoke_test":        True,
         }
 
     if args.config:
@@ -512,6 +540,36 @@ def resolve_config(args: argparse.Namespace) -> dict[str, Any]:
             message="MIPGapAbs para Benders",
             default=str(MIPGAPABS),
         ),
+        inquirer.List(
+            "semiplane",
+            message="Restricciones de semiplano",
+            choices=[
+                ("0 — sin semiplano", 0),
+                ("1 — V1 (Compact + Benders)", 1),
+                ("2 — V2 (solo Compact; Benders usa V1)", 2),
+            ],
+            default=0,
+        ),
+        inquirer.Confirm(
+            "strengthen",
+            message="¿Añadir strengthening constraints (R1/R2/R3)?",
+            default=False,
+        ),
+        inquirer.Confirm(
+            "crosses_constrain",
+            message="¿Añadir restricciones de cruce? (solo Benders)",
+            default=False,
+        ),
+        inquirer.Confirm(
+            "use_knapsack",
+            message="¿Knapsack constraints? (solo Compact — pendiente en Benders)",
+            default=False,
+        ),
+        inquirer.Confirm(
+            "use_cliques",
+            message="¿Clique constraints? (solo Compact — pendiente en Benders)",
+            default=False,
+        ),
         inquirer.Confirm(
             "profiling",
             message="¿Generar profiling CSV?",
@@ -525,15 +583,20 @@ def resolve_config(args: argparse.Namespace) -> dict[str, Any]:
         raise SystemExit(1)
 
     return {
-        "methods":      answers["methods"],
-        "objective":    answers["objective"],
-        "maximize":     answers["maximize"],
-        "sizes":        [int(s) for s in answers["sizes"]],
-        "time_limit":   int(answers["time_limit"]),
-        "instance_dir": answers["instance_dir"],
-        "mipgapabs":    float(answers["mipgapabs"]),
-        "profiling":    answers["profiling"],
-        "smoke_test":   False,
+        "methods":           answers["methods"],
+        "objective":         answers["objective"],
+        "maximize":          answers["maximize"],
+        "sizes":             [int(s) for s in answers["sizes"]],
+        "time_limit":        int(answers["time_limit"]),
+        "instance_dir":      answers["instance_dir"],
+        "mipgapabs":         float(answers["mipgapabs"]),
+        "semiplane":         int(answers["semiplane"]),
+        "strengthen":        answers["strengthen"],
+        "crosses_constrain": answers["crosses_constrain"],
+        "use_knapsack":      answers["use_knapsack"],
+        "use_cliques":       answers["use_cliques"],
+        "profiling":         answers["profiling"],
+        "smoke_test":        False,
     }
 
 
@@ -573,8 +636,13 @@ def main(args: argparse.Namespace) -> int:
     logger.info("Hardware: %s / %.1f GB RAM", sys_info["cpu_model"], sys_info["ram_gb"])
     logger.info("Solver: Gurobi %s  Seed=0  Threads=1", sys_info["gurobi_version"])
     logger.info(
-        "Config: methods=%s  obj=%s  max=%s  mipgapabs=%.2f  profiling=%s",
-        cfg["methods"], cfg["objective"], cfg["maximize"], cfg["mipgapabs"], cfg["profiling"],
+        "Config: methods=%s  obj=%s  max=%s  mipgapabs=%.2f",
+        cfg["methods"], cfg["objective"], cfg["maximize"], cfg["mipgapabs"],
+    )
+    logger.info(
+        "       semiplane=%d  strengthen=%s  crosses=%s  profiling=%s",
+        cfg.get("semiplane", 0), cfg.get("strengthen", False),
+        cfg.get("crosses_constrain", False), cfg["profiling"],
     )
     logger.info("=" * 70)
 
@@ -627,6 +695,10 @@ def main(args: argparse.Namespace) -> int:
                     inst_path, time_limit,
                     objective=cfg["objective"],
                     maximize=cfg["maximize"],
+                    semiplane=cfg.get("semiplane", 0),
+                    strengthen=cfg.get("strengthen", False),
+                    use_knapsack=cfg.get("use_knapsack", False),
+                    use_cliques=cfg.get("use_cliques", False),
                     profiling=cfg["profiling"],
                 )
             else:
@@ -635,6 +707,11 @@ def main(args: argparse.Namespace) -> int:
                     objective=cfg["objective"],
                     maximize=cfg["maximize"],
                     mipgapabs=cfg["mipgapabs"],
+                    semiplane=cfg.get("semiplane", 0),
+                    strengthen=cfg.get("strengthen", False),
+                    crosses_constrain=cfg.get("crosses_constrain", False),
+                    use_knapsack=cfg.get("use_knapsack", False),
+                    use_cliques=cfg.get("use_cliques", False),
                     profiling=cfg["profiling"],
                 )
 
