@@ -350,12 +350,6 @@ def run_benders_solve(
     label = f"benders_{benders_method}"
     timestamp = datetime.now().isoformat()
     benders_semiplane = min(semiplane, 1)  # Benders master only supports V1
-    if use_knapsack or use_cliques:
-        logger.warning(
-            "[%s] Benders(%s): use_knapsack=%s, use_cliques=%s not yet implemented "
-            "in BendersMasterMixin — ignored. TODO: add to benders_master_mixin.py.",
-            stem, benders_method, use_knapsack, use_cliques,
-        )
     logger.info(
         "[%s] Benders(%s) starting (limit=%ds, obj=%s, max=%s, sp=%d, str=%s, cross=%s)",
         stem, benders_method, time_limit, objective, maximize,
@@ -380,6 +374,8 @@ def run_benders_solve(
             strengthen=strengthen,
             use_deepest_cuts=False,
             semiplane=benders_semiplane,
+            use_knapsack=use_knapsack,
+            use_cliques=use_cliques,
         )
         model.model.Params.Seed = 0
         model.model.Params.Threads = 1
@@ -562,12 +558,12 @@ def resolve_config(args: argparse.Namespace) -> dict[str, Any]:
         ),
         inquirer.Confirm(
             "use_knapsack",
-            message="¿Knapsack constraints? (solo Compact — pendiente en Benders)",
+            message="¿Knapsack constraints?",
             default=False,
         ),
         inquirer.Confirm(
             "use_cliques",
-            message="¿Clique constraints? (solo Compact — pendiente en Benders)",
+            message="¿Clique constraints?",
             default=False,
         ),
         inquirer.Confirm(

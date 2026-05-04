@@ -3,11 +3,12 @@ import logging
 from typing import Literal
 
 import gurobipy as gp
+import networkx as nx
 import numpy as np
 from gurobipy import GRB
 
 from models.typing_oap import IndexArray, NumericArray, TrianglesAdjList
-from utils.utils import compute_crossing_edges, cost_function_area
+from utils.utils import compute_crossing_edges, cost_function_area, point_in_triangle, segments_intersect
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,8 @@ class BendersMasterMixin:
         maximize: bool = True,
         crosses_constrain: bool = False,
         semiplane: Literal[0, 1] = 0,
+        use_knapsack: bool = False,
+        use_cliques: bool = False,
     ) -> None:
         """Construye las variables y restricciones del Problema Maestro.
 
@@ -66,6 +69,11 @@ class BendersMasterMixin:
         # --- Semiplane V1 (master-side, pure x-space) ---
         if semiplane == 1:
             self._add_semiplane_master()
+
+        if use_knapsack:
+            self._add_knapsack_constraints_master()
+        if use_cliques:
+            self._add_clique_constraints_master()
 
         self.model.update()
 
@@ -257,3 +265,90 @@ class BendersMasterMixin:
                 n_added += 1
 
         logger.info("[semiplane V1] added %d master constraints.", n_added)
+
+    def _add_knapsack_constraints_master(self) -> None:
+        """Knapsack constraints for the Benders master (pure x-space).
+
+        Mirrors OAPCompactModel.inyectar_cortes_knapsack_locales.
+        Uses self._cost_x (computed by _add_function_objective_master).
+        """
+        n_added = 0
+        for i in range(self.N):
+            max_beneficio_real = 0.0
+
+            for j1 in range(self.N):
+                if j1 == i or (i, j1) not in self.x:
+                    continue
+                for j2 in range(j1 + 1, self.N):
+                    if j2 == i or (i, j2) not in self.x:
+                        continue
+
+                    es_pareja_legal = True
+                    for k in range(self.N):
+                        if k in (i, j1, j2):
+                            continue
+                        if point_in_triangle(
+                            self.points[k], self.points[j1], self.points[i], self.points[j2]
+                        ):
+                            es_pareja_legal = False
+                            break
+
+                    if es_pareja_legal:
+                        beneficio_pareja = (
+                            self._cost_x.get((i, j1), 0.0) + self._cost_x.get((i, j2), 0.0)
+                        )
+                        if beneficio_pareja > max_beneficio_real:
+                            max_beneficio_real = beneficio_pareja
+
+            expr_knapsack = gp.LinExpr()
+            for j in range(self.N):
+                if j != i and (i, j) in self.x:
+                    expr_knapsack.addTerms(self._cost_x.get((i, j), 0.0), self.x[i, j])
+
+            if expr_knapsack.size() > 0:
+                self.model.addConstr(
+                    expr_knapsack <= max_beneficio_real,
+                    name=f"knapsack_master_{i}",
+                )
+                n_added += 1
+
+        logger.info("[knapsack] added %d knapsack constraints to master.", n_added)
+
+    def _add_clique_constraints_master(self) -> None:
+        """Clique constraints from crossing arc sets for the Benders master.
+
+        Mirrors OAPCompactModel.inyectar_cliques_de_cruce.
+        """
+        logger.debug("[cliques] building intersection graph for clique constraints...")
+        aristas = [(i, j) for (i, j) in self.x.keys() if i < j]
+
+        G_cruces = nx.Graph()
+        G_cruces.add_nodes_from(aristas)
+
+        for idx, e1 in enumerate(aristas):
+            for e2 in aristas[idx + 1 :]:
+                if e1[0] in e2 or e1[1] in e2:
+                    continue
+                p1, p2 = self.points[e1[0]], self.points[e1[1]]
+                p3, p4 = self.points[e2[0]], self.points[e2[1]]
+                if segments_intersect(p1, p2, p3, p4):
+                    G_cruces.add_edge(e1, e2)
+
+        cliques = list(nx.find_cliques(G_cruces))
+        n_added = 0
+
+        for clique in cliques:
+            if len(clique) >= 3:
+                expr_clique = gp.LinExpr()
+                for e in clique:
+                    if e in self.x:
+                        expr_clique.addTerms(1.0, self.x[e[0], e[1]])
+                    if (e[1], e[0]) in self.x:
+                        expr_clique.addTerms(1.0, self.x[e[1], e[0]])
+                self.model.addConstr(
+                    expr_clique <= 1,
+                    name=f"clique_master_{n_added}",
+                )
+                n_added += 1
+
+        logger.info("[cliques] added %d clique constraints to master.", n_added)

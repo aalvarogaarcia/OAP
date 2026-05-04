@@ -81,6 +81,8 @@ class OAPBendersModel(
         cut_weights_y: dict | None = None,
         cut_weights_yp: dict | None = None,
         semiplane: Literal[0, 1] = 0,
+        use_knapsack: bool = False,
+        use_cliques: bool = False,
     ) -> None:
         """
         Orquesta la construcción del Problema Maestro y de los Subproblemas.
@@ -132,6 +134,8 @@ class OAPBendersModel(
             maximize=maximize,
             crosses_constrain=crosses_constrain,
             semiplane=semiplane,
+            use_knapsack=use_knapsack,
+            use_cliques=use_cliques,
         )
 
         # 2. Construir los Subproblemas (Viene de Farkas o Pi Mixin)
