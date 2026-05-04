@@ -39,6 +39,7 @@ import argparse
 import cProfile
 import csv
 import io
+import json
 import logging
 import platform
 import pstats
@@ -75,10 +76,12 @@ TIME_LIMIT_DEFAULT = 60_000  # seconds — FR-9 / HP25
 SKIP_WALL_CLOCK_S = 10 * 3600  # 10 h soft cap per solve
 MIPGAPABS = 1.99  # override OAPBendersModel default of 1.99
 
-METHODS: list[dict[str, Any]] = [
+ALL_METHODS: list[dict[str, Any]] = [
     {"label": "compact",        "model": "compact",  "benders_method": None},
     {"label": "benders_farkas", "model": "benders",  "benders_method": "farkas"},
+    {"label": "benders_pi",     "model": "benders",  "benders_method": "pi"},
 ]
+_ALL_METHOD_LABELS = [m["label"] for m in ALL_METHODS]
 
 CSV_FIELDNAMES = [
     "instance", "n_nodes", "family", "size", "method_label",
@@ -255,7 +258,13 @@ def _write_profile_summary(accumulated: dict[str, list[dict]], out_dir: Path) ->
         logger.info("Profile summary written: %s", out_path)
 
 
-def run_compact_solve(instance_path: Path, time_limit: int) -> tuple[dict, list[dict]]:
+def run_compact_solve(
+    instance_path: Path,
+    time_limit: int,
+    objective: str = "Fekete",
+    maximize: bool = False,
+    profiling: bool = True,
+) -> tuple[dict, list[dict]]:
     """Run OAPCompactModel. Returns (result_row, profile_rows)."""
     from models import OAPCompactModel
     from utils.utils import compute_triangles, read_indexed_instance
@@ -263,7 +272,7 @@ def run_compact_solve(instance_path: Path, time_limit: int) -> tuple[dict, list[
     stem = instance_path.stem
     label = "compact"
     timestamp = datetime.now().isoformat()
-    logger.info("[%s] Compact starting (limit=%ds)", stem, time_limit)
+    logger.info("[%s] Compact starting (limit=%ds, obj=%s, max=%s)", stem, time_limit, objective, maximize)
 
     try:
         points = read_indexed_instance(str(instance_path))
@@ -275,8 +284,8 @@ def run_compact_solve(instance_path: Path, time_limit: int) -> tuple[dict, list[
 
         model = OAPCompactModel(points, triangles, name=f"bench-{stem}-compact")
         model.build(
-            objective="Fekete",
-            maximize=False,
+            objective=objective,
+            maximize=maximize,
             subtour="SCF",
             sum_constrain=True,
             strengthen=False,
@@ -301,10 +310,10 @@ def run_compact_solve(instance_path: Path, time_limit: int) -> tuple[dict, list[
 
         logger.info("[%s] Compact: ip=%s gap=%s time=%.1fs", stem, ip, gap, time_s or wall_elapsed)
 
-        profile_rows = _dump_profile_csv(profiler, label, stem, PROFILING_OUT_DIR)
+        prof_rows = _dump_profile_csv(profiler, label, stem, PROFILING_OUT_DIR) if profiling else []
 
         return _make_row(stem, n_nodes, label, "compact", None, lp, ip, gap,
-                         time_s or wall_elapsed, nodes, n_master_constrs, status, timestamp), profile_rows
+                         time_s or wall_elapsed, nodes, n_master_constrs, status, timestamp), prof_rows
 
     except Exception as exc:
         logger.error("[%s] Compact FAILED: %s", stem, exc)
@@ -313,7 +322,13 @@ def run_compact_solve(instance_path: Path, time_limit: int) -> tuple[dict, list[
 
 
 def run_benders_solve(
-    instance_path: Path, benders_method: str, time_limit: int
+    instance_path: Path,
+    benders_method: str,
+    time_limit: int,
+    objective: str = "Fekete",
+    maximize: bool = False,
+    mipgapabs: float = MIPGAPABS,
+    profiling: bool = True,
 ) -> tuple[dict, list[dict]]:
     """Run OAPBendersModel. Returns (result_row, profile_rows)."""
     from models import OAPBendersModel
@@ -322,7 +337,7 @@ def run_benders_solve(
     stem = instance_path.stem
     label = f"benders_{benders_method}"
     timestamp = datetime.now().isoformat()
-    logger.info("[%s] Benders(%s) starting (limit=%ds)", stem, benders_method, time_limit)
+    logger.info("[%s] Benders(%s) starting (limit=%ds, obj=%s, max=%s)", stem, benders_method, time_limit, objective, maximize)
 
     try:
         points = read_indexed_instance(str(instance_path))
@@ -334,8 +349,8 @@ def run_benders_solve(
 
         model = OAPBendersModel(points, triangles, name=f"bench-{stem}-{benders_method}")
         model.build(
-            objective="Fekete",
-            maximize=False,
+            objective=objective,
+            maximize=maximize,
             benders_method=benders_method,
             sum_constrain=True,
             crosses_constrain=False,
@@ -345,7 +360,7 @@ def run_benders_solve(
         )
         model.model.Params.Seed = 0
         model.model.Params.Threads = 1
-        model.model.Params.MIPGapAbs = MIPGAPABS
+        model.model.Params.MIPGapAbs = mipgapabs
         n_master_constrs = model.model.NumConstrs
 
         wall_start = time.time()
@@ -361,10 +376,10 @@ def run_benders_solve(
 
         logger.info("[%s] Benders(%s): ip=%s gap=%s time=%.1fs", stem, benders_method, ip, gap, time_s or wall_elapsed)
 
-        profile_rows = _dump_profile_csv(profiler, label, stem, PROFILING_OUT_DIR)
+        prof_rows = _dump_profile_csv(profiler, label, stem, PROFILING_OUT_DIR) if profiling else []
 
         return _make_row(stem, n_nodes, label, "benders", benders_method, lp, ip, gap,
-                         time_s or wall_elapsed, nodes, n_master_constrs, status, timestamp), profile_rows
+                         time_s or wall_elapsed, nodes, n_master_constrs, status, timestamp), prof_rows
 
     except Exception as exc:
         logger.error("[%s] Benders(%s) FAILED: %s", stem, benders_method, exc)
@@ -416,32 +431,163 @@ def write_csv(rows: list[dict], path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Config resolution — interactive / JSON / smoke-test defaults
+# ---------------------------------------------------------------------------
+
+_OBJECTIVE_CHOICES = ["Fekete", "Internal", "External", "Diagonals"]
+_SUBTOUR_CHOICES   = ["SCF", "MTZ", "MCF"]
+_SIZE_CHOICES      = [10, 15, 20, 25, 30, 35, 40, 45, 50]
+
+
+def resolve_config(args: argparse.Namespace) -> dict[str, Any]:
+    """Return a fully-resolved benchmark config dict.
+
+    Priority: smoke-test defaults > --config JSON > interactive prompts.
+    CLI --time-limit always wins over JSON/interactive if explicitly set.
+    """
+    if args.smoke_test:
+        return {
+            "methods":      ["compact", "benders_farkas"],
+            "objective":    "Fekete",
+            "maximize":     False,
+            "sizes":        [6, 8, 10],
+            "time_limit":   60,
+            "instance_dir": str(REPO_ROOT / "instance" / "little-instances"),
+            "mipgapabs":    MIPGAPABS,
+            "profiling":    True,
+            "smoke_test":   True,
+        }
+
+    if args.config:
+        with open(args.config, encoding="utf-8") as fh:
+            cfg: dict[str, Any] = json.load(fh)
+        # CLI --time-limit overrides JSON when explicitly provided
+        if args.time_limit != TIME_LIMIT_DEFAULT:
+            cfg["time_limit"] = args.time_limit
+        cfg.setdefault("smoke_test", False)
+        logger.info("Config loaded from: %s", args.config)
+        return cfg
+
+    # --- Interactive mode (inquirer) ---
+    import inquirer  # local import; not needed in non-interactive runs
+
+    questions = [
+        inquirer.Checkbox(
+            "methods",
+            message="Métodos a incluir",
+            choices=_ALL_METHOD_LABELS,
+            default=["compact", "benders_farkas"],
+        ),
+        inquirer.List(
+            "objective",
+            message="Función objetivo",
+            choices=_OBJECTIVE_CHOICES,
+            default="Fekete",
+        ),
+        inquirer.List(
+            "maximize",
+            message="Sentido de optimización",
+            choices=[("Minimizar área (MinArea)", False), ("Maximizar área (MaxArea)", True)],
+            default=False,
+        ),
+        inquirer.Checkbox(
+            "sizes",
+            message="Tamaños de instancias a incluir",
+            choices=_SIZE_CHOICES,
+            default=[10, 15, 20, 25, 30, 35],
+        ),
+        inquirer.Text(
+            "time_limit",
+            message="Límite de tiempo por solve (segundos)",
+            default=str(args.time_limit),
+            validate=lambda _, v: v.isdigit() and int(v) > 0,
+        ),
+        inquirer.Text(
+            "instance_dir",
+            message="Directorio de instancias",
+            default=str(REPO_ROOT / "instance"),
+        ),
+        inquirer.Text(
+            "mipgapabs",
+            message="MIPGapAbs para Benders",
+            default=str(MIPGAPABS),
+        ),
+        inquirer.Confirm(
+            "profiling",
+            message="¿Generar profiling CSV?",
+            default=True,
+        ),
+    ]
+
+    answers = inquirer.prompt(questions)
+    if answers is None:
+        logger.error("Configuración cancelada.")
+        raise SystemExit(1)
+
+    return {
+        "methods":      answers["methods"],
+        "objective":    answers["objective"],
+        "maximize":     answers["maximize"],
+        "sizes":        [int(s) for s in answers["sizes"]],
+        "time_limit":   int(answers["time_limit"]),
+        "instance_dir": answers["instance_dir"],
+        "mipgapabs":    float(answers["mipgapabs"]),
+        "profiling":    answers["profiling"],
+        "smoke_test":   False,
+    }
+
+
+def save_run_config(cfg: dict[str, Any], run_id: str, sys_info: dict) -> Path:
+    """Persist the resolved config + hardware info as JSON for traceability."""
+    record = {
+        "run_id":   run_id,
+        "sys_info": sys_info,
+        "config":   cfg,
+    }
+    out_dir = REPO_ROOT / "outputs" / "CSV"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / f"benchmark_{run_id}_config.json"
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(record, fh, indent=2, default=str)
+    logger.info("Run config saved: %s", path)
+    return path
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 
 def main(args: argparse.Namespace) -> int:
     sys_info = get_system_info()
+
+    # --- Resolve config (smoke-test / JSON / interactive) ---
+    cfg = resolve_config(args)
+
+    run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    results_csv = REPO_ROOT / "outputs" / "CSV" / f"benchmark_{run_id}_results.csv"
+
     logger.info("=" * 70)
-    logger.info("Benchmark: Basic theory (Compact vs Farkas vs Pi, semiplane=0, no CGSP)")
+    logger.info("Benchmark: Basic theory (semiplane=0, no CGSP) — run %s", run_id)
     logger.info("Date: %s", sys_info["timestamp"])
     logger.info("Hardware: %s / %.1f GB RAM", sys_info["cpu_model"], sys_info["ram_gb"])
+    logger.info("Solver: Gurobi %s  Seed=0  Threads=1", sys_info["gurobi_version"])
     logger.info(
-        "Solver: Gurobi %s  Seed=%d  Threads=%d", sys_info["gurobi_version"], sys_info["seed"], sys_info["threads"]
+        "Config: methods=%s  obj=%s  max=%s  mipgapabs=%.2f  profiling=%s",
+        cfg["methods"], cfg["objective"], cfg["maximize"], cfg["mipgapabs"], cfg["profiling"],
     )
-    logger.info("MIPGapAbs=%.1f", MIPGAPABS)
     logger.info("=" * 70)
 
-    # Collect instances
-    if args.smoke_test:
-        instance_dir = REPO_ROOT / "instance" / "little-instances"
-        sizes = [6, 8, 10]
-        time_limit = 60
-        logger.info("SMOKE TEST MODE: %s, time_limit=%ds", instance_dir, time_limit)
-    else:
-        instance_dir = REPO_ROOT / "instance"
-        sizes = SIZES
-        time_limit = args.time_limit
+    if cfg.get("smoke_test"):
+        logger.info("SMOKE TEST MODE")
+
+    # Save config for traceability before starting any solve
+    save_run_config(cfg, run_id, sys_info)
+
+    # --- Collect instances ---
+    instance_dir = Path(cfg["instance_dir"])
+    sizes: list[int] = cfg["sizes"]
+    time_limit: int  = cfg["time_limit"]
 
     instances = collect_instances(instance_dir, sizes)
     if not instances:
@@ -452,18 +598,18 @@ def main(args: argparse.Namespace) -> int:
     for p in instances:
         logger.info("  %s (%d nodes)", p.stem, parse_n_nodes(p.stem))
 
-    # Estimate total budget (informational)
-    n_methods = len(METHODS)
+    # Active methods from config
+    active_methods = [m for m in ALL_METHODS if m["label"] in cfg["methods"]]
+    n_methods = len(active_methods)
     logger.info(
         "Matrix: %d instances × %d methods = %d solves",
-        len(instances),
-        n_methods,
-        len(instances) * n_methods,
+        len(instances), n_methods, len(instances) * n_methods,
     )
     logger.info(
         "Worst-case wall clock (10h skip): %.0f h",
         len(instances) * n_methods * SKIP_WALL_CLOCK_S / 3600,
     )
+    logger.info("Results CSV: %s", results_csv)
     logger.info("=" * 70)
 
     all_rows: list[dict] = []
@@ -472,47 +618,79 @@ def main(args: argparse.Namespace) -> int:
     for inst_path in instances:
         logger.info("")
         logger.info("--- Instance: %s ---", inst_path.stem)
-        for method_cfg in METHODS:
+        for method_cfg in active_methods:
             m_model   = method_cfg["model"]
             m_benders = method_cfg["benders_method"]
-            m_label   = method_cfg["label"]
 
             if m_model == "compact":
-                row, prof_rows = run_compact_solve(inst_path, time_limit)
+                row, prof_rows = run_compact_solve(
+                    inst_path, time_limit,
+                    objective=cfg["objective"],
+                    maximize=cfg["maximize"],
+                    profiling=cfg["profiling"],
+                )
             else:
-                row, prof_rows = run_benders_solve(inst_path, m_benders, time_limit)
+                row, prof_rows = run_benders_solve(
+                    inst_path, m_benders, time_limit,
+                    objective=cfg["objective"],
+                    maximize=cfg["maximize"],
+                    mipgapabs=cfg["mipgapabs"],
+                    profiling=cfg["profiling"],
+                )
 
             all_rows.append(row)
-            profile_accumulated.setdefault(m_label, []).extend(prof_rows)
+            profile_accumulated.setdefault(method_cfg["label"], []).extend(prof_rows)
 
-            # Incremental write
-            write_csv(all_rows, RESULTS_CSV_PATH)
+            # Incremental write — crash-safe
+            write_csv(all_rows, results_csv)
 
-    logger.info("Benchmark complete. Total solves: %d", len(all_rows))
+    logger.info("")
+    logger.info("=" * 70)
+    logger.info("Benchmark complete.  Run: %s  Total solves: %d", run_id, len(all_rows))
     ok      = sum(1 for r in all_rows if r["status"] == "OK")
     failed  = sum(1 for r in all_rows if r["status"].startswith("FAILED"))
     timeout = sum(1 for r in all_rows if r["status"] == "SKIPPED_TIMEOUT_10H")
     logger.info("  OK: %d  FAILED: %d  TIMEOUT-10H: %d", ok, failed, timeout)
+    logger.info("  Results: %s", results_csv)
+    logger.info("=" * 70)
 
-    _write_profile_summary(profile_accumulated, PROFILING_OUT_DIR)
+    if cfg["profiling"]:
+        _write_profile_summary(profile_accumulated, PROFILING_OUT_DIR)
 
     return 0
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Basic theory benchmark (Compact vs Farkas vs Pi, semiplane=0)")
+    parser = argparse.ArgumentParser(
+        description=(
+            "OAP basic-theory benchmark (Compact vs Farkas, semiplane=0, no CGSP).\n"
+            "Without --config or --smoke-test, launches an interactive configuration wizard."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument(
         "--smoke-test",
         action="store_true",
         default=False,
-        help=("Run on little-instances/ with time_limit=60s to validate the script before the real campaign."),
+        help="Run on little-instances/ with time_limit=60s (fixed config, no prompts).",
+    )
+    parser.add_argument(
+        "--config",
+        metavar="CONFIG.json",
+        default=None,
+        help=(
+            "Path to a JSON config file produced by a previous run "
+            "(outputs/CSV/benchmark_<run_id>_config.json) or hand-crafted. "
+            "Skips interactive prompts. Keys: methods, objective, maximize, sizes, "
+            "time_limit, instance_dir, mipgapabs, profiling."
+        ),
     )
     parser.add_argument(
         "--time-limit",
         type=int,
         default=TIME_LIMIT_DEFAULT,
         metavar="SECONDS",
-        help=f"Time limit per solve in seconds (default: {TIME_LIMIT_DEFAULT}).",
+        help=f"Override time limit per solve (default: {TIME_LIMIT_DEFAULT}s). Overrides --config value.",
     )
     parsed = parser.parse_args()
     sys.exit(main(parsed))
