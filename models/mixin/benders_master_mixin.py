@@ -34,6 +34,7 @@ class BendersMasterMixin:
         objective: Literal["Fekete", "Internal"] = "Fekete",
         mode: int = 0,
         maximize: bool = True,
+        subtour: Literal["SCF", "DFJ"] = "SCF",
         crosses_constrain: bool = False,
         semiplane: Literal[0, 1] = 0,
         use_knapsack: bool = False,
@@ -43,11 +44,21 @@ class BendersMasterMixin:
 
         Parameters
         ----------
+        subtour : Literal["SCF", "DFJ"], default "SCF"
+            Método de eliminación de subtours del maestro.
+            - "SCF": Single Commodity Flow — O(n²) variables f[i,j] continuas más
+              restricciones de capacidad.  Relajación LP más laxa pero sin callback.
+            - "DFJ": Dantzig-Fulkerson-Johnson — sin variables auxiliares; las SECs
+              se inyectan como lazy constraints en el callback MIPSOL.
+              Requiere ``LazyConstraints=1`` en el solver (ya seteado en ``solve()``).
+              Referencia: Dantzig, Fulkerson & Johnson (1954).
         semiplane : Literal[0, 1], default 0
             When 1, adds V1 half-plane constraints to the master after the
             subtour and crossing constraints are in place, but before
             ``model.update()``.  See ``_add_semiplane_master`` for details.
         """
+        # Guardar para que el callback pueda consultarlo sin referencia a build()
+        self._subtour_method = subtour
 
         self._add_variables_master(objective)  # Método auxiliar para añadir variables al maestro
 
@@ -59,8 +70,10 @@ class BendersMasterMixin:
         # --- Restricciones de Grado ---
         self._add_degree_constraints_master()  # Método auxiliar para añadir restricciones de grado al maestro
 
-        # --- Subtours (SCF) ---
-        self._add_subtour_constraints_master()  # Método auxiliar para añadir restricciones de subtour (SCF)
+        # --- Subtours ---
+        if subtour == "SCF":
+            self._add_subtour_constraints_master()  # SCF: flujo + capacidad (estático)
+        # DFJ: sin restricciones estáticas; SECs se inyectan lazy en el callback
 
         # --- Cortes de cruce ---
         if crosses_constrain:
@@ -86,12 +99,17 @@ class BendersMasterMixin:
             if i != j
         }
 
-        self.f = {
-            (i, j): self.model.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"f_{i}_{j}")
-            for i in self.N_list
-            for j in self.N_list
-            if i != j
-        }
+        # Variables de flujo SCF: solo se crean si el método de subtour es SCF.
+        # Con DFJ el maestro no lleva variables auxiliares de flujo.
+        if getattr(self, '_subtour_method', 'SCF') == 'SCF':
+            self.f = {
+                (i, j): self.model.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"f_{i}_{j}")
+                for i in self.N_list
+                for j in self.N_list
+                if i != j
+            }
+        else:
+            self.f = {}
 
         # Instanciamos la variable artificial eta solo si usamos la descomposición guiada por triángulos
         if objective == "Internal":
@@ -352,3 +370,52 @@ class BendersMasterMixin:
                 n_added += 1
 
         logger.info("[cliques] added %d clique constraints to master.", n_added)
+
+    # ------------------------------------------------------------------
+    # DFJ support: subtour detection via BFS (no networkx in hot-path)
+    # ------------------------------------------------------------------
+
+    def _detect_subtour_components(self, x_sol: dict) -> list[set[int]]:
+        """Detecta componentes débilmente conexas en la solución entera x_sol.
+
+        Implementado con BFS pura sobre el diccionario x_sol para evitar el
+        overhead de construir un grafo networkx dentro del callback de Gurobi.
+
+        Parameters
+        ----------
+        x_sol : dict
+            Mapeo (i, j) -> valor float de la solución actual del maestro.
+            Se consideran activos los arcos con valor > 0.5.
+
+        Returns
+        -------
+        list[set[int]]
+            Lista de componentes conexas (conjuntos de nodos).  Si la solución
+            es un único tour hamiltoniano, devuelve una lista con un solo set.
+        """
+        # Construir lista de adyacencia ignorando orientación (componentes débiles)
+        adj: dict[int, set[int]] = {i: set() for i in self.N_list}
+        for (i, j), v in x_sol.items():
+            if v > 0.5:
+                adj[i].add(j)
+                adj[j].add(i)
+
+        visited: set[int] = set()
+        components: list[set[int]] = []
+
+        for start in self.N_list:
+            if start in visited:
+                continue
+            # BFS
+            component: set[int] = set()
+            queue = [start]
+            while queue:
+                node = queue.pop()
+                if node in visited:
+                    continue
+                visited.add(node)
+                component.add(node)
+                queue.extend(adj[node] - visited)
+            components.append(component)
+
+        return components

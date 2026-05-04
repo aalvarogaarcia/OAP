@@ -436,19 +436,28 @@ class BendersFarkasMixin:
     
 
     def _log_and_print_farkas(self, v_components, cut_val, sub_name, TOL, x_sol, cut_expr, sense=None):
-        """Método auxiliar interno para registrar el log del rayo de Farkas."""
+        """Método auxiliar interno para registrar el log del rayo de Farkas.
+
+        Implementación con buffer: NO realiza I/O ni llamadas a logger dentro
+        del callback de Gurobi.  En su lugar acumula mensajes en
+        ``self._log_buffer`` (lista de str) y entradas JSON en
+        ``self._cut_buffer`` (lista de dict).  El callback los vacía al salir
+        del bloque MIPSOL, fuera del hot-path del solver.
+
+        Si los buffers no existen (llamada fuera del callback, p.ej. desde
+        solve_lp_relaxation) se comporta como antes: logger.info + log_benders_cut
+        síncronos.
+        """
         verbose = getattr(self, 'verbose', False)
         save_cuts = getattr(self, 'save_cuts', False)
-        
-        # 1. Registro en la consola / archivo log estándar de Python
+
+        # --- Construir mensaje de texto (sin I/O) ---
         if save_cuts and verbose:
-            # Construimos el mensaje de forma eficiente usando una lista
             log_msg = [
                 f"\n{'='*50}",
                 f"RAYO DE FARKAS DETECTADO EN SUBPROBLEMA {sub_name}",
-                f"Valor numérico de la violación (v^T * b(x_bar)): {cut_val:.6f}"
+                f"Valor numérico de la violación (v^T * b(x_bar)): {cut_val:.6f}",
             ]
-            
             for comp, values in v_components.items():
                 if values:
                     log_msg.append(f"Componente {comp}:")
@@ -457,31 +466,51 @@ class BendersFarkasMixin:
                             log_msg.append(f"  {k}: {v:.4f}")
                     else:
                         log_msg.append(f"  Valor: {values:.4f}")
-                        
             log_msg.append(f"{'='*50}\n")
-            
-            # Lanzamos todo el bloque de texto como un evento INFO (o DEBUG si prefieres)
-            logger.info("\n".join(log_msg))
+            text = "\n".join(log_msg)
 
-        # 2. Tu registro JSON/Estructurado personalizado (para el Post-Mortem)
-        if getattr(self, 'save_cuts', False) and hasattr(self, 'log_path'):
-            try:
-                from utils.utils import log_benders_cut
-                
-                log_benders_cut(
-                    filepath=self.log_path,
-                    iteration=self.iteration,
-                    node_depth=0,
-                    subproblem_type='Y' if sub_name == 'Y' else 'Y_prime',
-                    x_sol=x_sol,
-                    v_components=v_components,
-                    cut_value=cut_val,
-                    tolerance=TOL,
-                    cut_expr=cut_expr,
-                    sense=sense
-                )
-            except NameError:
-                logger.warning("No se pudo guardar el log estructurado: log_benders_cut no está definido.")
+            if hasattr(self, '_log_buffer'):
+                # Dentro del callback: acumular, no emitir
+                self._log_buffer.append(text)
+            else:
+                # Fuera del callback (LP loop): emitir directamente
+                logger.info(text)
+
+        # --- Construir entrada JSON (sin I/O) ---
+        if save_cuts and hasattr(self, 'log_path'):
+            entry = dict(
+                iteration=self.iteration,
+                node_depth=0,
+                subproblem_type='Y' if sub_name == 'Y' else 'Y_prime',
+                cut_value=cut_val,
+                tolerance=TOL,
+                sense=sense,
+                v_components={
+                    k: ({str(kk): vv for kk, vv in v.items()} if isinstance(v, dict) else v)
+                    for k, v in v_components.items()
+                },
+            )
+            if hasattr(self, '_cut_buffer'):
+                # Dentro del callback: acumular, no escribir a disco
+                self._cut_buffer.append(entry)
+            else:
+                # Fuera del callback: escribir directamente
+                try:
+                    from utils.utils import log_benders_cut
+                    log_benders_cut(
+                        filepath=self.log_path,
+                        iteration=self.iteration,
+                        node_depth=0,
+                        subproblem_type='Y' if sub_name == 'Y' else 'Y_prime',
+                        x_sol=x_sol,
+                        v_components=v_components,
+                        cut_value=cut_val,
+                        tolerance=TOL,
+                        cut_expr=cut_expr,
+                        sense=sense,
+                    )
+                except NameError:
+                    logger.warning("No se pudo guardar el log estructurado: log_benders_cut no está definido.")
             
 
     def _add_sum_constrain_farkas(self):

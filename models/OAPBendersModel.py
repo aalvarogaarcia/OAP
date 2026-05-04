@@ -10,6 +10,7 @@ from models.mixin.benders_analysis_mixin import BendersAnalysisMixin
 from models.mixin.benders_cgsp_mixin import BendersCGSPMixin
 from models.mixin.benders_farkas_mixin import BendersFarkasMixin
 from models.mixin.benders_master_mixin import BendersMasterMixin
+from models.mixin.benders_mw_mixin import BendersMagnantiWongMixin
 from models.mixin.benders_optimize_mixin import BendersOptimizeMixin
 from models.mixin.benders_pi_mixin import BendersPiMixin
 
@@ -23,6 +24,7 @@ logger = logging.getLogger(__name__)
 class OAPBendersModel(
     BendersMasterMixin,
     BendersCGSPMixin,
+    BendersMagnantiWongMixin,   # after CGSP — shares dual variable structure
     BendersFarkasMixin,
     BendersPiMixin,
     BendersOptimizeMixin,
@@ -51,11 +53,17 @@ class OAPBendersModel(
         self.iteration = 0
         self.cortes_añadidos = 0
         self.benders_method = "farkas"  # Valor por defecto
+        self._subtour_method = "SCF"    # Valor por defecto; actualizado en build()
 
         # CGSP (deepest cuts) configuration — defaults to off for backward compat
         self.use_deepest_cuts: bool = False
         self.cut_weights_y: dict | None = None
         self.cut_weights_yp: dict | None = None
+
+        # Magnanti-Wong (pareto-optimal cuts) — defaults to off
+        self.use_magnanti_wong: bool = False
+        self._core_point: dict | None = None
+        self._core_point_strategy: str = "lp_relaxation"
 
         # Para el logger de Farkas/Pi si deseas guardar archivos JSON
         self.log_path = f"outputs/Others/Benders/{name}/log.json"
@@ -73,6 +81,7 @@ class OAPBendersModel(
         mode: int = 0,
         maximize: bool = True,
         benders_method: Literal["farkas", "pi"] = "farkas",
+        subtour: Literal["SCF", "DFJ"] = "SCF",
         sum_constrain: bool = True,
         crosses_constrain: bool = False,
         strengthen: bool = False,
@@ -83,6 +92,8 @@ class OAPBendersModel(
         semiplane: Literal[0, 1] = 0,
         use_knapsack: bool = False,
         use_cliques: bool = False,
+        use_magnanti_wong: bool = False,
+        core_point_strategy: Literal["lp_relaxation", "uniform"] = "lp_relaxation",
     ) -> None:
         """
         Orquesta la construcción del Problema Maestro y de los Subproblemas.
@@ -109,7 +120,14 @@ class OAPBendersModel(
                  points.  Pure x-space; does NOT affect the Y / Y' subproblems or
                  the Farkas / Pi / CGSP cut derivations (see design note
                  2026-04-30-benders-semiplane-master.md §"Decomposition invariance").
-            V2 is reserved for future work.
+             V2 is reserved for future work.
+        use_magnanti_wong : bool, default False
+            When True, the callback uses Magnanti-Wong Pareto-optimal cuts.
+            Mutually exclusive with use_deepest_cuts=True (raises ValueError).
+        core_point_strategy : str, default 'lp_relaxation'
+            Strategy to compute x^0 used in Magnanti-Wong:
+            - 'lp_relaxation': solve master LP once at build time (accurate).
+            - 'uniform': x^0 = 1/N for all arcs (zero cost, less accurate).
 
         Notes
         -----
@@ -118,6 +136,12 @@ class OAPBendersModel(
         behave bit-identically when this kwarg is omitted (NFR-5 / NFR-6).
         """
         logger.info(f"=== Construyendo OAPBendersModel ({benders_method.upper()}) ===")
+
+        # Validate mutually exclusive options
+        if use_magnanti_wong and use_deepest_cuts:
+            raise ValueError(
+                "use_magnanti_wong and use_deepest_cuts are mutually exclusive."
+            )
 
         # Guardamos el método elegido para que el callback sepa qué cortes generar
         self.benders_method = benders_method
@@ -132,6 +156,7 @@ class OAPBendersModel(
             objective=objective,
             mode=mode,
             maximize=maximize,
+            subtour=subtour,
             crosses_constrain=crosses_constrain,
             semiplane=semiplane,
             use_knapsack=use_knapsack,
@@ -149,5 +174,13 @@ class OAPBendersModel(
             )
         else:
             raise ValueError(f"Método de Benders desconocido: {benders_method}")
+
+        # Magnanti-Wong core point (must be after subproblems + master are built)
+        self.use_magnanti_wong = use_magnanti_wong
+        if use_magnanti_wong:
+            self._core_point_strategy = core_point_strategy
+            self._core_point = self._compute_core_point(core_point_strategy)
+        else:
+            self._core_point = None
 
         logger.info("Construcción completada con éxito.")

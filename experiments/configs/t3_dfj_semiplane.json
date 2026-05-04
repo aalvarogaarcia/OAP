@@ -1,0 +1,15 @@
+{
+  "methods":           ["benders_farkas_dfj"],
+  "objective":         "Fekete",
+  "maximize":          false,
+  "sizes":             [10, 15, 20, 25, 30],
+  "time_limit":        3600,
+  "instance_dir":      "instance",
+  "mipgapabs":         1.99,
+  "semiplane":         1,
+  "strengthen":        false,
+  "crosses_constrain": false,
+  "use_knapsack":      false,
+  "use_cliques":       false,
+  "profiling":         true
+}

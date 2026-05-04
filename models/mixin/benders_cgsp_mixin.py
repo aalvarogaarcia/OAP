@@ -218,6 +218,122 @@ class BendersCGSPMixin:
         return weights
 
     # ------------------------------------------------------------------
+    # B-1: Dual feasibility constraints  A^T π ≤ 0
+    # ------------------------------------------------------------------
+
+    def _build_dual_feasibility_constrs(
+        self,
+        cgsp: gp.Model,
+        pi_vars: dict,
+        which: str,  # "y" or "yp"
+    ) -> None:
+        """Add A^T π ≤ 0 constraints to the CGSP model.
+
+        One constraint per primal variable (triangle t ∈ V_list).
+        Each constraint sums the dual contributions from every subproblem
+        constraint that involves y[t] (or yp[t]), consistent with sign.
+
+        Constraint type → dual sign
+        ---------------------------
+        alpha  (=)   → π_α free   → u_α - v_α
+        beta   (=)   → π_β free   → u_β - v_β  (forward +1, backward -1)
+        gamma  (≥)   → π_γ ≥ 0   → u_γ  only
+        delta  (≤)   → π_δ ≤ 0   → -v_δ only
+        global (=)   → π_g free   → u_g - v_g
+        r1     (≤)   → π_r1 ≤ 0  → -v_r1 * area[t]
+        r2     (≤)   → π_r2 ≤ 0  → -v_r2[arc]
+        r3     (≤)   → π_r3 ≤ 0  → -v_r3[key]
+        """
+        suffix = "_p" if which == "yp" else ""
+        adj: list[list[list[int]]] = getattr(self, "triangles_adj_list", [])
+        constrs = self.constrs_yp if which == "yp" else self.constrs_y
+
+        def _adj(i: int, j: int) -> list[int]:
+            """Safe accessor for triangles_adj_list[i][j]."""
+            try:
+                return adj[i][j]
+            except (IndexError, TypeError):
+                return []
+
+        for t in getattr(self, "V_list", []):
+            expr = gp.LinExpr()
+
+            # alpha[_p]: equality, adjacent to CH arcs
+            for (i, j) in constrs.get(f"alpha{suffix}", {}):
+                t_list = _adj(i, j)
+                if t in t_list:
+                    u = pi_vars.get(f"u_alpha{suffix}", {}).get((i, j))
+                    v = pi_vars.get(f"v_alpha{suffix}", {}).get((i, j))
+                    if u is not None:
+                        expr += u
+                    if v is not None:
+                        expr -= v
+
+            # beta[_p]: equality, non-CH edges
+            for (i, j) in constrs.get(f"beta{suffix}", {}):
+                u_key = f"u_beta{suffix}"
+                v_key = f"v_beta{suffix}"
+                if t in _adj(i, j):   # forward +1
+                    u = pi_vars.get(u_key, {}).get((i, j))
+                    v = pi_vars.get(v_key, {}).get((i, j))
+                    if u is not None:
+                        expr += u
+                    if v is not None:
+                        expr -= v
+                if t in _adj(j, i):   # backward -1
+                    u = pi_vars.get(u_key, {}).get((i, j))
+                    v = pi_vars.get(v_key, {}).get((i, j))
+                    if u is not None:
+                        expr -= u
+                    if v is not None:
+                        expr += v
+
+            # gamma[_p]: ≥ constraint, π_γ ≥ 0 → only u_gamma
+            for (i, j) in constrs.get(f"gamma{suffix}", {}):
+                if t in _adj(i, j):
+                    u = pi_vars.get(f"u_gamma{suffix}", {}).get((i, j))
+                    if u is not None:
+                        expr += u
+
+            # delta[_p]: ≤ constraint, π_δ ≤ 0 → only -v_delta
+            for (i, j) in constrs.get(f"delta{suffix}", {}):
+                if t in _adj(i, j):
+                    v = pi_vars.get(f"v_delta{suffix}", {}).get((i, j))
+                    if v is not None:
+                        expr -= v
+
+            # global[_p]: equality → free
+            u_g = pi_vars.get(f"u_global{suffix}")
+            v_g = pi_vars.get(f"v_global{suffix}")
+            if isinstance(u_g, gp.Var):
+                expr += u_g
+            if isinstance(v_g, gp.Var):
+                expr -= v_g
+
+            # r1[_p]: ≤ → -v_r1 * area[t]
+            v_r1 = pi_vars.get(f"v_r1{suffix}")
+            if isinstance(v_r1, gp.Var) and hasattr(self, "_abs_areas"):
+                expr -= self._abs_areas[t] * v_r1  # type: ignore[index]
+
+            # r2[_p]: ≤ → -v_r2[arc]
+            for (i, j) in constrs.get(f"r2{suffix}", {}):
+                if t in _adj(i, j):
+                    v = pi_vars.get(f"v_r2{suffix}", {}).get((i, j))
+                    if v is not None:
+                        expr -= v
+
+            # r3[_p]: ≤ → -v_r3[key]
+            for key in constrs.get(f"r3{suffix}", {}):
+                i, j, k, s = key
+                if t in _adj(i, j) or t in _adj(k, s):
+                    v = pi_vars.get(f"v_r3{suffix}", {}).get(key)
+                    if v is not None:
+                        expr -= v
+
+            if expr.size() > 0:
+                cgsp.addConstr(expr <= 0.0, name=f"dual_feas{suffix}_t{t}")
+
+    # ------------------------------------------------------------------
     # Task 5: _build_cgsp_yp — dual LP for Y' (external triangulation)
     # ------------------------------------------------------------------
 
@@ -322,22 +438,34 @@ class BendersCGSPMixin:
             pi_vars["v_beta_p"] = v_bp
 
         # ---- gamma_p: Σ_t yp[t] ≥ x[j,i]  for (i,j) ∈ A'' ----
+        # π_γ ≥ 0 (≥ constraint) → only u_gamma_p, no v_gamma_p
         if "gamma_p" in self.constrs_yp and self.constrs_yp["gamma_p"]:
             keys_gp = list(self.constrs_yp["gamma_p"].keys())
             rhs_map_gp = {(i, j): x_sol.get((j, i), 0.0) for (i, j) in keys_gp}
             w_map_gp = weights.get("gamma_p", {})
-            u_gp, v_gp = _add_pi_indexed("gamma_p", keys_gp, rhs_map_gp, w_map_gp)
+            u_gp = cgsp.addVars(keys_gp, lb=0.0, name="u_gamma_p")
+            for k in keys_gp:
+                rhs_k = rhs_map_gp.get(k, 0.0)
+                w_k = w_map_gp.get(k, 1.0) if isinstance(w_map_gp, dict) else 1.0
+                obj_expr.addTerms([rhs_k], [u_gp[k]])
+                norm_expr.addTerms([w_k], [u_gp[k]])
             pi_vars["u_gamma_p"] = u_gp
-            pi_vars["v_gamma_p"] = v_gp
+            # No v_gamma_p: π_γ ≥ 0
 
         # ---- delta_p: Σ_t yp[t] ≤ 1 - x[i,j]  for (i,j) ∈ A'' ----
+        # π_δ ≤ 0 (≤ constraint) → only v_delta_p (π_δ = -v_δ), no u_delta_p
         if "delta_p" in self.constrs_yp and self.constrs_yp["delta_p"]:
             keys_dp = list(self.constrs_yp["delta_p"].keys())
             rhs_map_dp = {(i, j): 1.0 - x_sol.get((i, j), 0.0) for (i, j) in keys_dp}
             w_map_dp = weights.get("delta_p", {})
-            u_dp, v_dp = _add_pi_indexed("delta_p", keys_dp, rhs_map_dp, w_map_dp)
-            pi_vars["u_delta_p"] = u_dp
+            v_dp = cgsp.addVars(keys_dp, lb=0.0, name="v_delta_p")
+            for k in keys_dp:
+                rhs_k = rhs_map_dp.get(k, 0.0)
+                w_k = w_map_dp.get(k, 1.0) if isinstance(w_map_dp, dict) else 1.0
+                obj_expr.addTerms([-rhs_k], [v_dp[k]])   # π_δ = -v_δ → contribution -rhs_k * v_δ
+                norm_expr.addTerms([w_k], [v_dp[k]])
             pi_vars["v_delta_p"] = v_dp
+            # No u_delta_p: π_δ ≤ 0
 
         # ---- global_p: Σ_t yp[t] = N - |CH| ----
         if "global_p" in self.constrs_yp and isinstance(self.constrs_yp["global_p"], gp.Constr):
@@ -375,6 +503,9 @@ class BendersCGSPMixin:
             pi_vars["u_r3_p"] = u_r3
             pi_vars["v_r3_p"] = v_r3
 
+        # ---- Dual feasibility constraints: A^T π ≤ 0 (B-1) ----
+        self._build_dual_feasibility_constrs(cgsp, pi_vars, which="yp")
+
         # ---- L₁ normalisation: Σ w (u + v) = 1 ----
         # Only add if there are variables to normalise
         cgsp.update()
@@ -387,10 +518,6 @@ class BendersCGSPMixin:
         cgsp.update()
 
         return cgsp, pi_vars
-
-    # ------------------------------------------------------------------
-    # Task 6: _build_cgsp_y — dual LP for Y (internal triangulation)
-    # ------------------------------------------------------------------
 
     def _build_cgsp_y(
         self,
@@ -482,22 +609,34 @@ class BendersCGSPMixin:
             pi_vars["v_beta"] = v_b
 
         # ---- gamma: Σ_t y[t] ≥ x[i,j]  for (i,j) ∈ A'' ----
+        # π_γ ≥ 0 (≥ constraint) → only u_gamma, no v_gamma
         if "gamma" in self.constrs_y and self.constrs_y["gamma"]:
             keys_g = list(self.constrs_y["gamma"].keys())
             rhs_map_g = {(i, j): x_sol.get((i, j), 0.0) for (i, j) in keys_g}
             w_map_g = weights.get("gamma", {})
-            u_g, v_g = _add_pi_indexed("gamma", keys_g, rhs_map_g, w_map_g)
-            pi_vars["u_gamma"] = u_g
-            pi_vars["v_gamma"] = v_g
+            u_g2 = cgsp.addVars(keys_g, lb=0.0, name="u_gamma")
+            for k in keys_g:
+                rhs_k = rhs_map_g.get(k, 0.0)
+                w_k = w_map_g.get(k, 1.0) if isinstance(w_map_g, dict) else 1.0
+                obj_expr.addTerms([rhs_k], [u_g2[k]])
+                norm_expr.addTerms([w_k], [u_g2[k]])
+            pi_vars["u_gamma"] = u_g2
+            # No v_gamma: π_γ ≥ 0
 
         # ---- delta: Σ_t y[t] ≤ 1 - x[j,i]  for (i,j) ∈ A'' ----
+        # π_δ ≤ 0 (≤ constraint) → only v_delta (π_δ = -v_δ), no u_delta
         if "delta" in self.constrs_y and self.constrs_y["delta"]:
             keys_d = list(self.constrs_y["delta"].keys())
             rhs_map_d = {(i, j): 1.0 - x_sol.get((j, i), 0.0) for (i, j) in keys_d}
             w_map_d = weights.get("delta", {})
-            u_d, v_d = _add_pi_indexed("delta", keys_d, rhs_map_d, w_map_d)
-            pi_vars["u_delta"] = u_d
-            pi_vars["v_delta"] = v_d
+            v_d2 = cgsp.addVars(keys_d, lb=0.0, name="v_delta")
+            for k in keys_d:
+                rhs_k = rhs_map_d.get(k, 0.0)
+                w_k = w_map_d.get(k, 1.0) if isinstance(w_map_d, dict) else 1.0
+                obj_expr.addTerms([-rhs_k], [v_d2[k]])   # π_δ = -v_δ → contribution -rhs_k * v_δ
+                norm_expr.addTerms([w_k], [v_d2[k]])
+            pi_vars["v_delta"] = v_d2
+            # No u_delta: π_δ ≤ 0
 
         # ---- global: Σ_t y[t] = N - 2 ----
         if "global" in self.constrs_y and isinstance(self.constrs_y["global"], gp.Constr):
@@ -555,6 +694,9 @@ class BendersCGSPMixin:
             pi_vars["pi0_neg"] = pi0_neg
             # Store net variable reference via a helper attribute name
             pi0_var = pi0_pos  # caller uses pi0_pos.X - pi0_neg.X for the net value
+
+        # ---- Dual feasibility constraints: A^T π ≤ 0 (B-1) ----
+        self._build_dual_feasibility_constrs(cgsp, pi_vars, which="y")
 
         # ---- L₁ normalisation ----
         cgsp.update()
@@ -618,20 +760,29 @@ class BendersCGSPMixin:
         # The cut is: Σ_i π_i * (b_i(x) - 0) ≤ 0  ↔  Σ_i π_i * b_i(x) ≤ 0
         # where b_i(x) is the i-th RHS expressed as a linear function of x.
 
-        # Helper: retrieve net value (u - v) for a variable group
+        # Helper: retrieve net dual value for a variable group.
+        # Supports one-sided vars (only u or only v present):
+        #   u only  → π = +u   (constraint was ≥, dual ≥ 0)
+        #   v only  → π = -v   (constraint was ≤, dual ≤ 0)
+        #   both    → π = u - v (free dual, = constraint)
         def _net(u_key: str, v_key: str) -> dict:
             out: dict = {}
             u_vars = pi_vars.get(u_key)
             v_vars = pi_vars.get(v_key)
-            if u_vars is None or v_vars is None:
+            if u_vars is None and v_vars is None:
                 return out
-            if isinstance(u_vars, gp.Var):
-                val = u_vars.X - v_vars.X  # type: ignore[union-attr]
+            if isinstance(u_vars, gp.Var) or isinstance(v_vars, gp.Var):
+                u_val = u_vars.X if isinstance(u_vars, gp.Var) else 0.0  # type: ignore[union-attr]
+                v_val = v_vars.X if isinstance(v_vars, gp.Var) else 0.0  # type: ignore[union-attr]
+                val = u_val - v_val
                 if abs(val) > TOL:
                     out["scalar"] = val
             else:
-                for k in u_vars.keys():
-                    val = u_vars[k].X - v_vars[k].X  # type: ignore[index]
+                keys = u_vars.keys() if u_vars is not None else v_vars.keys()  # type: ignore[union-attr]
+                for k in keys:
+                    u_val = u_vars[k].X if u_vars is not None else 0.0  # type: ignore[index]
+                    v_val = v_vars[k].X if v_vars is not None else 0.0  # type: ignore[index]
+                    val = u_val - v_val
                     if abs(val) > TOL:
                         out[k] = val
             return out
@@ -670,14 +821,14 @@ class BendersCGSPMixin:
         if gl_net and "scalar" in gl_net:
             pi_val = gl_net["scalar"]
             rhs_val = self.constrs_yp["global_p"].RHS
-            cut_rhs += pi_val * rhs_val
+            cut_rhs -= pi_val * rhs_val
             witness["global_p"] = pi_val
 
         # r1_p: area balance (constant RHS = CH_area)
         r1_net = _net("u_r1_p", "v_r1_p")
         if r1_net and "scalar" in r1_net:
             pi_val = r1_net["scalar"]
-            cut_rhs += pi_val * self.convex_hull_area
+            cut_rhs -= pi_val * self.convex_hull_area
             witness["r1_p"] = pi_val
 
         # r2_p: arc coverage (constant RHS = 1)
@@ -685,7 +836,7 @@ class BendersCGSPMixin:
         if r2_net:
             witness["r2_p"] = r2_net
             for _k, pi_val in r2_net.items():
-                cut_rhs += pi_val * 1.0
+                cut_rhs -= pi_val * 1.0
 
         # r3_p: crossing exclusion — RHS = 1 - x[i,j] - x[s,k]
         r3_net = _net("u_r3_p", "v_r3_p")
@@ -750,15 +901,20 @@ class BendersCGSPMixin:
             out: dict = {}
             u_vars = pi_vars.get(u_key)
             v_vars = pi_vars.get(v_key)
-            if u_vars is None or v_vars is None:
+            if u_vars is None and v_vars is None:
                 return out
-            if isinstance(u_vars, gp.Var):
-                val = u_vars.X - v_vars.X  # type: ignore[union-attr]
+            if isinstance(u_vars, gp.Var) or isinstance(v_vars, gp.Var):
+                u_val = u_vars.X if isinstance(u_vars, gp.Var) else 0.0  # type: ignore[union-attr]
+                v_val = v_vars.X if isinstance(v_vars, gp.Var) else 0.0  # type: ignore[union-attr]
+                val = u_val - v_val
                 if abs(val) > TOL:
                     out["scalar"] = val
             else:
-                for k in u_vars.keys():
-                    val = u_vars[k].X - v_vars[k].X  # type: ignore[index]
+                keys = u_vars.keys() if u_vars is not None else v_vars.keys()  # type: ignore[union-attr]
+                for k in keys:
+                    u_val = u_vars[k].X if u_vars is not None else 0.0  # type: ignore[index]
+                    v_val = v_vars[k].X if v_vars is not None else 0.0  # type: ignore[index]
+                    val = u_val - v_val
                     if abs(val) > TOL:
                         out[k] = val
             return out
@@ -809,14 +965,14 @@ class BendersCGSPMixin:
         if gl_net and "scalar" in gl_net:
             pi_val = gl_net["scalar"]
             rhs_val = self.constrs_y["global"].RHS
-            cut_rhs += pi_val * rhs_val
+            cut_rhs -= pi_val * rhs_val
             witness["global"] = pi_val
 
         # r1: area balance (constant RHS = CH_area)
         r1_net = _net("u_r1", "v_r1")
         if r1_net and "scalar" in r1_net:
             pi_val = r1_net["scalar"]
-            cut_rhs += pi_val * self.convex_hull_area
+            cut_rhs -= pi_val * self.convex_hull_area
             witness["r1"] = pi_val
 
         # r2: arc coverage (constant RHS = 1)
@@ -824,7 +980,7 @@ class BendersCGSPMixin:
         if r2_net:
             witness["r2"] = r2_net
             for _k, pi_val in r2_net.items():
-                cut_rhs += pi_val * 1.0
+                cut_rhs -= pi_val * 1.0
 
         # r3: crossing exclusion — RHS = 1 - x[j,i] - x[k,s]
         r3_net = _net("u_r3", "v_r3")

@@ -77,9 +77,10 @@ SKIP_WALL_CLOCK_S = 10 * 3600  # 10 h soft cap per solve
 MIPGAPABS = 1.99  # override OAPBendersModel default of 1.99
 
 ALL_METHODS: list[dict[str, Any]] = [
-    {"label": "compact",        "model": "compact",  "benders_method": None},
-    {"label": "benders_farkas", "model": "benders",  "benders_method": "farkas"},
-    {"label": "benders_pi",     "model": "benders",  "benders_method": "pi"},
+    {"label": "compact",            "model": "compact",  "benders_method": None,      "subtour": "SCF"},
+    {"label": "benders_farkas",     "model": "benders",  "benders_method": "farkas",  "subtour": "SCF"},
+    {"label": "benders_pi",         "model": "benders",  "benders_method": "pi",      "subtour": "SCF"},
+    {"label": "benders_farkas_dfj", "model": "benders",  "benders_method": "farkas",  "subtour": "DFJ"},
 ]
 _ALL_METHOD_LABELS = [m["label"] for m in ALL_METHODS]
 
@@ -341,18 +342,19 @@ def run_benders_solve(
     use_knapsack: bool = False,
     use_cliques: bool = False,
     profiling: bool = True,
+    subtour: str = "SCF",
 ) -> tuple[dict, list[dict]]:
     """Run OAPBendersModel. Returns (result_row, profile_rows)."""
     from models import OAPBendersModel
     from utils.utils import compute_triangles, read_indexed_instance
 
     stem = instance_path.stem
-    label = f"benders_{benders_method}"
+    label = f"benders_{benders_method}" if subtour == "SCF" else f"benders_{benders_method}_{subtour.lower()}"
     timestamp = datetime.now().isoformat()
     benders_semiplane = min(semiplane, 1)  # Benders master only supports V1
     logger.info(
-        "[%s] Benders(%s) starting (limit=%ds, obj=%s, max=%s, sp=%d, str=%s, cross=%s)",
-        stem, benders_method, time_limit, objective, maximize,
+        "[%s] Benders(%s/%s) starting (limit=%ds, obj=%s, max=%s, sp=%d, str=%s, cross=%s)",
+        stem, benders_method, subtour, time_limit, objective, maximize,
         benders_semiplane, strengthen, crosses_constrain,
     )
 
@@ -369,6 +371,7 @@ def run_benders_solve(
             objective=objective,
             maximize=maximize,
             benders_method=benders_method,
+            subtour=subtour,
             sum_constrain=True,
             crosses_constrain=crosses_constrain,
             strengthen=strengthen,
@@ -393,7 +396,7 @@ def run_benders_solve(
         if wall_elapsed >= SKIP_WALL_CLOCK_S:
             status = "SKIPPED_TIMEOUT_10H"
 
-        logger.info("[%s] Benders(%s): ip=%s gap=%s time=%.1fs", stem, benders_method, ip, gap, time_s or wall_elapsed)
+        logger.info("[%s] Benders(%s/%s): ip=%s gap=%s time=%.1fs", stem, benders_method, subtour, ip, gap, time_s or wall_elapsed)
 
         prof_rows = _dump_profile_csv(profiler, label, stem, PROFILING_OUT_DIR) if profiling else []
 
@@ -709,6 +712,7 @@ def main(args: argparse.Namespace) -> int:
                     use_knapsack=cfg.get("use_knapsack", False),
                     use_cliques=cfg.get("use_cliques", False),
                     profiling=cfg["profiling"],
+                    subtour=method_cfg.get("subtour", "SCF"),
                 )
 
             all_rows.append(row)

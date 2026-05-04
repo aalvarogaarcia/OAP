@@ -447,9 +447,11 @@ class BendersPiMixin:
                 obj_yp += art_vars.sum()
             else:
                 obj_yp += art_vars
-        sense = self.model.ModelSense if hasattr(self, 'model') else GRB.MINIMIZE
-        self.sub_y.setObjective(obj_y, sense)
-        self.sub_yp.setObjective(obj_yp, sense)
+        # Phase-1 ALWAYS minimises the sum of artificials.
+        # The master's ModelSense (maximize for MaxArea) is irrelevant here —
+        # inheriting it would make sub_y/sub_yp unbounded when maximize=True.
+        self.sub_y.setObjective(obj_y, GRB.MINIMIZE)
+        self.sub_yp.setObjective(obj_yp, GRB.MINIMIZE)
 
     def _añadir_restricciones_pi(self, A_prime: list[Arc], A_double_prime: list[Arc], A_double_prime_beta: list[Arc], sum_constrain: bool) -> None:
         """Construye las ecuaciones matemáticas integrando las variables reales y las artificiales."""

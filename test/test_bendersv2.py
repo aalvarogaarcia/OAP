@@ -46,7 +46,7 @@ def instancia_cargada(request):
 # =======================================================================
 
 @pytest.mark.parametrize("objective", ["Fekete", "Internal"])
-@pytest.mark.parametrize("benders_method", ["farkas"])
+@pytest.mark.parametrize("benders_method", ["farkas", "pi"])
 def test_benders_mip_equivalence_min(instancia_cargada, objective, benders_method):
     """
     Comprueba que el valor objetivo entero (MIP) de Benders sea idéntico 
@@ -54,6 +54,8 @@ def test_benders_mip_equivalence_min(instancia_cargada, objective, benders_metho
     """
     if objective == "Internal":
         pytest.skip("Benders Internal objective MIP decomposition is work-in-progress; LP bound always 0 for minimize.")
+    if objective == "Internal" and benders_method == "pi":
+        pytest.skip("Pi + Internal: optimality cuts not yet implemented.")
     instance_name, points, triangles = instancia_cargada
     
     # 1. Resolver Compacto (Nuestra fuente de verdad)
@@ -82,12 +84,14 @@ def test_benders_mip_equivalence_min(instancia_cargada, objective, benders_metho
 # =======================================================================
 
 @pytest.mark.parametrize("objective", ["Fekete", "Internal"])
-@pytest.mark.parametrize("benders_method", ["farkas"])
+@pytest.mark.parametrize("benders_method", ["farkas", "pi"])
 def test_benders_lp_equivalence_min(instancia_cargada, objective, benders_method):
     """
     Comprueba que la relajación lineal (LP) del Maestro con Benders
     converge al mismo límite inferior que la relajación del Compacto.
     """
+    if objective == "Internal" and benders_method == "pi":
+        pytest.skip("Pi + Internal LP: optimality cuts not yet implemented.")
     instance_name, points, triangles = instancia_cargada
 
     # 1. Resolver LP del Compacto
@@ -119,7 +123,7 @@ def test_benders_lp_equivalence_min(instancia_cargada, objective, benders_method
 # =======================================================================
 
 @pytest.mark.parametrize("objective", ["Fekete", "Internal"])
-@pytest.mark.parametrize("benders_method", ["farkas"])
+@pytest.mark.parametrize("benders_method", ["farkas", "pi"])
 def test_benders_mip_equivalence_max(instancia_cargada, objective, benders_method):
     """
     Comprueba que el valor objetivo entero (MIP) de Benders sea idéntico 
@@ -127,6 +131,8 @@ def test_benders_mip_equivalence_max(instancia_cargada, objective, benders_metho
     """
     if objective == "Internal":
         pytest.skip("Benders Internal objective MIP decomposition is work-in-progress.")
+    if objective == "Internal" and benders_method == "pi":
+        pytest.skip("Pi + Internal: optimality cuts not yet implemented.")
     instance_name, points, triangles = instancia_cargada
     
     # 1. Resolver Compacto (Nuestra fuente de verdad)
@@ -155,12 +161,14 @@ def test_benders_mip_equivalence_max(instancia_cargada, objective, benders_metho
 # =======================================================================
 
 @pytest.mark.parametrize("objective", ["Fekete", "Internal"])
-@pytest.mark.parametrize("benders_method", ["farkas"])
+@pytest.mark.parametrize("benders_method", ["farkas", "pi"])
 def test_benders_lp_equivalence_max(instancia_cargada, objective, benders_method):
     """
     Comprueba que la relajación lineal (LP) del Maestro con Benders
     converge al mismo límite inferior que la relajación del Compacto.
     """
+    if objective == "Internal" and benders_method == "pi":
+        pytest.skip("Pi + Internal LP: optimality cuts not yet implemented.")
     instance_name, points, triangles = instancia_cargada
 
     # 1. Resolver LP del Compacto
