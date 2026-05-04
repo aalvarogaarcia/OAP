@@ -78,7 +78,6 @@ MIPGAPABS = 1.99  # override OAPBendersModel default of 1.99
 METHODS: list[dict[str, Any]] = [
     {"label": "compact",        "model": "compact",  "benders_method": None},
     {"label": "benders_farkas", "model": "benders",  "benders_method": "farkas"},
-    {"label": "benders_pi",     "model": "benders",  "benders_method": "pi"},
 ]
 
 CSV_FIELDNAMES = [
