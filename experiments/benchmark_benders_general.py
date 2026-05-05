@@ -143,6 +143,22 @@ def get_system_info() -> dict:
 # Solver
 # ---------------------------------------------------------------------------
 
+def _safe_round(value, ndigits: int):
+    """Round numeric values; pass through anything else (None, "-", strings) as None.
+
+    F1.2 (audit ref. .claude/context/reviews/2026-05-04-cgsp-paper-dissonance.md §2.4):
+    ``OAPStatsMixin.get_model_stats`` returns the literal string ``"-"`` when
+    the manual LP-relaxation Benders loop fails to converge (or when SolCount
+    is zero).  The previous implementation called ``round("-", 4)`` which
+    raised ``TypeError: type str doesn't define __round__ method`` and made
+    the whole method appear ``FAILED`` in the report — masking the real
+    diagnostic, which is LP non-convergence inside CGSP.
+    """
+    if isinstance(value, (int, float)):
+        return round(value, ndigits)
+    return None
+
+
 def run_single_solve(
     instance_path: str,
     method: str,
@@ -205,18 +221,28 @@ def run_single_solve(
 
         row.update(
             {
-                "root_lp": round(lp, 4) if lp is not None else None,
-                "final_ip": round(ip, 4) if ip is not None else None,
-                "gap_pct": round(gap, 4) if gap is not None else None,
-                "time_s": round(time_s, 2) if time_s is not None else None,
-                "nodes": int(nodes) if nodes is not None else None,
+                "root_lp": _safe_round(lp, 4),
+                "final_ip": _safe_round(ip, 4),
+                "gap_pct": _safe_round(gap, 4),
+                "time_s": _safe_round(time_s, 2),
+                "nodes": int(nodes) if isinstance(nodes, (int, float)) else None,
                 "status": "OK",
             }
         )
 
     except Exception as exc:
-        logger.error("  FAILED [%s] %s: %s", method, stem, exc)
-        row["status"] = f"FAILED: {str(exc)[:80]}"
+        # F1.3 — emit the full traceback so failures don't get truncated to a
+        # single line; without this the only diagnostic in the benchmark log is
+        # ``FAILED: <type>: <first 80 chars>``, which is what hid the real
+        # ``round("-")`` origin of the previous run.
+        import traceback
+        logger.error(
+            "  FAILED [%s] %s\n%s",
+            method,
+            stem,
+            traceback.format_exc(),
+        )
+        row["status"] = f"FAILED: {type(exc).__name__}: {str(exc)[:80]}"
 
     return row
 

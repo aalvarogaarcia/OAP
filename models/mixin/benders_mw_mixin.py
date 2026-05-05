@@ -66,7 +66,12 @@ class BendersMagnantiWongMixin:
             n = getattr(self, "N", None)
             if n is None or n == 0:
                 return {}
-            return {arc: 1.0 / n for arc in getattr(self, "_x", {})}
+            # NOTE (F1.1): the master variable dict is `self.x` (no underscore).
+            # An earlier draft used `self._x` which does not exist; the resulting
+            # empty dict made every MW callback abort with "no_core_point" and
+            # silently fall back to legacy Farkas — see audit
+            # .claude/context/reviews/2026-05-04-cgsp-paper-dissonance.md §2.1.
+            return {arc: 1.0 / n for arc in getattr(self, "x", {})}
 
         # 'lp_relaxation'
         try:
@@ -76,7 +81,8 @@ class BendersMagnantiWongMixin:
             lp.optimize()
             if lp.Status == GRB.OPTIMAL:
                 result: dict = {}
-                for arc in getattr(self, "_x", {}):
+                # F1.1: same correction as above — iterate `self.x`, not `self._x`.
+                for arc in getattr(self, "x", {}):
                     v = lp.getVarByName(f"x_{arc[0]}_{arc[1]}")
                     if v is not None:
                         result[arc] = v.X
