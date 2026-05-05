@@ -1,0 +1,23 @@
+{
+  "_comment": "FR-9 benchmark: all 7 cut strategies on n=20 instances. Full run (~2-8 hours depending on method).",
+  "instances": [
+    "instance/euro-night-0000020.instance",
+    "instance/london-0000020.instance",
+    "instance/stars-0000020.instance",
+    "instance/uniform-0000020-1.instance",
+    "instance/uniform-0000020-2.instance",
+    "instance/us-night-0000020.instance"
+  ],
+  "methods": [
+    "farkas",
+    "cgsp_farkas",
+    "cgsp_pi",
+    "mw_lp",
+    "mw_uniform",
+    "ddma_farkas",
+    "ddma_pi"
+  ],
+  "objective":   "Fekete",
+  "maximize":    true,
+  "time_limit":  600
+}

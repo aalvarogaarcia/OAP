@@ -1,0 +1,19 @@
+{
+  "_comment": "DDMA validation run on n=20: compare farkas vs ddma_farkas vs ddma_pi. Quick DDMA-specific benchmark.",
+  "instances": [
+    "instance/euro-night-0000020.instance",
+    "instance/london-0000020.instance",
+    "instance/stars-0000020.instance",
+    "instance/uniform-0000020-1.instance",
+    "instance/uniform-0000020-2.instance",
+    "instance/us-night-0000020.instance"
+  ],
+  "methods": [
+    "farkas",
+    "ddma_farkas",
+    "ddma_pi"
+  ],
+  "objective":   "Fekete",
+  "maximize":    true,
+  "time_limit":  600
+}
