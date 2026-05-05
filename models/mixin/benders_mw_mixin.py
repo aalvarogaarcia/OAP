@@ -66,11 +66,6 @@ class BendersMagnantiWongMixin:
             n = getattr(self, "N", None)
             if n is None or n == 0:
                 return {}
-            # NOTE (F1.1): the master variable dict is `self.x` (no underscore).
-            # An earlier draft used `self._x` which does not exist; the resulting
-            # empty dict made every MW callback abort with "no_core_point" and
-            # silently fall back to legacy Farkas — see audit
-            # .claude/context/reviews/2026-05-04-cgsp-paper-dissonance.md §2.1.
             return {arc: 1.0 / n for arc in getattr(self, "x", {})}
 
         # 'lp_relaxation'
@@ -81,7 +76,6 @@ class BendersMagnantiWongMixin:
             lp.optimize()
             if lp.Status == GRB.OPTIMAL:
                 result: dict = {}
-                # F1.1: same correction as above — iterate `self.x`, not `self._x`.
                 for arc in getattr(self, "x", {}):
                     v = lp.getVarByName(f"x_{arc[0]}_{arc[1]}")
                     if v is not None:
@@ -105,32 +99,26 @@ class BendersMagnantiWongMixin:
     def _build_mw_secondary_lp(
         self,
         x_sol: "dict[Arc, float]",
-        q_opt: "float | None",
+        q_opt: float,
         which: str,  # "y" or "yp"
         TOL: float = _MW_TOL,
-    ) -> "tuple[gp.Model, dict, gp.LinExpr, gp.LinExpr | None] | tuple[None, None, None, None]":
+        add_pareto: bool = True,
+    ) -> "tuple[gp.Model, dict, gp.LinExpr, gp.LinExpr] | tuple[None, None, None, None]":
         """Build the Magnanti-Wong secondary LP for subproblem Y or Y'.
 
         Secondary LP
         ------------
             max  π^T b(x^0)              [maximise at core point]
             s.t. A^T π ≤ 0               [dual feasibility — from CGSP B-1]
-                 π^T b(x_bar) = q_opt    [Pareto constraint, if feasible]
+                 π^T b(x_bar) = q_opt    [Pareto constraint — omitted when
+                                          add_pareto=False, i.e. subproblem
+                                          was infeasible (Papadakos §3.3.3)]
                  Σ w|π| = 1              [L₁ normalisation]
-
-        F2.3 (audit §4.3): when the original primal subproblem is infeasible
-        ``q_opt`` is undefined (the dual value is +∞ in the Farkas sense).
-        Pass ``q_opt = None`` and the Pareto constraint is dropped — this is
-        the Papadakos relaxation (Hosseini & Turner 2025 §3.3.3 eq. 29).
-        Setting ``q_opt = 0.0`` for an infeasible subproblem is wrong because
-        it forces ``π^T b(x_bar) = 0``, which in general excludes every
-        valid Farkas certificate.
 
         Returns
         -------
         (mw_model, pi_vars, obj_expr_x0, obj_expr_xbar)
-            ``obj_expr_xbar`` is ``None`` when the Pareto constraint is
-            dropped (Papadakos).  Returns the all-``None`` tuple on error.
+            or (None, None, None, None) on error.
         """
         core_point = getattr(self, "_core_point", None)
         if not core_point:
@@ -141,24 +129,30 @@ class BendersMagnantiWongMixin:
         try:
             if which == "yp":
                 mw, pi_vars = self._build_cgsp_yp(x_sol)  # type: ignore[attr-defined]
-            else:
-                mw, pi_vars, _pi0_var = self._build_cgsp_y(x_sol)  # type: ignore[attr-defined]
-
-            x_bar_expr: "gp.LinExpr | None" = None
-            if q_opt is not None:
-                # Pareto constraint: π^T b(x_bar) = q_opt
                 x_bar_expr = _recompute_obj_at_x(pi_vars, x_sol, which, self)  # type: ignore[arg-type]
                 if x_bar_expr is None:
                     return None, None, None, None
-                mw.addConstr(x_bar_expr == q_opt, name="mw_pareto")
-
-            # Replace objective: maximise at core point x^0
-            x0_expr = _recompute_obj_at_x(pi_vars, core_point, which, self)  # type: ignore[arg-type]
-            if x0_expr is None:
-                return None, None, None, None
-            mw.setObjective(x0_expr, GRB.MAXIMIZE)
-            mw.update()
-            return mw, pi_vars, x0_expr, x_bar_expr
+                if add_pareto:
+                    mw.addConstr(x_bar_expr == q_opt, name="mw_pareto")
+                x0_expr = _recompute_obj_at_x(pi_vars, core_point, which, self)  # type: ignore[arg-type]
+                if x0_expr is None:
+                    return None, None, None, None
+                mw.setObjective(x0_expr, GRB.MAXIMIZE)
+                mw.update()
+                return mw, pi_vars, x0_expr, x_bar_expr
+            else:
+                mw, pi_vars, _pi0_var = self._build_cgsp_y(x_sol)  # type: ignore[attr-defined]
+                x_bar_expr = _recompute_obj_at_x(pi_vars, x_sol, which, self)  # type: ignore[arg-type]
+                if x_bar_expr is None:
+                    return None, None, None, None
+                if add_pareto:
+                    mw.addConstr(x_bar_expr == q_opt, name="mw_pareto")
+                x0_expr = _recompute_obj_at_x(pi_vars, core_point, which, self)  # type: ignore[arg-type]
+                if x0_expr is None:
+                    return None, None, None, None
+                mw.setObjective(x0_expr, GRB.MAXIMIZE)
+                mw.update()
+                return mw, pi_vars, x0_expr, x_bar_expr
         except Exception as exc:  # noqa: BLE001
             logger.warning("MW secondary LP build failed (%s).", exc)
             return None, None, None, None
@@ -187,18 +181,16 @@ class BendersMagnantiWongMixin:
 
         yp_status = sub_yp.Status
         if yp_status == GRB.OPTIMAL:
-            q_opt: "float | None" = sub_yp.ObjVal
+            q_opt = sub_yp.ObjVal
+            add_pareto = True
         elif yp_status == GRB.INFEASIBLE:
-            # F2.3 (audit §4.3): Papadakos — drop the Pareto constraint when
-            # the primal is infeasible.  q_opt = 0.0 was wrong because it
-            # forced π^T b(x_bar) = 0 which is generically inconsistent with
-            # any valid Farkas certificate.
-            q_opt = None
+            q_opt = 0.0
+            add_pareto = False  # Papadakos §3.3.3: skip Pareto constraint for infeasibility cuts
         else:
             return None, None, {"aborted": f"sub_yp_status_{yp_status}"}
 
         mw, pi_vars, _x0_expr, _xbar_expr = self._build_mw_secondary_lp(
-            x_sol, q_opt, which="yp", TOL=TOL
+            x_sol, q_opt, which="yp", TOL=TOL, add_pareto=add_pareto
         )
         if mw is None:
             return None, None, {"aborted": "build_failed"}
@@ -213,20 +205,14 @@ class BendersMagnantiWongMixin:
         if mw.ObjVal <= TOL:
             return None, None, {"aborted": "no_violation"}
 
-        # F2.2 (audit §4.2): reconstruct the cut from the secondary LP's own
-        # π★, NOT by re-running CGSP from scratch.  The previous version
-        # called self.get_cgsp_cut_yp again, which built a *new* CGSP model,
-        # solved it, and used the resulting π — that π is generically Pareto-
-        # dominated by the secondary LP's π★, so the emitted cut was not the
-        # MW-optimal cut at all.
+        # Reconstruct cut from the optimal pi_vars of the MW secondary LP.
+        # This is correct Magnanti-Wong: we use the π★ that maximises at x^0
+        # subject to the Pareto constraint, NOT a fresh CGSP solve.
         try:
             cut_expr, cut_rhs, witness = self._reconstruct_cut_from_pi(  # type: ignore[attr-defined]
-                pi_vars, x_sol, which="yp", TOL=TOL
+                pi_vars, which="yp", TOL=TOL
             )
-            if cut_expr is None:
-                return None, None, witness
             witness["mw"] = True
-            witness["mw_papadakos"] = (q_opt is None)
             return cut_expr, cut_rhs, witness
         except Exception as exc:  # noqa: BLE001
             logger.warning("MW (Y') cut reconstruction failed (%s).", exc)
@@ -247,15 +233,16 @@ class BendersMagnantiWongMixin:
 
         y_status = sub_y.Status
         if y_status == GRB.OPTIMAL:
-            q_opt: "float | None" = sub_y.ObjVal
+            q_opt = sub_y.ObjVal
+            add_pareto = True
         elif y_status == GRB.INFEASIBLE:
-            # F2.3 — Papadakos: drop the Pareto constraint on infeasible.
-            q_opt = None
+            q_opt = 0.0
+            add_pareto = False  # Papadakos §3.3.3: skip Pareto constraint for infeasibility cuts
         else:
             return None, None, {"aborted": f"sub_y_status_{y_status}"}
 
         mw, pi_vars, _x0_expr, _xbar_expr = self._build_mw_secondary_lp(
-            x_sol, q_opt, which="y", TOL=TOL
+            x_sol, q_opt, which="y", TOL=TOL, add_pareto=add_pareto
         )
         if mw is None:
             return None, None, {"aborted": "build_failed"}
@@ -270,19 +257,11 @@ class BendersMagnantiWongMixin:
         if mw.ObjVal <= TOL:
             return None, None, {"aborted": "no_violation"}
 
-        # F2.2: reuse the shared reconstructor on the secondary LP's π★.
-        # Note: pi0_var is None here because we did not separately build/store
-        # the Y CGSP's π₀ for the MW path.  MW under the "Internal" objective
-        # is therefore restricted to feasibility cuts; an extension to MW
-        # optimality cuts (with a free π₀ in the secondary LP) is future work.
         try:
             cut_expr, cut_rhs, witness = self._reconstruct_cut_from_pi(  # type: ignore[attr-defined]
-                pi_vars, x_sol, which="y", TOL=TOL
+                pi_vars, which="y", TOL=TOL
             )
-            if cut_expr is None:
-                return None, None, witness
             witness["mw"] = True
-            witness["mw_papadakos"] = (q_opt is None)
             return cut_expr, cut_rhs, witness
         except Exception as exc:  # noqa: BLE001
             logger.warning("MW (Y) cut reconstruction failed (%s).", exc)
@@ -382,40 +361,5 @@ def _recompute_obj_at_x(
             expr.addTerms([rhs_val], [u_gl])
         if isinstance(v_gl, gp.Var):
             expr.addTerms([-rhs_val], [v_gl])
-
-    # F2.2 extension — strengthening duals (r1, r2, r3) must also enter the
-    # Pareto / core-point objective so the MW LP is consistent with the cut
-    # reconstruction.  These were missing from the previous version, which
-    # silently dropped any contribution coming from the strengthening rows.
-    convex_hull_area = float(getattr(model, "convex_hull_area", 0.0) or 0.0)
-
-    # r1[_p]: scalar, constant RHS = convex_hull_area
-    u_r1 = pi_vars.get(f"u_r1{suffix}")
-    v_r1 = pi_vars.get(f"v_r1{suffix}")
-    if isinstance(u_r1, gp.Var):
-        expr.addTerms([convex_hull_area], [u_r1])
-    if isinstance(v_r1, gp.Var):
-        expr.addTerms([-convex_hull_area], [v_r1])
-
-    # r2[_p]: indexed, constant RHS = 1
-    r2_keys = list((pi_vars.get(f"u_r2{suffix}") or pi_vars.get(f"v_r2{suffix}") or {}).keys())
-    r2_rhs = {k: 1.0 for k in r2_keys}
-    _add_indexed(f"u_r2{suffix}", f"v_r2{suffix}", r2_rhs)
-
-    # r3[_p]: indexed, x-dependent RHS = 1 - x[arc1] - x[arc2]
-    r3_keys = list((pi_vars.get(f"u_r3{suffix}") or pi_vars.get(f"v_r3{suffix}") or {}).keys())
-    if which == "yp":
-        # b_r3'(x) = 1 - x[i,j] - x[s,k]  for key = (i, j, k, s)
-        r3_rhs = {
-            (i, j, k, s): 1.0 - x_sol.get((i, j), 0.0) - x_sol.get((s, k), 0.0)
-            for (i, j, k, s) in r3_keys
-        }
-    else:
-        # b_r3(x)  = 1 - x[j,i] - x[k,s]
-        r3_rhs = {
-            (i, j, k, s): 1.0 - x_sol.get((j, i), 0.0) - x_sol.get((k, s), 0.0)
-            for (i, j, k, s) in r3_keys
-        }
-    _add_indexed(f"u_r3{suffix}", f"v_r3{suffix}", r3_rhs)
 
     return expr

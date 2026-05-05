@@ -61,6 +61,7 @@ class OAPBendersModel(
         self.use_deepest_cuts: bool = False
         self.cut_weights_y: dict | None = None
         self.cut_weights_yp: dict | None = None
+        self.cgsp_norm: str = "misd"  # "misd" (uniform) | "relaxed_l1"
 
         # F2.4 — model caches for the CGSP separation LPs.  ``None`` means
         # "not yet built"; the first call to ``_build_cgsp_y(p)`` populates
@@ -102,6 +103,7 @@ class OAPBendersModel(
         use_deepest_cuts: bool = False,
         cut_weights_y: dict | None = None,
         cut_weights_yp: dict | None = None,
+        cgsp_norm: Literal["misd", "relaxed_l1"] = "misd",
         semiplane: Literal[0, 1] = 0,
         use_knapsack: bool = False,
         use_cliques: bool = False,
@@ -173,6 +175,7 @@ class OAPBendersModel(
         self.use_deepest_cuts = use_deepest_cuts
         self.cut_weights_y = cut_weights_y
         self.cut_weights_yp = cut_weights_yp
+        self.cgsp_norm = cgsp_norm
 
         # F2.5 — when using deepest cuts, default to Relaxed-ℓ₁ weights unless
         # the caller explicitly supplied weights or chose MISD.

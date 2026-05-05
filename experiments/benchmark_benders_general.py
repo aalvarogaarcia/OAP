@@ -320,13 +320,25 @@ def prompt_config() -> dict:
     ]
 
     # --- Step 3: method selection ---
+    # Use (label, value) tuples so the user sees a human-readable description
+    # in the checkbox while the stored value is the METHOD_CONFIG key.
+    _METHOD_LABELS: dict[str, str] = {
+        "farkas":       "farkas          — Benders Farkas (baseline)",
+        "cgsp_farkas":  "cgsp_farkas     — Deepest cuts via CGSP, Farkas-mode  (Hosseini & Turner §3)",
+        "cgsp_pi":      "cgsp_pi         — Deepest cuts via CGSP, Pi-mode",
+        "mw_lp":        "mw_lp           — Magnanti-Wong Pareto-optimal, core point = LP relax",
+        "mw_uniform":   "mw_uniform      — Magnanti-Wong Pareto-optimal, core point = uniform",
+        "ddma_farkas":  "ddma_farkas     — DDMA Algorithm 3, Farkas-mode  [Hosseini & Turner §4.1]",
+        "ddma_pi":      "ddma_pi         — DDMA Algorithm 3, Pi-mode      [Hosseini & Turner §4.1]",
+    }
+    method_choices = [(_METHOD_LABELS.get(m, m), m) for m in ALL_METHODS]
     method_answers = inquirer.prompt(
         [
             inquirer.Checkbox(
                 "methods",
-                message="Select methods to benchmark",
-                choices=ALL_METHODS,
-                default=ALL_METHODS,
+                message="Select cut strategies to benchmark  (space = toggle, enter = confirm)",
+                choices=method_choices,
+                default=[label for label, _ in method_choices],
             ),
         ]
     )
