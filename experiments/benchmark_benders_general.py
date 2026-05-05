@@ -91,6 +91,19 @@ METHOD_CONFIG: dict[str, dict] = {
         use_magnanti_wong=True,
         core_point_strategy="uniform",
     ),
+    # F3 — DDMA (Algorithm 3, Hosseini & Turner 2025 §4.1)
+    "ddma_farkas": dict(
+        benders_method="farkas",
+        use_deepest_cuts=False,
+        use_magnanti_wong=False,
+        use_ddma=True,
+    ),
+    "ddma_pi": dict(
+        benders_method="pi",
+        use_deepest_cuts=False,
+        use_magnanti_wong=False,
+        use_ddma=True,
+    ),
 }
 
 ALL_METHODS = list(METHOD_CONFIG.keys())
@@ -456,16 +469,17 @@ def write_report(
 
         # --- Method descriptions ---
         f.write("## Method Descriptions\n\n")
-        f.write("| Label | benders_method | use_deepest_cuts | use_magnanti_wong | core_point_strategy |\n")
-        f.write("|-------|---------------|-----------------|------------------|--------------------|\n")
+        f.write("| Label | benders_method | use_deepest_cuts | use_magnanti_wong | use_ddma | core_point_strategy |\n")
+        f.write("|-------|---------------|-----------------|------------------|----------|--------------------|\n")
         for label, kwargs in METHOD_CONFIG.items():
             if label not in methods:
                 continue
             bm = kwargs.get("benders_method", "—")
             dc = kwargs.get("use_deepest_cuts", False)
             mw = kwargs.get("use_magnanti_wong", False)
+            ddma = kwargs.get("use_ddma", False)
             cp = kwargs.get("core_point_strategy", "—")
-            f.write(f"| `{label}` | {bm} | {dc} | {mw} | {cp} |\n")
+            f.write(f"| `{label}` | {bm} | {dc} | {mw} | {ddma} | {cp} |\n")
         f.write("\n")
 
         # --- Raw results per instance ---

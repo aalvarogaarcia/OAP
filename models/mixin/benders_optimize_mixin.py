@@ -126,6 +126,7 @@ class BendersOptimizeMixin:
 
             use_deepest = getattr(self, "use_deepest_cuts", False)
             use_mw = getattr(self, "use_magnanti_wong", False)
+            use_ddma = getattr(self, "use_ddma", False)
 
             # 4. Análisis del Subproblema Y
             y_status = self.sub_y.Status
@@ -153,6 +154,14 @@ class BendersOptimizeMixin:
                     cut_expr_y, cut_rhs_y, _witness_y = self.get_cgsp_cut_y(x_sol, eta_sol=eta_sol, TOL=TOL)
                     if cut_expr_y is not None:
                         model.cbLazy(cut_expr_y <= cut_rhs_y)
+            elif use_ddma and (
+                y_status == GRB.INFEASIBLE
+                or (self.benders_method == "pi" and y_status == GRB.OPTIMAL and y_objval is not None and y_objval > TOL)
+            ):
+                # --- DDMA branch (F3) ---
+                cut_expr_y, cut_rhs_y, _witness_y = self.get_ddma_cut_y(x_sol, eta_sol=eta_sol, TOL=TOL)
+                if cut_expr_y is not None:
+                    model.cbLazy(cut_expr_y <= cut_rhs_y)
             elif use_mw and (
                 y_status == GRB.INFEASIBLE
                 or (self.benders_method == "pi" and y_status == GRB.OPTIMAL and y_objval is not None and y_objval > TOL)
@@ -207,6 +216,11 @@ class BendersOptimizeMixin:
             if use_deepest and _yp_violated:
                 # --- CGSP / deepest-cut branch ---
                 cut_expr_yp, cut_rhs_yp, _witness_yp = self.get_cgsp_cut_yp(x_sol, TOL=TOL)
+                if cut_expr_yp is not None:
+                    model.cbLazy(cut_expr_yp <= cut_rhs_yp)
+            elif use_ddma and _yp_violated:
+                # --- DDMA branch (F3) ---
+                cut_expr_yp, cut_rhs_yp, _witness_yp = self.get_ddma_cut_yp(x_sol, TOL=TOL)
                 if cut_expr_yp is not None:
                     model.cbLazy(cut_expr_yp <= cut_rhs_yp)
             elif use_mw and _yp_violated:
@@ -396,6 +410,7 @@ class BendersOptimizeMixin:
 
             use_deepest = getattr(self, "use_deepest_cuts", False)
             use_mw = getattr(self, "use_magnanti_wong", False)
+            use_ddma = getattr(self, "use_ddma", False)
 
             # --- Análisis del Subproblema Y ---
             lp_y_status = self.sub_y.Status
@@ -423,6 +438,15 @@ class BendersOptimizeMixin:
                 else:
                     converged_y = True
             elif use_deepest and not needs_cut_y:
+                converged_y = True
+            elif use_ddma and needs_cut_y:
+                # --- DDMA branch (F3) ---
+                cut_expr_y, cut_rhs_y, _witness_y = self.get_ddma_cut_y(x_sol, eta_sol=eta_sol, TOL=TOL)
+                if cut_expr_y is not None:
+                    self.model.addConstr(cut_expr_y <= cut_rhs_y, name=f"lp_ddma_y_{self.iteration}")
+                else:
+                    converged_y = True
+            elif use_ddma and not needs_cut_y:
                 converged_y = True
             elif use_mw and needs_cut_y:
                 # --- Magnanti-Wong branch ---
@@ -493,6 +517,15 @@ class BendersOptimizeMixin:
                 else:
                     converged_yp = True
             elif use_deepest and not needs_cut_yp:
+                converged_yp = True
+            elif use_ddma and needs_cut_yp:
+                # --- DDMA branch (F3) ---
+                cut_expr_yp, cut_rhs_yp, _witness_yp = self.get_ddma_cut_yp(x_sol, TOL=TOL)
+                if cut_expr_yp is not None:
+                    self.model.addConstr(cut_expr_yp <= cut_rhs_yp, name=f"lp_ddma_yp_{self.iteration}")
+                else:
+                    converged_yp = True
+            elif use_ddma and not needs_cut_yp:
                 converged_yp = True
             elif use_mw and needs_cut_yp:
                 # --- Magnanti-Wong branch ---
