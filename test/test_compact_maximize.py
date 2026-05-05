@@ -1,6 +1,7 @@
 import logging
 from pathlib import Path
 
+import gurobipy as gp
 import pandas as pd
 import pytest
 
@@ -54,8 +55,18 @@ def test_oap_compact_model_maximize(ref_data, caplog):
     # IMPORTANTE: maximize=True para este test
     modelo.build(objective="Internal", mode=0, maximize=True, subtour="SCF", sum_constrain=True) 
     
-    # Para los tests de CI/CD solemos poner un límite de tiempo más estricto
-    modelo.solve(time_limit=300, verbose=False)
+    # Para los tests de CI/CD solemos poner un límite de tiempo más estricto.
+    # Capturamos GurobiError de licencia (size-limited) y hacemos skip: esto
+    # ocurre en máquinas sin licencia académica completa cuando la instancia
+    # (n≥20) supera el límite de variables/restricciones de la licencia gratuita.
+    try:
+        modelo.solve(time_limit=300, verbose=False)
+    except gp.GurobiError as exc:
+        if "size-limited" in str(exc).lower() or "too large" in str(exc).lower():
+            pytest.skip(
+                f"Instance '{instance_name}' too large for Gurobi size-limited license: {exc}"
+            )
+        raise
 
     # --- ASSERT (Verificar) ---
     
