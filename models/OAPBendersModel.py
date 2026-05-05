@@ -8,6 +8,7 @@ from numpy.typing import NDArray
 
 from models.mixin.benders_analysis_mixin import BendersAnalysisMixin
 from models.mixin.benders_cgsp_mixin import BendersCGSPMixin
+from models.mixin.benders_ddma_mixin import BendersDDMAMixin
 from models.mixin.benders_farkas_mixin import BendersFarkasMixin
 from models.mixin.benders_master_mixin import BendersMasterMixin
 from models.mixin.benders_mw_mixin import BendersMagnantiWongMixin
@@ -23,8 +24,9 @@ logger = logging.getLogger(__name__)
 # ¡La herencia múltiple en todo su esplendor!
 class OAPBendersModel(
     BendersMasterMixin,
+    BendersDDMAMixin,            # F3 — before CGSP; shares sub_y/sub_yp
     BendersCGSPMixin,
-    BendersMagnantiWongMixin,   # after CGSP — shares dual variable structure
+    BendersMagnantiWongMixin,    # after CGSP — shares dual variable structure
     BendersFarkasMixin,
     BendersPiMixin,
     BendersOptimizeMixin,
@@ -68,6 +70,9 @@ class OAPBendersModel(
         self._cgsp_yp_cache: tuple | None = None
         self._cgsp_y_cache: tuple | None = None
 
+        # F3 — DDMA configuration (defaults off for backward compat)
+        self.use_ddma: bool = False
+
         # Magnanti-Wong (pareto-optimal cuts) — defaults to off
         self.use_magnanti_wong: bool = False
         self._core_point: dict | None = None
@@ -103,6 +108,7 @@ class OAPBendersModel(
         use_magnanti_wong: bool = False,
         core_point_strategy: Literal["lp_relaxation", "uniform"] = "lp_relaxation",
         cgsp_norm: Literal["misd", "relaxed_l1"] = "relaxed_l1",
+        use_ddma: bool = False,
     ) -> None:
         """
         Orquesta la construcción del Problema Maestro y de los Subproblemas.
@@ -153,9 +159,11 @@ class OAPBendersModel(
         logger.info(f"=== Construyendo OAPBendersModel ({benders_method.upper()}) ===")
 
         # Validate mutually exclusive options
-        if use_magnanti_wong and use_deepest_cuts:
+        n_methods = sum([use_deepest_cuts, use_magnanti_wong, use_ddma])
+        if n_methods > 1:
             raise ValueError(
-                "use_magnanti_wong and use_deepest_cuts are mutually exclusive."
+                "use_deepest_cuts, use_magnanti_wong, and use_ddma are mutually "
+                "exclusive — only one may be True at a time."
             )
 
         # Guardamos el método elegido para que el callback sepa qué cortes generar
@@ -215,5 +223,8 @@ class OAPBendersModel(
             self._core_point = self._compute_core_point(core_point_strategy)
         else:
             self._core_point = None
+
+        # F3 — DDMA configuration (after subproblems are built)
+        self.use_ddma = use_ddma
 
         logger.info("Construcción completada con éxito.")
