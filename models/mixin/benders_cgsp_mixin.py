@@ -218,6 +218,58 @@ class BendersCGSPMixin:
         return weights
 
     # ------------------------------------------------------------------
+    # F2.5 — Relaxed-ℓ₁ weight computation (column sums of |B|)
+    # ------------------------------------------------------------------
+
+    def _compute_relaxed_l1_weights(self, which: str) -> dict:
+        """Return Relaxed-ℓ₁ normalisation weights for CGSP cut generation.
+
+        The weights correspond to the row sums of the |B| matrix, i.e. the
+        number of x-variables that appear (with non-zero coefficient) in each
+        RHS expression b(x) of the subproblem constraints.  Constraints whose
+        RHS is constant (no x-dependence) receive weight 0.
+
+        Parameters
+        ----------
+        which : str
+            ``"y"``  → use ``self.constrs_y``   (Y-subproblem)
+            ``"yp"`` → use ``self.constrs_yp``  (Y′-subproblem)
+
+        Returns
+        -------
+        dict
+            Nested weight dict with the same structure expected by
+            ``_resolve_weights``.
+        """
+        if which == "yp":
+            constrs = self.constrs_yp
+            weights: dict = {
+                "alpha_p":  {arc: 1.0 for arc in constrs.get("alpha_p",  {})},
+                "beta_p":   {arc: 2.0 for arc in constrs.get("beta_p",   {})},
+                "gamma_p":  {arc: 1.0 for arc in constrs.get("gamma_p",  {})},
+                "delta_p":  {arc: 1.0 for arc in constrs.get("delta_p",  {})},
+                "global_p": 0.0,
+                "r1_p":     0.0,
+                "r2_p":     {k: 0.0 for k in constrs.get("r2_p", {})},
+                "r3_p":     {key: 2.0 for key in constrs.get("r3_p", {})},
+            }
+        else:
+            constrs = self.constrs_y
+            weights = {
+                "alpha":  {arc: 1.0 for arc in constrs.get("alpha",  {})},
+                "beta":   {arc: 2.0 for arc in constrs.get("beta",   {})},
+                "gamma":  {arc: 1.0 for arc in constrs.get("gamma",  {})},
+                "delta":  {arc: 1.0 for arc in constrs.get("delta",  {})},
+                "global": 0.0,
+                "r1":     0.0,
+                "r2":     {k: 0.0 for k in constrs.get("r2", {})},
+                "r3":     {key: 2.0 for key in constrs.get("r3", {})},
+            }
+        # Remove keys not present in constrs so _resolve_weights sees a clean dict
+        present = set(constrs.keys())
+        return {k: v for k, v in weights.items() if k in present or not isinstance(v, dict)}
+
+    # ------------------------------------------------------------------
     # B-1: Dual feasibility constraints  A^T π ≤ 0
     # ------------------------------------------------------------------
 
@@ -323,15 +375,175 @@ class BendersCGSPMixin:
                         expr -= v
 
             # r3[_p]: ≤ → -v_r3[key]
+            # F2.1 (audit §2.2): the primal r3 row sums y over BOTH triangle
+            # fans (adj(i,j) and adj(k,s)).  When a triangle t belongs to both
+            # fans the y_t coefficient in the row is 2, not 1.  The previous
+            # `or` test contributed -v_r3 once even in that case, producing an
+            # invalid dual feasibility constraint.  Count both indicators.
             for key in constrs.get(f"r3{suffix}", {}):
                 i, j, k, s = key
-                if t in _adj(i, j) or t in _adj(k, s):
+                coef = (1 if t in _adj(i, j) else 0) + (1 if t in _adj(k, s) else 0)
+                if coef:
                     v = pi_vars.get(f"v_r3{suffix}", {}).get(key)
                     if v is not None:
-                        expr -= v
+                        expr -= coef * v
 
             if expr.size() > 0:
                 cgsp.addConstr(expr <= 0.0, name=f"dual_feas{suffix}_t{t}")
+
+    # ------------------------------------------------------------------
+    # F2.4 — Objective recomputation (used by the CGSP-model cache)
+    # ------------------------------------------------------------------
+
+    def _compute_cgsp_objective(
+        self,
+        pi_vars: dict,
+        x_sol: dict[Arc, float],
+        which: str,  # "y" or "yp"
+        eta_sol: float = 0.0,
+    ) -> gp.LinExpr:
+        """Rebuild the CGSP objective  Σ_i π_i b_i(x_sol)  from a cached model.
+
+        Used both by the first-call build (so the same code path produces the
+        objective in both cases) and by every subsequent callback once the
+        CGSP skeleton is cached.  Skipping the variable/constraint rebuild
+        is what brings CGSP from >100x slower than Farkas down toward parity
+        — see audit §2.5 in
+        ``.claude/context/reviews/2026-05-04-cgsp-paper-dissonance.md``.
+
+        Notes
+        -----
+        Variables that exist only as ``u_*`` (e.g. gamma — the dual of a
+        ≥ constraint) contribute ``+rhs * u``; ``v_*``-only (e.g. delta —
+        the dual of a ≤ constraint) contribute ``-rhs * v``; both
+        present ⇒ ``+rhs * u - rhs * v`` (free dual).
+        """
+        obj = gp.LinExpr()
+        suffix = "_p" if which == "yp" else ""
+
+        def _addto(u_key: str, v_key: str, rhs_map: dict) -> None:
+            u_vars = pi_vars.get(u_key)
+            v_vars = pi_vars.get(v_key)
+            if u_vars is None and v_vars is None:
+                return
+            keys = (
+                u_vars.keys() if u_vars is not None else v_vars.keys()  # type: ignore[union-attr]
+            )
+            for k in keys:
+                rhs_k = rhs_map.get(k, 0.0)
+                if u_vars is not None:
+                    obj.addTerms([rhs_k], [u_vars[k]])  # type: ignore[index]
+                if v_vars is not None:
+                    obj.addTerms([-rhs_k], [v_vars[k]])  # type: ignore[index]
+
+        # alpha[_p]:  yp → 1 - x[i,j];   y → x[i,j]
+        a_keys = list(
+            (pi_vars.get(f"u_alpha{suffix}") or pi_vars.get(f"v_alpha{suffix}") or {}).keys()
+        )
+        if which == "yp":
+            a_rhs = {(i, j): 1.0 - x_sol.get((i, j), 0.0) for (i, j) in a_keys}
+        else:
+            a_rhs = {(i, j): x_sol.get((i, j), 0.0) for (i, j) in a_keys}
+        _addto(f"u_alpha{suffix}", f"v_alpha{suffix}", a_rhs)
+
+        # beta[_p]:  yp → x[j,i] - x[i,j];   y → x[i,j] - x[j,i]
+        b_keys = list(
+            (pi_vars.get(f"u_beta{suffix}") or pi_vars.get(f"v_beta{suffix}") or {}).keys()
+        )
+        if which == "yp":
+            b_rhs = {
+                (i, j): x_sol.get((j, i), 0.0) - x_sol.get((i, j), 0.0) for (i, j) in b_keys
+            }
+        else:
+            b_rhs = {
+                (i, j): x_sol.get((i, j), 0.0) - x_sol.get((j, i), 0.0) for (i, j) in b_keys
+            }
+        _addto(f"u_beta{suffix}", f"v_beta{suffix}", b_rhs)
+
+        # gamma[_p]: u-only.  yp → x[j,i];   y → x[i,j]
+        g_keys = list((pi_vars.get(f"u_gamma{suffix}") or {}).keys())
+        if which == "yp":
+            g_rhs = {(i, j): x_sol.get((j, i), 0.0) for (i, j) in g_keys}
+        else:
+            g_rhs = {(i, j): x_sol.get((i, j), 0.0) for (i, j) in g_keys}
+        _addto(f"u_gamma{suffix}", f"v_gamma{suffix}", g_rhs)
+
+        # delta[_p]: v-only.  yp → 1 - x[i,j];   y → 1 - x[j,i]
+        d_keys = list((pi_vars.get(f"v_delta{suffix}") or {}).keys())
+        if which == "yp":
+            d_rhs = {(i, j): 1.0 - x_sol.get((i, j), 0.0) for (i, j) in d_keys}
+        else:
+            d_rhs = {(i, j): 1.0 - x_sol.get((j, i), 0.0) for (i, j) in d_keys}
+        _addto(f"u_delta{suffix}", f"v_delta{suffix}", d_rhs)
+
+        # global[_p]: scalar, RHS taken from the primal constraint
+        constrs = self.constrs_yp if which == "yp" else self.constrs_y
+        g_constr = constrs.get(f"global{suffix}")
+        if g_constr is not None and hasattr(g_constr, "RHS"):
+            rhs_val = float(g_constr.RHS)
+            u_gl = pi_vars.get(f"u_global{suffix}")
+            v_gl = pi_vars.get(f"v_global{suffix}")
+            if isinstance(u_gl, gp.Var):
+                obj.addTerms([rhs_val], [u_gl])
+            if isinstance(v_gl, gp.Var):
+                obj.addTerms([-rhs_val], [v_gl])
+
+        # r1[_p]: scalar, constant RHS = convex_hull_area
+        u_r1 = pi_vars.get(f"u_r1{suffix}")
+        v_r1 = pi_vars.get(f"v_r1{suffix}")
+        if isinstance(u_r1, gp.Var):
+            obj.addTerms([float(self.convex_hull_area)], [u_r1])
+        if isinstance(v_r1, gp.Var):
+            obj.addTerms([-float(self.convex_hull_area)], [v_r1])
+
+        # r2[_p]: indexed, constant RHS = 1
+        r2_keys = list(
+            (pi_vars.get(f"u_r2{suffix}") or pi_vars.get(f"v_r2{suffix}") or {}).keys()
+        )
+        r2_rhs = {k: 1.0 for k in r2_keys}
+        _addto(f"u_r2{suffix}", f"v_r2{suffix}", r2_rhs)
+
+        # r3[_p]: indexed, x-dependent RHS
+        r3_keys = list(
+            (pi_vars.get(f"u_r3{suffix}") or pi_vars.get(f"v_r3{suffix}") or {}).keys()
+        )
+        if which == "yp":
+            r3_rhs = {
+                (i, j, k, s): 1.0 - x_sol.get((i, j), 0.0) - x_sol.get((s, k), 0.0)
+                for (i, j, k, s) in r3_keys
+            }
+        else:
+            r3_rhs = {
+                (i, j, k, s): 1.0 - x_sol.get((j, i), 0.0) - x_sol.get((k, s), 0.0)
+                for (i, j, k, s) in r3_keys
+            }
+        _addto(f"u_r3{suffix}", f"v_r3{suffix}", r3_rhs)
+
+        # π₀ for "Internal" objective on Y
+        if which == "y" and getattr(self, "objective", "Fekete") == "Internal":
+            pi0_pos = pi_vars.get("pi0_pos")
+            pi0_neg = pi_vars.get("pi0_neg")
+            cost_x: dict = getattr(self, "_cost_x", {})
+            f_dot_x = sum(cost_x.get(arc, 0.0) * x_sol.get(arc, 0.0) for arc in cost_x)
+            pi0_contribution = f_dot_x - eta_sol
+            if isinstance(pi0_pos, gp.Var):
+                obj.addTerms([pi0_contribution], [pi0_pos])
+            if isinstance(pi0_neg, gp.Var):
+                obj.addTerms([-pi0_contribution], [pi0_neg])
+
+        return obj
+
+    def invalidate_cgsp_cache(self) -> None:
+        """Drop the cached CGSP skeletons so the next call rebuilds from scratch.
+
+        Call this if the primal subproblem structure changes (e.g. dynamic
+        addition of strengthening constraints during the solve, or rebuilding
+        the master / subproblems with different parameters).  In normal
+        Benders flow this is not needed because constraint families are
+        fixed at build time.
+        """
+        self._cgsp_yp_cache = None
+        self._cgsp_y_cache = None
 
     # ------------------------------------------------------------------
     # Task 5: _build_cgsp_yp — dual LP for Y' (external triangulation)
@@ -376,6 +588,20 @@ class BendersCGSPMixin:
             The dict also contains 'u_<name>' and 'v_<name>' keys for the
             positive/negative parts if needed.
         """
+        # F2.4 — fast path: reuse the cached skeleton (variables + dual
+        # feasibility constraints + L₁ normalisation), only re-set the
+        # objective.  All structure-only data (instance triangulation,
+        # constraint RHS for constant rows) is fixed once the model is built,
+        # so the only x_sol-dependent quantity is the objective coefficient
+        # vector.
+        cache = getattr(self, "_cgsp_yp_cache", None)
+        if cache is not None:
+            cgsp, pi_vars = cache
+            obj_expr = self._compute_cgsp_objective(pi_vars, x_sol, "yp")
+            cgsp.setObjective(obj_expr, GRB.MAXIMIZE)
+            cgsp.update()
+            return cgsp, pi_vars
+
         cgsp = gp.Model("cgsp_yp")
         cgsp.setParam("OutputFlag", 0)
         cgsp.setParam("InfUnbdInfo", 1)
@@ -514,8 +740,18 @@ class BendersCGSPMixin:
             cgsp.addConstr(norm_expr == 1.0, name="l1_norm")
 
         # ---- Objective: maximise violation ----
+        # F2.4 — replace the obj_expr we accumulated incrementally with the
+        # canonical one produced by ``_compute_cgsp_objective``.  The two
+        # expressions are mathematically identical for the first call, but
+        # using the helper here means the cache-hit path on subsequent calls
+        # produces a bit-identical objective and we don't have two parallel
+        # implementations of the coefficient formulas.
+        obj_expr = self._compute_cgsp_objective(pi_vars, x_sol, "yp")
         cgsp.setObjective(obj_expr, GRB.MAXIMIZE)
         cgsp.update()
+
+        # Cache the skeleton + pi_vars so subsequent callbacks reuse them.
+        self._cgsp_yp_cache = (cgsp, pi_vars)
 
         return cgsp, pi_vars
 
@@ -552,6 +788,19 @@ class BendersCGSPMixin:
         """
         is_internal = (getattr(self, "objective", "Fekete") == "Internal")
         include_pi0 = is_internal
+
+        # F2.4 — cache fast path; symmetric to ``_build_cgsp_yp``.  The π₀
+        # variable is recovered from pi_vars under the "pi0_pos" key (since
+        # it is just the positive part of the free π₀).
+        cache = getattr(self, "_cgsp_y_cache", None)
+        if cache is not None:
+            cgsp, pi_vars, pi0_var = cache
+            obj_expr = self._compute_cgsp_objective(
+                pi_vars, x_sol, "y", eta_sol=eta_sol,
+            )
+            cgsp.setObjective(obj_expr, GRB.MAXIMIZE)
+            cgsp.update()
+            return cgsp, pi_vars, pi0_var
 
         cgsp = gp.Model("cgsp_y")
         cgsp.setParam("OutputFlag", 0)
@@ -704,11 +953,264 @@ class BendersCGSPMixin:
         if all_vars:
             cgsp.addConstr(norm_expr == 1.0, name="l1_norm")
 
+        # F2.4 — replace the obj_expr we accumulated incrementally with the
+        # canonical one produced by ``_compute_cgsp_objective`` so that both
+        # the first build and every cache-hit path produce a bit-identical
+        # objective.
+        obj_expr = self._compute_cgsp_objective(pi_vars, x_sol, "y", eta_sol=eta_sol)
+
         # ---- Objective ----
         cgsp.setObjective(obj_expr, GRB.MAXIMIZE)
         cgsp.update()
 
+        # F2.4 — cache the skeleton + π₀ ref so subsequent callbacks reuse it.
+        self._cgsp_y_cache = (cgsp, pi_vars, pi0_var)
+
         return cgsp, pi_vars, pi0_var
+
+    # ------------------------------------------------------------------
+    # F2.2 — Cut reconstruction helpers (shared between CGSP and MW)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _net_pi(
+        pi_vars: dict,
+        u_key: str,
+        v_key: str,
+        TOL: float = _CGSP_TOL,
+    ) -> dict:
+        """Return the net dual values π = u - v for one constraint group.
+
+        The sign convention for the split (π = u - v with u, v ≥ 0) is:
+          • equality constraint ⇒ π is free  ⇒ both u and v exist.
+          • ≥ constraint        ⇒ π ≥ 0      ⇒ only u exists.
+          • ≤ constraint        ⇒ π ≤ 0      ⇒ only v exists, and π = -v.
+
+        ``pi_vars`` may contain a single ``gp.Var`` (scalar dual) or a
+        ``gp.tupledict`` keyed by the constraint index.
+
+        Returns a dict whose keys are the constraint-group indices (or the
+        sentinel ``"scalar"`` for a single-row group), filtered to entries
+        with absolute value strictly above TOL.
+        """
+        out: dict = {}
+        u_vars = pi_vars.get(u_key)
+        v_vars = pi_vars.get(v_key)
+        if u_vars is None and v_vars is None:
+            return out
+        if isinstance(u_vars, gp.Var) or isinstance(v_vars, gp.Var):
+            u_val = u_vars.X if isinstance(u_vars, gp.Var) else 0.0  # type: ignore[union-attr]
+            v_val = v_vars.X if isinstance(v_vars, gp.Var) else 0.0  # type: ignore[union-attr]
+            val = u_val - v_val
+            if abs(val) > TOL:
+                out["scalar"] = val
+        else:
+            keys = (
+                u_vars.keys() if u_vars is not None else v_vars.keys()  # type: ignore[union-attr]
+            )
+            for k in keys:
+                u_val = u_vars[k].X if u_vars is not None else 0.0  # type: ignore[index]
+                v_val = v_vars[k].X if v_vars is not None else 0.0  # type: ignore[index]
+                val = u_val - v_val
+                if abs(val) > TOL:
+                    out[k] = val
+        return out
+
+    def _reconstruct_cut_from_pi(
+        self,
+        pi_vars: dict,
+        x_sol: dict[Arc, float],
+        which: str,  # "y" or "yp"
+        eta_sol: float = 0.0,
+        pi0_var: gp.Var | None = None,
+        TOL: float = _CGSP_TOL,
+    ) -> tuple[gp.LinExpr, float, dict] | tuple[None, None, dict]:
+        """Reconstruct the Benders cut from already-solved CGSP / MW pi_vars.
+
+        Mathematics
+        -----------
+        The CGSP guarantees that, at optimum,  Σ_i π_i b_i(x_bar) > 0,
+        i.e. the master point  x_bar  violates the cut
+
+            Σ_i π_i b_i(x) ≤ 0.                                       (★)
+
+        Decompose each row's RHS as  b_i(x) = b_i^const + B_i · x.  Then
+        (★) is equivalent to
+
+            (Σ_i π_i B_i) · x   ≤   -Σ_i π_i b_i^const.
+
+        We accumulate the *linear* part on ``cut_expr`` and the *constant*
+        part on ``cut_rhs`` explicitly (F2.6 — previously the constants from
+        groups with x-dependent RHS lived inside the LinExpr and relied on
+        Gurobi's auto-move of LinExpr constants on ``addConstr``).
+
+        For "Internal" objective with a non-zero π₀:
+            π₀ · η  ≥  Σ_i π_i b_i(x)
+        rearranges to (cut_expr / π₀) - η ≤ -(Σ π_i b_i^const) / π₀.
+
+        Parameters
+        ----------
+        pi_vars : dict
+            Mapping ``u_<group> | v_<group>`` → ``gp.Var | gp.tupledict``,
+            populated by ``_build_cgsp_y(p)`` *after* the LP has been
+            solved (so that ``.X`` is available).
+        x_sol : dict[Arc, float]
+            Current master solution (only used to populate the witness;
+            the cut itself is in master variable *symbols* ``self.x``).
+        which : "y" | "yp"
+            Selects the constraint families and their RHS templates.
+        eta_sol : float
+            Current η value (ignored unless ``pi0_var`` is non-null).
+        pi0_var : gp.Var | None
+            The π₀_pos variable (the secondary LP returns it for the Y
+            subproblem when ``objective == "Internal"``).
+        TOL : float
+            Numerical zero threshold.
+
+        Returns
+        -------
+        Same triple contract as ``get_cgsp_cut_yp`` /
+        ``get_cgsp_cut_y`` — see those functions' docstrings.
+        """
+        cut_expr = gp.LinExpr()
+        cut_rhs = 0.0
+        witness: dict = {}
+
+        suffix = "_p" if which == "yp" else ""
+        is_internal = (getattr(self, "objective", "Fekete") == "Internal")
+
+        # Determine if this should be an optimality cut (Y, Internal, π₀ ≠ 0)
+        is_optimality_cut = False
+        pi0_net = 0.0
+        if which == "y" and is_internal and pi0_var is not None:
+            pi0_neg_var = pi_vars.get("pi0_neg")
+            pi0_net = pi0_var.X - (pi0_neg_var.X if pi0_neg_var is not None else 0.0)
+            if abs(pi0_net) > TOL:
+                is_optimality_cut = True
+                witness["pi0"] = pi0_net
+
+        # ----------------------------------------------------------------
+        # alpha[_p]:  b = ±x_arc + (0 or 1)
+        #   y   →  b_α(x) = x[i,j]              (const=0, B = +1·x[i,j])
+        #   yp  →  b_α'(x) = 1 - x[i,j]         (const=1, B = -1·x[i,j])
+        # ----------------------------------------------------------------
+        a_net = self._net_pi(pi_vars, f"u_alpha{suffix}", f"v_alpha{suffix}", TOL)
+        if a_net:
+            witness[f"alpha{suffix}"] = a_net
+            for (i, j), pi_val in a_net.items():
+                if which == "yp":
+                    cut_expr += -pi_val * self.x[i, j]
+                    cut_rhs += -pi_val * 1.0
+                else:
+                    cut_expr += pi_val * self.x[i, j]
+
+        # ----------------------------------------------------------------
+        # beta[_p]:  b is purely x-dependent (const = 0)
+        #   y   →  b_β(x) = x[i,j] - x[j,i]
+        #   yp  →  b_β'(x) = x[j,i] - x[i,j]
+        # ----------------------------------------------------------------
+        b_net = self._net_pi(pi_vars, f"u_beta{suffix}", f"v_beta{suffix}", TOL)
+        if b_net:
+            witness[f"beta{suffix}"] = b_net
+            for (i, j), pi_val in b_net.items():
+                if which == "yp":
+                    cut_expr += pi_val * (self.x[j, i] - self.x[i, j])
+                else:
+                    cut_expr += pi_val * (self.x[i, j] - self.x[j, i])
+
+        # ----------------------------------------------------------------
+        # gamma[_p]:  b is purely x-dependent (const = 0)
+        #   y   →  b_γ(x) = x[i,j]
+        #   yp  →  b_γ'(x) = x[j,i]
+        # γ is the dual of a ≥ constraint, so only u_γ exists in pi_vars.
+        # ----------------------------------------------------------------
+        g_net = self._net_pi(pi_vars, f"u_gamma{suffix}", f"v_gamma{suffix}", TOL)
+        if g_net:
+            witness[f"gamma{suffix}"] = g_net
+            for (i, j), pi_val in g_net.items():
+                if which == "yp":
+                    cut_expr += pi_val * self.x[j, i]
+                else:
+                    cut_expr += pi_val * self.x[i, j]
+
+        # ----------------------------------------------------------------
+        # delta[_p]: const = 1, B = -1·x_arc
+        #   y   →  b_δ(x)  = 1 - x[j,i]
+        #   yp  →  b_δ'(x) = 1 - x[i,j]
+        # δ is the dual of a ≤ constraint, so only v_δ exists; the helper
+        # already maps v-only to π = -v.
+        # ----------------------------------------------------------------
+        d_net = self._net_pi(pi_vars, f"u_delta{suffix}", f"v_delta{suffix}", TOL)
+        if d_net:
+            witness[f"delta{suffix}"] = d_net
+            for (i, j), pi_val in d_net.items():
+                if which == "yp":
+                    cut_expr += -pi_val * self.x[i, j]
+                else:
+                    cut_expr += -pi_val * self.x[j, i]
+                cut_rhs += -pi_val * 1.0
+
+        # ----------------------------------------------------------------
+        # Constant-RHS groups: global, r1, r2 — pure cut_rhs contributions.
+        # ----------------------------------------------------------------
+        gl_net = self._net_pi(pi_vars, f"u_global{suffix}", f"v_global{suffix}", TOL)
+        if gl_net and "scalar" in gl_net:
+            pi_val = gl_net["scalar"]
+            constrs = self.constrs_yp if which == "yp" else self.constrs_y
+            rhs_val = constrs[f"global{suffix}"].RHS
+            cut_rhs += -pi_val * rhs_val
+            witness[f"global{suffix}"] = pi_val
+
+        r1_net = self._net_pi(pi_vars, f"u_r1{suffix}", f"v_r1{suffix}", TOL)
+        if r1_net and "scalar" in r1_net:
+            pi_val = r1_net["scalar"]
+            cut_rhs += -pi_val * self.convex_hull_area
+            witness[f"r1{suffix}"] = pi_val
+
+        r2_net = self._net_pi(pi_vars, f"u_r2{suffix}", f"v_r2{suffix}", TOL)
+        if r2_net:
+            witness[f"r2{suffix}"] = r2_net
+            for _k, pi_val in r2_net.items():
+                cut_rhs += -pi_val * 1.0
+
+        # ----------------------------------------------------------------
+        # r3[_p]: const = 1, B = -x_arc1 - x_arc2.
+        #   y   →  b_r3(x)  = 1 - x[j,i] - x[k,s]
+        #   yp  →  b_r3'(x) = 1 - x[i,j] - x[s,k]
+        # ----------------------------------------------------------------
+        r3_net = self._net_pi(pi_vars, f"u_r3{suffix}", f"v_r3{suffix}", TOL)
+        if r3_net:
+            witness[f"r3{suffix}"] = r3_net
+            for (i, j, k, s), pi_val in r3_net.items():
+                if which == "yp":
+                    cut_expr += -pi_val * (self.x[i, j] + self.x[s, k])
+                else:
+                    cut_expr += -pi_val * (self.x[j, i] + self.x[k, s])
+                cut_rhs += -pi_val * 1.0
+
+        # ----------------------------------------------------------------
+        # Optimality cut for Y under "Internal" objective.
+        # ----------------------------------------------------------------
+        if is_optimality_cut and which == "y" and is_internal:
+            if pi0_net < -TOL:
+                logger.warning(
+                    "CGSP-Y: pi0_net=%.3e < -TOL; skipping cut "
+                    "(numerical sign anomaly).",
+                    pi0_net,
+                )
+                return None, None, {"aborted": "pi0_negative", "pi0_net": pi0_net}
+            if pi0_net > TOL:
+                # Cut form: π₀·η ≥ cut_expr - cut_rhs
+                # → (cut_expr - cut_rhs) / π₀ ≤ η
+                # → (cut_expr / π₀) - η ≤ cut_rhs / π₀
+                scale = 1.0 / pi0_net
+                scaled_expr = scale * cut_expr - self.eta
+                scaled_rhs = cut_rhs * scale
+                witness["is_optimality_cut"] = True
+                return scaled_expr, scaled_rhs, witness
+            # |pi0_net| ≤ TOL → fall through and emit a feasibility cut.
+
+        return cut_expr, cut_rhs, witness
 
     # ------------------------------------------------------------------
     # Task 8: Public entry points
@@ -744,10 +1246,6 @@ class BendersCGSPMixin:
         cgsp, pi_vars = self._build_cgsp_yp(x_sol, TOL=TOL)
         cgsp.optimize()
 
-        cut_expr = gp.LinExpr()
-        cut_rhs = 0.0
-        witness: dict = {}
-
         if cgsp.Status not in (GRB.OPTIMAL, GRB.SUBOPTIMAL):
             logger.warning("CGSP (Y') did not solve to optimality (status=%d).", cgsp.Status)
             return None, None, {"aborted": "solve_failed", "status": cgsp.Status}
@@ -756,96 +1254,12 @@ class BendersCGSPMixin:
             # No violated cut found
             return None, None, {"aborted": "no_violation"}
 
-        # ---- Reconstruct the Benders cut in the master variable space ----
-        # The cut is: Σ_i π_i * (b_i(x) - 0) ≤ 0  ↔  Σ_i π_i * b_i(x) ≤ 0
-        # where b_i(x) is the i-th RHS expressed as a linear function of x.
-
-        # Helper: retrieve net dual value for a variable group.
-        # Supports one-sided vars (only u or only v present):
-        #   u only  → π = +u   (constraint was ≥, dual ≥ 0)
-        #   v only  → π = -v   (constraint was ≤, dual ≤ 0)
-        #   both    → π = u - v (free dual, = constraint)
-        def _net(u_key: str, v_key: str) -> dict:
-            out: dict = {}
-            u_vars = pi_vars.get(u_key)
-            v_vars = pi_vars.get(v_key)
-            if u_vars is None and v_vars is None:
-                return out
-            if isinstance(u_vars, gp.Var) or isinstance(v_vars, gp.Var):
-                u_val = u_vars.X if isinstance(u_vars, gp.Var) else 0.0  # type: ignore[union-attr]
-                v_val = v_vars.X if isinstance(v_vars, gp.Var) else 0.0  # type: ignore[union-attr]
-                val = u_val - v_val
-                if abs(val) > TOL:
-                    out["scalar"] = val
-            else:
-                keys = u_vars.keys() if u_vars is not None else v_vars.keys()  # type: ignore[union-attr]
-                for k in keys:
-                    u_val = u_vars[k].X if u_vars is not None else 0.0  # type: ignore[index]
-                    v_val = v_vars[k].X if v_vars is not None else 0.0  # type: ignore[index]
-                    val = u_val - v_val
-                    if abs(val) > TOL:
-                        out[k] = val
-            return out
-
-        # alpha_p: RHS = 1 - x[i,j]  → contribution = π * (1 - x[i,j])
-        ap_net = _net("u_alpha_p", "v_alpha_p")
-        if ap_net:
-            witness["alpha_p"] = ap_net
-            for (i, j), pi_val in ap_net.items():
-                cut_expr += pi_val * (1.0 - self.x[i, j])
-                # cut_rhs stays 0 (accumulated in cut_expr)
-
-        # beta_p: RHS = x[j,i] - x[i,j]  → contribution = π * (x[j,i] - x[i,j])
-        bp_net = _net("u_beta_p", "v_beta_p")
-        if bp_net:
-            witness["beta_p"] = bp_net
-            for (i, j), pi_val in bp_net.items():
-                cut_expr += pi_val * (self.x[j, i] - self.x[i, j])
-
-        # gamma_p: RHS = x[j,i]  → contribution = π * x[j,i]
-        gp_net = _net("u_gamma_p", "v_gamma_p")
-        if gp_net:
-            witness["gamma_p"] = gp_net
-            for (i, j), pi_val in gp_net.items():
-                cut_expr += pi_val * self.x[j, i]
-
-        # delta_p: RHS = 1 - x[i,j]  → contribution = π * (1 - x[i,j])
-        dp_net = _net("u_delta_p", "v_delta_p")
-        if dp_net:
-            witness["delta_p"] = dp_net
-            for (i, j), pi_val in dp_net.items():
-                cut_expr += pi_val * (1.0 - self.x[i, j])
-
-        # global_p: RHS = N - |CH|  (constant — move to right-hand side)
-        gl_net = _net("u_global_p", "v_global_p")
-        if gl_net and "scalar" in gl_net:
-            pi_val = gl_net["scalar"]
-            rhs_val = self.constrs_yp["global_p"].RHS
-            cut_rhs -= pi_val * rhs_val
-            witness["global_p"] = pi_val
-
-        # r1_p: area balance (constant RHS = CH_area)
-        r1_net = _net("u_r1_p", "v_r1_p")
-        if r1_net and "scalar" in r1_net:
-            pi_val = r1_net["scalar"]
-            cut_rhs -= pi_val * self.convex_hull_area
-            witness["r1_p"] = pi_val
-
-        # r2_p: arc coverage (constant RHS = 1)
-        r2_net = _net("u_r2_p", "v_r2_p")
-        if r2_net:
-            witness["r2_p"] = r2_net
-            for _k, pi_val in r2_net.items():
-                cut_rhs -= pi_val * 1.0
-
-        # r3_p: crossing exclusion — RHS = 1 - x[i,j] - x[s,k]
-        r3_net = _net("u_r3_p", "v_r3_p")
-        if r3_net:
-            witness["r3_p"] = r3_net
-            for (i, j, k, s), pi_val in r3_net.items():
-                cut_expr += pi_val * (1.0 - self.x[i, j] - self.x[s, k])
-
-        return cut_expr, cut_rhs, witness
+        # F2.2: cut reconstruction lives in _reconstruct_cut_from_pi so the
+        # MW mixin can reuse it on the secondary LP's solution rather than
+        # re-running CGSP from scratch.
+        return self._reconstruct_cut_from_pi(
+            pi_vars, x_sol, which="yp", TOL=TOL,
+        )
 
     def get_cgsp_cut_y(
         self,
@@ -885,10 +1299,6 @@ class BendersCGSPMixin:
         cgsp, pi_vars, pi0_var = self._build_cgsp_y(x_sol, eta_sol=eta_sol, TOL=TOL)
         cgsp.optimize()
 
-        cut_expr = gp.LinExpr()
-        cut_rhs = 0.0
-        witness: dict = {}
-
         if cgsp.Status not in (GRB.OPTIMAL, GRB.SUBOPTIMAL):
             logger.warning("CGSP (Y) did not solve to optimality (status=%d).", cgsp.Status)
             return None, None, {"aborted": "solve_failed", "status": cgsp.Status}
@@ -897,122 +1307,12 @@ class BendersCGSPMixin:
             # No violated cut
             return None, None, {"aborted": "no_violation"}
 
-        def _net(u_key: str, v_key: str) -> dict:
-            out: dict = {}
-            u_vars = pi_vars.get(u_key)
-            v_vars = pi_vars.get(v_key)
-            if u_vars is None and v_vars is None:
-                return out
-            if isinstance(u_vars, gp.Var) or isinstance(v_vars, gp.Var):
-                u_val = u_vars.X if isinstance(u_vars, gp.Var) else 0.0  # type: ignore[union-attr]
-                v_val = v_vars.X if isinstance(v_vars, gp.Var) else 0.0  # type: ignore[union-attr]
-                val = u_val - v_val
-                if abs(val) > TOL:
-                    out["scalar"] = val
-            else:
-                keys = u_vars.keys() if u_vars is not None else v_vars.keys()  # type: ignore[union-attr]
-                for k in keys:
-                    u_val = u_vars[k].X if u_vars is not None else 0.0  # type: ignore[index]
-                    v_val = v_vars[k].X if v_vars is not None else 0.0  # type: ignore[index]
-                    val = u_val - v_val
-                    if abs(val) > TOL:
-                        out[k] = val
-            return out
-
-        is_internal = (getattr(self, "objective", "Fekete") == "Internal")
-
-        # Determine if this is an optimality cut
-        is_optimality_cut = False
-        if is_internal and pi0_var is not None:
-            pi0_neg_var = pi_vars.get("pi0_neg")
-            pi0_net = pi0_var.X - (pi0_neg_var.X if pi0_neg_var is not None else 0.0)
-            if abs(pi0_net) > TOL:
-                is_optimality_cut = True
-                witness["pi0"] = pi0_net
-        else:
-            pi0_net = 0.0
-
-        # alpha: RHS = x[i,j]
-        a_net = _net("u_alpha", "v_alpha")
-        if a_net:
-            witness["alpha"] = a_net
-            for (i, j), pi_val in a_net.items():
-                cut_expr += pi_val * self.x[i, j]
-
-        # beta: RHS = x[i,j] - x[j,i]
-        b_net = _net("u_beta", "v_beta")
-        if b_net:
-            witness["beta"] = b_net
-            for (i, j), pi_val in b_net.items():
-                cut_expr += pi_val * (self.x[i, j] - self.x[j, i])
-
-        # gamma: RHS = x[i,j]
-        g_net = _net("u_gamma", "v_gamma")
-        if g_net:
-            witness["gamma"] = g_net
-            for (i, j), pi_val in g_net.items():
-                cut_expr += pi_val * self.x[i, j]
-
-        # delta: RHS = 1 - x[j,i]
-        d_net = _net("u_delta", "v_delta")
-        if d_net:
-            witness["delta"] = d_net
-            for (i, j), pi_val in d_net.items():
-                cut_expr += pi_val * (1.0 - self.x[j, i])
-
-        # global: RHS = N - 2 (constant)
-        gl_net = _net("u_global", "v_global")
-        if gl_net and "scalar" in gl_net:
-            pi_val = gl_net["scalar"]
-            rhs_val = self.constrs_y["global"].RHS
-            cut_rhs -= pi_val * rhs_val
-            witness["global"] = pi_val
-
-        # r1: area balance (constant RHS = CH_area)
-        r1_net = _net("u_r1", "v_r1")
-        if r1_net and "scalar" in r1_net:
-            pi_val = r1_net["scalar"]
-            cut_rhs -= pi_val * self.convex_hull_area
-            witness["r1"] = pi_val
-
-        # r2: arc coverage (constant RHS = 1)
-        r2_net = _net("u_r2", "v_r2")
-        if r2_net:
-            witness["r2"] = r2_net
-            for _k, pi_val in r2_net.items():
-                cut_rhs -= pi_val * 1.0
-
-        # r3: crossing exclusion — RHS = 1 - x[j,i] - x[k,s]
-        r3_net = _net("u_r3", "v_r3")
-        if r3_net:
-            witness["r3"] = r3_net
-            for (i, j, k, s), pi_val in r3_net.items():
-                cut_expr += pi_val * (1.0 - self.x[j, i] - self.x[k, s])
-
-        # For Internal optimality cuts: η ≥ cut_expr - cut_rhs_const
-        # Cut form: π₀ η ≥ π^T b(x) - π^T B x  →  if π₀ > 0: η ≥ (π^T b - π^T B x) / π₀
-        # We return the normalised form: cut_expr (involving x and eta) and cut_rhs
-        if is_optimality_cut and is_internal:
-            if pi0_net < -TOL:
-                # Pathological dual: π₀ < 0 would invert the cut direction.
-                # Refuse to emit a cut this iteration.
-                logger.warning(
-                    "CGSP-Y: pi0_net=%.3e < -TOL; skipping cut "
-                    "(numerical sign anomaly).",
-                    pi0_net,
-                )
-                return None, None, {"aborted": "pi0_negative", "pi0_net": pi0_net}
-            if pi0_net > TOL:
-                # Optimality cut. Scale by 1/pi0_net to get standard form:
-                #   eta >= (cut_expr - cut_rhs) / pi0_net
-                # Rearranged: (cut_expr / pi0_net) - eta <= cut_rhs / pi0_net
-                # Return as: scaled_expr <= scaled_rhs  where
-                #   scaled_expr = cut_expr * (1/pi0_net) - eta
-                scale = 1.0 / pi0_net
-                scaled_expr = scale * cut_expr - self.eta  # gp.LinExpr supports * float
-                scaled_rhs = cut_rhs * scale
-                witness["is_optimality_cut"] = True
-                return scaled_expr, scaled_rhs, witness
-            # |pi0_net| <= TOL → fall through to feasibility-cut return below.
-
-        return cut_expr, cut_rhs, witness
+        # F2.2: delegate to the shared reconstructor; π₀ handling lives there.
+        return self._reconstruct_cut_from_pi(
+            pi_vars,
+            x_sol,
+            which="y",
+            eta_sol=eta_sol,
+            pi0_var=pi0_var,
+            TOL=TOL,
+        )

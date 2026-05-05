@@ -60,6 +60,14 @@ class OAPBendersModel(
         self.cut_weights_y: dict | None = None
         self.cut_weights_yp: dict | None = None
 
+        # F2.4 — model caches for the CGSP separation LPs.  ``None`` means
+        # "not yet built"; the first call to ``_build_cgsp_y(p)`` populates
+        # these and every subsequent call only re-sets the objective.  See
+        # BendersCGSPMixin._compute_cgsp_objective and
+        # BendersCGSPMixin.invalidate_cgsp_cache.
+        self._cgsp_yp_cache: tuple | None = None
+        self._cgsp_y_cache: tuple | None = None
+
         # Magnanti-Wong (pareto-optimal cuts) — defaults to off
         self.use_magnanti_wong: bool = False
         self._core_point: dict | None = None
@@ -94,6 +102,7 @@ class OAPBendersModel(
         use_cliques: bool = False,
         use_magnanti_wong: bool = False,
         core_point_strategy: Literal["lp_relaxation", "uniform"] = "lp_relaxation",
+        cgsp_norm: Literal["misd", "relaxed_l1"] = "relaxed_l1",
     ) -> None:
         """
         Orquesta la construcción del Problema Maestro y de los Subproblemas.
@@ -128,6 +137,12 @@ class OAPBendersModel(
             Strategy to compute x^0 used in Magnanti-Wong:
             - 'lp_relaxation': solve master LP once at build time (accurate).
             - 'uniform': x^0 = 1/N for all arcs (zero cost, less accurate).
+        cgsp_norm : Literal["misd", "relaxed_l1"], default "relaxed_l1"
+            Normalisation scheme for CGSP deepest-cut weights (F2.5).
+            - 'relaxed_l1': column sums of |B| (Hosseini & Turner 2025 §3.3.2).
+              Applied automatically when use_deepest_cuts=True and no explicit
+              cut_weights_y/yp are supplied.
+            - 'misd': unit weights (original MISD behaviour, all weights = 1).
 
         Notes
         -----
@@ -150,6 +165,16 @@ class OAPBendersModel(
         self.use_deepest_cuts = use_deepest_cuts
         self.cut_weights_y = cut_weights_y
         self.cut_weights_yp = cut_weights_yp
+
+        # F2.5 — when using deepest cuts, default to Relaxed-ℓ₁ weights unless
+        # the caller explicitly supplied weights or chose MISD.
+        if use_deepest_cuts and cgsp_norm == "relaxed_l1" and cut_weights_y is None and cut_weights_yp is None:
+            # _compute_relaxed_l1_weights requires constrs_y/yp to exist, so it
+            # must be called AFTER build_farkas/pi_subproblems below.  Store the
+            # strategy string and apply it after step 2.
+            self._pending_cgsp_norm = "relaxed_l1"
+        else:
+            self._pending_cgsp_norm = None
 
         # 1. Construir el Maestro (Viene de BendersMasterMixin)
         self.build_master(
@@ -174,6 +199,14 @@ class OAPBendersModel(
             )
         else:
             raise ValueError(f"Método de Benders desconocido: {benders_method}")
+
+        # F2.5 — apply Relaxed-ℓ₁ weights now that constrs_y/yp are populated
+        if getattr(self, "_pending_cgsp_norm", None) == "relaxed_l1":
+            self.cut_weights_y = self._compute_relaxed_l1_weights("y")
+            self.cut_weights_yp = self._compute_relaxed_l1_weights("yp")
+            # Invalidate any cached CGSP model so it is rebuilt with new weights
+            self.invalidate_cgsp_cache()
+            self._pending_cgsp_norm = None
 
         # Magnanti-Wong core point (must be after subproblems + master are built)
         self.use_magnanti_wong = use_magnanti_wong
