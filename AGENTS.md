@@ -75,13 +75,25 @@ from models import OAPCompactModel, OAPBendersModel   # only public import path
 ```
 
 Both inherit from `OAPBaseModel(OAPStatsMixin)`.  
-`OAPBendersModel` also inherits five mixins (MRO order matters):
+`OAPBendersModel` also inherits eight mixins (MRO order matters):
 ```
 OAPBendersModel(
-    BendersMasterMixin, BendersFarkasMixin, BendersPiMixin,
-    BendersOptimizeMixin, BendersAnalysisMixin, OAPBaseModel
+    BendersMasterMixin,
+    BendersDDMAMixin,         # DDMA Algorithm 3 (Hosseini & Turner 2025 §4.1)
+    BendersCGSPMixin,         # Deepest cuts via CGSP normalised LP
+    BendersMagnantiWongMixin, # Magnanti-Wong Pareto-optimal cuts
+    BendersFarkasMixin,
+    BendersPiMixin,
+    BendersOptimizeMixin,
+    BendersAnalysisMixin,
+    OAPBaseModel
 )
 ```
+
+Mixin responsibilities:
+- `BendersDDMAMixin` — implements Algorithm 3 from Hosseini & Turner (2025). No auxiliary LP; perturbs RHS iteratively to generate deepest cuts.
+- `BendersCGSPMixin` — deepest cuts via a normalised separation LP (CGSP). Relaxed-ℓ₁ weights by default; caches the Gurobi model across callbacks.
+- `BendersMagnantiWongMixin` — secondary LP to select the cut with maximum core-point depth (Magnanti-Wong Pareto-optimal cuts).
 
 ### Standard workflow (always this order)
 
@@ -140,14 +152,61 @@ model.build(
     mode: int = 0,
     maximize: bool = True,
     benders_method: Literal["farkas", "pi"] = "farkas",
+    subtour: Literal["SCF", "DFJ"] = "SCF",
     sum_constrain: bool = True,
     crosses_constrain: bool = False,
-)
+    strengthen: bool = False,
+    plot_strengthen: bool = False,
+    use_deepest_cuts: bool = False,       # CGSP deepest cuts
+    cut_weights_y: dict | None = None,    # custom L₁ weights for Y
+    cut_weights_yp: dict | None = None,   # custom L₁ weights for Y'
+    semiplane: Literal[0, 1] = 0,
+    use_knapsack: bool = False,
+    use_cliques: bool = False,
+    use_magnanti_wong: bool = False,      # Magnanti-Wong cuts
+    core_point_strategy: Literal["lp_relaxation", "uniform"] = "lp_relaxation",
+    cgsp_norm: Literal["misd", "relaxed_l1"] = "relaxed_l1",
+    use_ddma: bool = False,               # DDMA Algorithm 3
+) -> None
+```
+
+**Mutual exclusivity:** `use_deepest_cuts`, `use_magnanti_wong`, and `use_ddma` are mutually exclusive — at most one may be `True` at a time.
+
+```python
 model.solve(time_limit=7200, verbose=False, relaxed=False,
             save_cuts=False, polihedral=False)
 model.set_log_path(path)   # override default outputs/Others/Benders/{name}/log.json
 model.solve_lp_relaxation(time_limit, verbose)   # standalone LP solve
 ```
+
+---
+
+## Benchmark
+
+`experiments/benchmark_benders_general.py` compares all seven cut strategies across instances.
+
+**Available methods:** `farkas`, `cgsp_farkas`, `cgsp_pi`, `mw_lp`, `mw_uniform`, `ddma_farkas`, `ddma_pi`
+
+```bash
+# Interactive (inquirer prompts with descriptive labels for each method)
+.venv/bin/python experiments/benchmark_benders_general.py
+
+# Headless from JSON config
+.venv/bin/python experiments/benchmark_benders_general.py --config experiments/configs/general_all7_n20.json
+
+# Quick smoke-test (little-instances/, 60s, all methods)
+.venv/bin/python experiments/benchmark_benders_general.py --smoke-test
+```
+
+Pre-built configs in `experiments/configs/`:
+
+| File | Description |
+|---|---|
+| `general_all7_n10_n15.json` | 12 instances n=10,15, all 7 methods |
+| `general_all7_n20.json` | 6 instances n=20, all 7 methods |
+| `general_ddma_only_n20.json` | farkas + ddma_farkas + ddma_pi only |
+
+---
 
 ### `main.py` CLI integer codes (different from model string keys)
 

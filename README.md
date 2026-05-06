@@ -34,6 +34,9 @@ To improve scalability and modularity, the formulation is decomposed via `OAPBen
 - **Master problem** over global combinatorial edge-selection decisions (`mixin/benders_master_mixin.py`),
 - **Feasibility subproblem** generating Farkas-ray cuts (`mixin/benders_farkas_mixin.py`),
 - **Optimality subproblem** generating π-based cuts (`mixin/benders_pi_mixin.py`),
+- **DDMA deepest cuts** — Algorithm 3 from Hosseini & Turner (2025), RHS perturbation, no auxiliary LP (`mixin/benders_ddma_mixin.py`),
+- **CGSP deepest cuts** — normalised separation LP with relaxed-ℓ₁ weights and model caching (`mixin/benders_cgsp_mixin.py`),
+- **Magnanti-Wong Pareto-optimal cuts** — secondary LP selecting maximum core-point depth (`mixin/benders_mw_mixin.py`),
 - **Solve-loop orchestration** and LP-relaxation warmstart (`mixin/benders_optimize_mixin.py`),
 - **Post-solve diagnostics** (`mixin/benders_analysis_mixin.py`).
 
@@ -62,6 +65,9 @@ OAP_NextGen/
 │       ├── benders_master_mixin.py    – master problem setup
 │       ├── benders_farkas_mixin.py    – Farkas feasibility cuts
 │       ├── benders_pi_mixin.py        – π-based optimality cuts
+│       ├── benders_ddma_mixin.py      – DDMA Algorithm 3 deepest cuts (Hosseini & Turner 2025 §4.1)
+│       ├── benders_cgsp_mixin.py      – CGSP normalised-LP deepest cuts with model caching
+│       ├── benders_mw_mixin.py        – Magnanti-Wong Pareto-optimal cut selection
 │       ├── benders_optimize_mixin.py  – solve-loop orchestration
 │       └── benders_analysis_mixin.py  – post-solve diagnostics
 ├── utils/
@@ -79,12 +85,21 @@ OAP_NextGen/
 │   ├── benders_analysis.py    – cut-pattern analysis
 │   ├── run_batch_analysis.py  – batch experiment runner
 │   └── umap_benders_analysis.py – UMAP dimensionality reduction
+├── experiments/
+│   ├── benchmark_benders_general.py  – general benchmark (all 7 cut strategies)
+│   └── configs/
+│       ├── general_all7_n10_n15.json – 12 instances n=10,15, all 7 methods
+│       ├── general_all7_n20.json     – 6 instances n=20, all 7 methods
+│       └── general_ddma_only_n20.json – farkas + ddma variants only
 ├── test/
 │   ├── __init__.py
 │   ├── test_compact_minimize.py
 │   ├── test_compact_maximize.py
 │   ├── test_benders.py
 │   ├── test_bendersv2.py
+│   ├── test_ddma.py                  – DDMA cut validity and equivalence tests
+│   ├── test_cgsp_validity.py         – CGSP cut validity tests
+│   ├── test_cross_model_equivalence.py – cross-variant IP/LP equivalence (6 variants)
 │   └── TablaResultadosA4.tsv  – reference results for parametric tests
 ├── instance/                  – problem instances (git-ignored)
 └── outputs/                   – solver output files (git-ignored)

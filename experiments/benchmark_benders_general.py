@@ -91,6 +91,19 @@ METHOD_CONFIG: dict[str, dict] = {
         use_magnanti_wong=True,
         core_point_strategy="uniform",
     ),
+    # F3 — DDMA (Algorithm 3, Hosseini & Turner 2025 §4.1)
+    "ddma_farkas": dict(
+        benders_method="farkas",
+        use_deepest_cuts=False,
+        use_magnanti_wong=False,
+        use_ddma=True,
+    ),
+    "ddma_pi": dict(
+        benders_method="pi",
+        use_deepest_cuts=False,
+        use_magnanti_wong=False,
+        use_ddma=True,
+    ),
 }
 
 ALL_METHODS = list(METHOD_CONFIG.keys())
@@ -142,6 +155,22 @@ def get_system_info() -> dict:
 # ---------------------------------------------------------------------------
 # Solver
 # ---------------------------------------------------------------------------
+
+def _safe_round(value, ndigits: int):
+    """Round numeric values; pass through anything else (None, "-", strings) as None.
+
+    F1.2 (audit ref. .claude/context/reviews/2026-05-04-cgsp-paper-dissonance.md §2.4):
+    ``OAPStatsMixin.get_model_stats`` returns the literal string ``"-"`` when
+    the manual LP-relaxation Benders loop fails to converge (or when SolCount
+    is zero).  The previous implementation called ``round("-", 4)`` which
+    raised ``TypeError: type str doesn't define __round__ method`` and made
+    the whole method appear ``FAILED`` in the report — masking the real
+    diagnostic, which is LP non-convergence inside CGSP.
+    """
+    if isinstance(value, (int, float)):
+        return round(value, ndigits)
+    return None
+
 
 def run_single_solve(
     instance_path: str,
@@ -205,18 +234,28 @@ def run_single_solve(
 
         row.update(
             {
-                "root_lp": round(lp, 4) if lp is not None else None,
-                "final_ip": round(ip, 4) if ip is not None else None,
-                "gap_pct": round(gap, 4) if gap is not None else None,
-                "time_s": round(time_s, 2) if time_s is not None else None,
-                "nodes": int(nodes) if nodes is not None else None,
+                "root_lp": _safe_round(lp, 4),
+                "final_ip": _safe_round(ip, 4),
+                "gap_pct": _safe_round(gap, 4),
+                "time_s": _safe_round(time_s, 2),
+                "nodes": int(nodes) if isinstance(nodes, (int, float)) else None,
                 "status": "OK",
             }
         )
 
     except Exception as exc:
-        logger.error("  FAILED [%s] %s: %s", method, stem, exc)
-        row["status"] = f"FAILED: {str(exc)[:80]}"
+        # F1.3 — emit the full traceback so failures don't get truncated to a
+        # single line; without this the only diagnostic in the benchmark log is
+        # ``FAILED: <type>: <first 80 chars>``, which is what hid the real
+        # ``round("-")`` origin of the previous run.
+        import traceback
+        logger.error(
+            "  FAILED [%s] %s\n%s",
+            method,
+            stem,
+            traceback.format_exc(),
+        )
+        row["status"] = f"FAILED: {type(exc).__name__}: {str(exc)[:80]}"
 
     return row
 
@@ -281,13 +320,25 @@ def prompt_config() -> dict:
     ]
 
     # --- Step 3: method selection ---
+    # Use (label, value) tuples so the user sees a human-readable description
+    # in the checkbox while the stored value is the METHOD_CONFIG key.
+    _METHOD_LABELS: dict[str, str] = {
+        "farkas":       "farkas          — Benders Farkas (baseline)",
+        "cgsp_farkas":  "cgsp_farkas     — Deepest cuts via CGSP, Farkas-mode  (Hosseini & Turner §3)",
+        "cgsp_pi":      "cgsp_pi         — Deepest cuts via CGSP, Pi-mode",
+        "mw_lp":        "mw_lp           — Magnanti-Wong Pareto-optimal, core point = LP relax",
+        "mw_uniform":   "mw_uniform      — Magnanti-Wong Pareto-optimal, core point = uniform",
+        "ddma_farkas":  "ddma_farkas     — DDMA Algorithm 3, Farkas-mode  [Hosseini & Turner §4.1]",
+        "ddma_pi":      "ddma_pi         — DDMA Algorithm 3, Pi-mode      [Hosseini & Turner §4.1]",
+    }
+    method_choices = [(_METHOD_LABELS.get(m, m), m) for m in ALL_METHODS]
     method_answers = inquirer.prompt(
         [
             inquirer.Checkbox(
                 "methods",
-                message="Select methods to benchmark",
-                choices=ALL_METHODS,
-                default=ALL_METHODS,
+                message="Select cut strategies to benchmark  (space = toggle, enter = confirm)",
+                choices=method_choices,
+                default=[label for label, _ in method_choices],
             ),
         ]
     )
@@ -430,16 +481,17 @@ def write_report(
 
         # --- Method descriptions ---
         f.write("## Method Descriptions\n\n")
-        f.write("| Label | benders_method | use_deepest_cuts | use_magnanti_wong | core_point_strategy |\n")
-        f.write("|-------|---------------|-----------------|------------------|--------------------|\n")
+        f.write("| Label | benders_method | use_deepest_cuts | use_magnanti_wong | use_ddma | core_point_strategy |\n")
+        f.write("|-------|---------------|-----------------|------------------|----------|--------------------|\n")
         for label, kwargs in METHOD_CONFIG.items():
             if label not in methods:
                 continue
             bm = kwargs.get("benders_method", "—")
             dc = kwargs.get("use_deepest_cuts", False)
             mw = kwargs.get("use_magnanti_wong", False)
+            ddma = kwargs.get("use_ddma", False)
             cp = kwargs.get("core_point_strategy", "—")
-            f.write(f"| `{label}` | {bm} | {dc} | {mw} | {cp} |\n")
+            f.write(f"| `{label}` | {bm} | {dc} | {mw} | {ddma} | {cp} |\n")
         f.write("\n")
 
         # --- Raw results per instance ---

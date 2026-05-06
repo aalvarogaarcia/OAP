@@ -66,7 +66,7 @@ class BendersMagnantiWongMixin:
             n = getattr(self, "N", None)
             if n is None or n == 0:
                 return {}
-            return {arc: 1.0 / n for arc in getattr(self, "_x", {})}
+            return {arc: 1.0 / n for arc in getattr(self, "x", {})}
 
         # 'lp_relaxation'
         try:
@@ -76,7 +76,7 @@ class BendersMagnantiWongMixin:
             lp.optimize()
             if lp.Status == GRB.OPTIMAL:
                 result: dict = {}
-                for arc in getattr(self, "_x", {}):
+                for arc in getattr(self, "x", {}):
                     v = lp.getVarByName(f"x_{arc[0]}_{arc[1]}")
                     if v is not None:
                         result[arc] = v.X
@@ -102,6 +102,7 @@ class BendersMagnantiWongMixin:
         q_opt: float,
         which: str,  # "y" or "yp"
         TOL: float = _MW_TOL,
+        add_pareto: bool = True,
     ) -> "tuple[gp.Model, dict, gp.LinExpr, gp.LinExpr] | tuple[None, None, None, None]":
         """Build the Magnanti-Wong secondary LP for subproblem Y or Y'.
 
@@ -109,7 +110,9 @@ class BendersMagnantiWongMixin:
         ------------
             max  π^T b(x^0)              [maximise at core point]
             s.t. A^T π ≤ 0               [dual feasibility — from CGSP B-1]
-                 π^T b(x_bar) = q_opt    [Pareto constraint]
+                 π^T b(x_bar) = q_opt    [Pareto constraint — omitted when
+                                          add_pareto=False, i.e. subproblem
+                                          was infeasible (Papadakos §3.3.3)]
                  Σ w|π| = 1              [L₁ normalisation]
 
         Returns
@@ -126,18 +129,11 @@ class BendersMagnantiWongMixin:
         try:
             if which == "yp":
                 mw, pi_vars = self._build_cgsp_yp(x_sol)  # type: ignore[attr-defined]
-                _cgsp_obj_expr_at_x0, pi_vars_x0 = _recompute_obj_at(
-                    pi_vars, core_point, which, self  # type: ignore[arg-type]
-                )
-                # Pareto constraint: π^T b(x_bar) = q_opt
-                # The CGSP was built with objective = π^T b(x_bar).
-                # We need that as an equality constraint.
-                # Re-derive the x_bar objective from pi_vars.
                 x_bar_expr = _recompute_obj_at_x(pi_vars, x_sol, which, self)  # type: ignore[arg-type]
                 if x_bar_expr is None:
                     return None, None, None, None
-                mw.addConstr(x_bar_expr == q_opt, name="mw_pareto")
-                # Replace objective: maximise at core point x^0
+                if add_pareto:
+                    mw.addConstr(x_bar_expr == q_opt, name="mw_pareto")
                 x0_expr = _recompute_obj_at_x(pi_vars, core_point, which, self)  # type: ignore[arg-type]
                 if x0_expr is None:
                     return None, None, None, None
@@ -149,7 +145,8 @@ class BendersMagnantiWongMixin:
                 x_bar_expr = _recompute_obj_at_x(pi_vars, x_sol, which, self)  # type: ignore[arg-type]
                 if x_bar_expr is None:
                     return None, None, None, None
-                mw.addConstr(x_bar_expr == q_opt, name="mw_pareto")
+                if add_pareto:
+                    mw.addConstr(x_bar_expr == q_opt, name="mw_pareto")
                 x0_expr = _recompute_obj_at_x(pi_vars, core_point, which, self)  # type: ignore[arg-type]
                 if x0_expr is None:
                     return None, None, None, None
@@ -185,13 +182,15 @@ class BendersMagnantiWongMixin:
         yp_status = sub_yp.Status
         if yp_status == GRB.OPTIMAL:
             q_opt = sub_yp.ObjVal
+            add_pareto = True
         elif yp_status == GRB.INFEASIBLE:
             q_opt = 0.0
+            add_pareto = False  # Papadakos §3.3.3: skip Pareto constraint for infeasibility cuts
         else:
             return None, None, {"aborted": f"sub_yp_status_{yp_status}"}
 
         mw, pi_vars, _x0_expr, _xbar_expr = self._build_mw_secondary_lp(
-            x_sol, q_opt, which="yp", TOL=TOL
+            x_sol, q_opt, which="yp", TOL=TOL, add_pareto=add_pareto
         )
         if mw is None:
             return None, None, {"aborted": "build_failed"}
@@ -206,10 +205,13 @@ class BendersMagnantiWongMixin:
         if mw.ObjVal <= TOL:
             return None, None, {"aborted": "no_violation"}
 
-        # Reconstruct cut from the optimal pi — reuse CGSP cut reconstruction
-        # by passing the solved model's pi_vars to get_cgsp_cut_yp
+        # Reconstruct cut from the optimal pi_vars of the MW secondary LP.
+        # This is correct Magnanti-Wong: we use the π★ that maximises at x^0
+        # subject to the Pareto constraint, NOT a fresh CGSP solve.
         try:
-            cut_expr, cut_rhs, witness = self.get_cgsp_cut_yp(x_sol, TOL=TOL)  # type: ignore[attr-defined]
+            cut_expr, cut_rhs, witness = self._reconstruct_cut_from_pi(  # type: ignore[attr-defined]
+                pi_vars, which="yp", TOL=TOL
+            )
             witness["mw"] = True
             return cut_expr, cut_rhs, witness
         except Exception as exc:  # noqa: BLE001
@@ -232,13 +234,15 @@ class BendersMagnantiWongMixin:
         y_status = sub_y.Status
         if y_status == GRB.OPTIMAL:
             q_opt = sub_y.ObjVal
+            add_pareto = True
         elif y_status == GRB.INFEASIBLE:
             q_opt = 0.0
+            add_pareto = False  # Papadakos §3.3.3: skip Pareto constraint for infeasibility cuts
         else:
             return None, None, {"aborted": f"sub_y_status_{y_status}"}
 
         mw, pi_vars, _x0_expr, _xbar_expr = self._build_mw_secondary_lp(
-            x_sol, q_opt, which="y", TOL=TOL
+            x_sol, q_opt, which="y", TOL=TOL, add_pareto=add_pareto
         )
         if mw is None:
             return None, None, {"aborted": "build_failed"}
@@ -254,7 +258,9 @@ class BendersMagnantiWongMixin:
             return None, None, {"aborted": "no_violation"}
 
         try:
-            cut_expr, cut_rhs, witness = self.get_cgsp_cut_y(x_sol, TOL=TOL)  # type: ignore[attr-defined]
+            cut_expr, cut_rhs, witness = self._reconstruct_cut_from_pi(  # type: ignore[attr-defined]
+                pi_vars, which="y", TOL=TOL
+            )
             witness["mw"] = True
             return cut_expr, cut_rhs, witness
         except Exception as exc:  # noqa: BLE001
