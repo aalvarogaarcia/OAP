@@ -103,7 +103,6 @@ class OAPBendersModel(
         use_deepest_cuts: bool = False,
         cut_weights_y: dict | None = None,
         cut_weights_yp: dict | None = None,
-        cgsp_norm: Literal["misd", "relaxed_l1"] = "misd",
         semiplane: Literal[0, 1] = 0,
         use_knapsack: bool = False,
         use_cliques: bool = False,
