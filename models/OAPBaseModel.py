@@ -21,12 +21,12 @@ class OAPBaseModel(OAPStatsMixin):
         # Todo lo que es común a ambos modelos
         self.points = points
         self.triangles = triangles
-        self.triangles_adj_list = triangles_adjacency_list(triangles, points)
+        self.triangles_adj_list = triangles_adjacency_list(triangles, points)  # type: ignore[arg-type]
         self.N_list = range(len(points))
         self.N = len(points)
-        self.CH = compute_convex_hull(points)
+        self.CH = compute_convex_hull(points)  # type: ignore[arg-type]
         self.V_list = range(len(triangles))
-        self.convex_hull_area = compute_convex_hull_area(points)
+        self.convex_hull_area = compute_convex_hull_area(points)  # type: ignore[arg-type]
 
         # El modelo principal (Para Compacto es el modelo entero, para Benders es el Master)
         self.name = name

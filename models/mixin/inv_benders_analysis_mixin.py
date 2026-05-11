@@ -71,7 +71,7 @@ class InvBendersAnalysisMixin:
                 plt.figure(figsize=(10, 8))
                 plot_farkas_ray_network(
                     log_entry,
-                    points=self.points,
+                    points=self.points,  # type: ignore[arg-type]
                     save_path=None,
                     show_plot=False,
                 )

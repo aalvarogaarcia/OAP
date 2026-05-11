@@ -58,7 +58,7 @@ def _eval_cut(cut_expr: gp.LinExpr, x_sol: dict[str, Any]) -> float:
         if name.startswith("x_"):
             parts = name.split("_")
             arc = (int(parts[1]), int(parts[2]))
-            val += coef * x_sol.get(arc, 0.0)
+            val += coef * x_sol.get(arc, 0.0)  # type: ignore[call-overload]
     return val
 
 
@@ -111,7 +111,7 @@ def test_ddma_cut_validity(instance):  # type: ignore[no-untyped-def]
     i.e. the current master solution actually violates the cut.
     """
     name, points, triangles = instance
-    m = _build_ddma_model(points, triangles, f"DDMA_valid_{name}")
+    m = _build_ddma_model(points, triangles, f"DDMA_valid_{name}")  # type: ignore[no-untyped-call]
 
     # Use the LP relaxation solution as a synthetic x̄
     # (it may violate the subproblem feasibility)
@@ -170,7 +170,7 @@ def test_ddma_ip_equals_farkas(instance, maximize: bool) -> None:  # type: ignor
     assert expected is not None
 
     # DDMA
-    m_ddma = _build_ddma_model(points, triangles, f"DDMA_IP_{name}_{direction}")
+    m_ddma = _build_ddma_model(points, triangles, f"DDMA_IP_{name}_{direction}")  # type: ignore[no-untyped-call]
     m_ddma.build.__func__  # silence; model was already built above
     # Rebuild with maximize setting:
     m_ddma2 = OAPBendersModel(points, triangles, name=f"DDMA2_IP_{name}_{direction}")
@@ -243,7 +243,7 @@ def test_ddma_early_termination_valid(instance):  # type: ignore[no-untyped-def]
     cut that is violated at x̄ (Remark 6 in Hosseini & Turner 2025).
     """
     name, points, triangles = instance
-    m = _build_ddma_model(points, triangles, f"DDMA_early_{name}")
+    m = _build_ddma_model(points, triangles, f"DDMA_early_{name}")  # type: ignore[no-untyped-call]
 
     x_sol = {arc: 1.0 / m.N for arc in m.x.keys()}
     m._update_subproblem_rhs(x_sol)
@@ -276,7 +276,7 @@ def test_ddma_no_cut_on_feasible(instance):  # type: ignore[no-untyped-def]
     emit a cut (no violation → correct convergence signal).
     """
     name, points, triangles = instance
-    m = _build_ddma_model(points, triangles, f"DDMA_nofeas_{name}")
+    m = _build_ddma_model(points, triangles, f"DDMA_nofeas_{name}")  # type: ignore[no-untyped-call]
 
     # Use actual optimal integer solution (if model reaches OPTIMAL)
     m_ref = OAPBendersModel(points, triangles, name=f"Ref_{name}")

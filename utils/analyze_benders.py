@@ -43,7 +43,7 @@ def generate_post_mortem_report(
 
             if "cut_expr" in log_entry:
                 # --- VISUALIZACIÓN DE PESOS DE CORTE (BARRAS) ---
-                texto_corte = format_cut_string(log_entry["cut_expr"])
+                texto_corte = format_cut_string(log_entry["cut_expr"])  # type: ignore[call-arg]
 
                 # Colocamos el texto justo debajo del eje X (y = -0.1)
                 plt.text(

@@ -91,7 +91,7 @@ def read_indexed_instance(filepath: str) -> NDArray[np.int64]:
 def compute_convex_hull(points: NDArray[np.int64]) -> NDArray[np.int64]:
     """Return the indices of convex-hull vertices (scipy ordering)."""
     hull = ConvexHull(points)
-    return hull.vertices
+    return hull.vertices  # type: ignore[no-any-return]
 
 
 def compute_convex_hull_area(points: NDArray[np.int64]) -> float:
@@ -163,7 +163,7 @@ def signed_area(
     p3: NDArray[np.int64],
 ) -> float:
     """Signed area of triangle *p1 p2 p3* (positive = CCW)."""
-    return 0.5 * ((p2[0] - p1[0]) * (p3[1] - p1[1]) - (p2[1] - p1[1]) * (p3[0] - p1[0]))
+    return 0.5 * ((p2[0] - p1[0]) * (p3[1] - p1[1]) - (p2[1] - p1[1]) * (p3[0] - p1[0]))  # type: ignore[no-any-return]
 
 
 def is_colineal(
@@ -172,7 +172,7 @@ def is_colineal(
     p3: NDArray[np.int64],
 ) -> bool:
     """Return ``True`` if *p1*, *p2*, *p3* are collinear."""
-    return (p2[1] - p1[1]) * (p3[0] - p2[0]) == (p3[1] - p2[1]) * (p2[0] - p1[0])
+    return (p2[1] - p1[1]) * (p3[0] - p2[0]) == (p3[1] - p2[1]) * (p2[0] - p1[0])  # type: ignore[no-any-return]
 
 
 def segments_intersect(
@@ -191,7 +191,7 @@ def segments_intersect(
         B: NDArray[np.int64],
         C: NDArray[np.int64],
     ) -> np.bool_:
-        return (C[1] - A[1]) * (B[0] - A[0]) > (B[1] - A[1]) * (C[0] - A[0])
+        return (C[1] - A[1]) * (B[0] - A[0]) > (B[1] - A[1]) * (C[0] - A[0])  # type: ignore[no-any-return]
 
     if np.array_equal(p1, p3) or np.array_equal(p1, p4) or np.array_equal(p2, p3) or np.array_equal(p2, p4):
         return False

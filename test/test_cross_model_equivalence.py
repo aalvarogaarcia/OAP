@@ -127,7 +127,7 @@ def test_ip_equivalence(instance, variant: BendersVariant, maximize: bool) -> No
         triangles,
         name=f"Compact_IP_{instance_name}_{objective}_{direction}",
     )
-    compact.build(objective=objective, maximize=maximize)
+    compact.build(objective=objective, maximize=maximize)  # type: ignore[arg-type]
     compact.solve(time_limit=300, verbose=False)
 
     if compact.model.Status != gp.GRB.OPTIMAL:
@@ -141,9 +141,9 @@ def test_ip_equivalence(instance, variant: BendersVariant, maximize: bool) -> No
         name=f"Benders_IP_{instance_name}_{objective}_{direction}_{variant.label}",
     )
     benders.build(
-        objective=objective,
+        objective=objective,  # type: ignore[arg-type]
         maximize=maximize,
-        benders_method=variant.method,
+        benders_method=variant.method,  # type: ignore[arg-type]
         **variant.extra_kwargs,
     )
     benders.solve(time_limit=300, verbose=False)
@@ -181,7 +181,7 @@ def test_lp_equivalence(instance, variant: BendersVariant, maximize: bool) -> No
         triangles,
         name=f"Compact_LP_{instance_name}_{objective}_{direction}",
     )
-    compact.build(objective=objective, maximize=maximize)
+    compact.build(objective=objective, maximize=maximize)  # type: ignore[arg-type]
     compact.solve(time_limit=120, verbose=False, relaxed=True)
     lp_compact = compact.get_objval_lp()
 
@@ -195,9 +195,9 @@ def test_lp_equivalence(instance, variant: BendersVariant, maximize: bool) -> No
         name=f"Benders_LP_{instance_name}_{objective}_{direction}_{variant.label}",
     )
     benders.build(
-        objective=objective,
+        objective=objective,  # type: ignore[arg-type]
         maximize=maximize,
-        benders_method=variant.method,
+        benders_method=variant.method,  # type: ignore[arg-type]
         **variant.extra_kwargs,
     )
     benders.solve(time_limit=120, verbose=False, relaxed=True)
@@ -253,8 +253,8 @@ def test_benders_variant_parity(instance, maximize: bool) -> None:  # type: igno
         m.build(
             objective="Fekete",
             maximize=maximize,
-            benders_method=benders_method,
-            **extra_kwargs,
+            benders_method=benders_method,  # type: ignore[arg-type]
+            **extra_kwargs,  # type: ignore[arg-type]
         )
         m.solve(time_limit=TIME_LIMIT, verbose=False)
         if m.model.Status == gp.GRB.OPTIMAL:

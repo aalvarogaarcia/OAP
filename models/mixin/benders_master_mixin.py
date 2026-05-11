@@ -94,7 +94,7 @@ class BendersMasterMixin:
     def _add_variables_master(self, objective: Literal["Fekete", "Internal"]) -> None:
         """Método auxiliar para añadir variables al maestro (si es necesario)."""
         self.x = {
-            (i, j): self.model.addVar(vtype=GRB.BINARY, name=f"x_{i}_{j}")
+            (i, j): self.model.addVar(vtype=GRB.BINARY, name=f"x_{i}_{j}")  # type: ignore[misc]
             for i in self.N_list
             for j in self.N_list
             if i != j
@@ -104,7 +104,7 @@ class BendersMasterMixin:
         # Con DFJ el maestro no lleva variables auxiliares de flujo.
         if getattr(self, "_subtour_method", "SCF") == "SCF":
             self.f = {
-                (i, j): self.model.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"f_{i}_{j}")
+                (i, j): self.model.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"f_{i}_{j}")  # type: ignore[misc]
                 for i in self.N_list
                 for j in self.N_list
                 if i != j
@@ -123,28 +123,30 @@ class BendersMasterMixin:
                 if i == 0 and j == len(self.CH) - 1:
                     continue
                 for var_dict in [self.x, self.f]:
-                    if (self.CH[i], self.CH[j]) in var_dict:
-                        self.model.remove(var_dict[self.CH[i], self.CH[j]])
-                        self.model.remove(var_dict[self.CH[j], self.CH[i]])
-                        var_dict.pop((self.CH[i], self.CH[j]), None)
-                        var_dict.pop((self.CH[j], self.CH[i]), None)
+                    if (self.CH[i], self.CH[j]) in var_dict:  # type: ignore[comparison-overlap]
+                        self.model.remove(var_dict[self.CH[i], self.CH[j]])  # type: ignore[index]
+                        self.model.remove(var_dict[self.CH[j], self.CH[i]])  # type: ignore[index]
+                        var_dict.pop((self.CH[i], self.CH[j]), None)  # type: ignore[call-overload]
+                        var_dict.pop((self.CH[j], self.CH[i]), None)  # type: ignore[call-overload]
 
             j = (i + 1) % len(self.CH)
             for var_dict in [self.x, self.f]:
-                if (self.CH[j], self.CH[i]) in var_dict:
-                    self.model.remove(var_dict[self.CH[j], self.CH[i]])
-                    var_dict.pop((self.CH[j], self.CH[i]), None)
+                if (self.CH[j], self.CH[i]) in var_dict:  # type: ignore[comparison-overlap]
+                    self.model.remove(var_dict[self.CH[j], self.CH[i]])  # type: ignore[index]
+                    var_dict.pop((self.CH[j], self.CH[i]), None)  # type: ignore[call-overload]
 
-    def _add_function_objective_master(self, objective: Literal["Fekete", "Internal"], mode: int, maximize: bool) -> None:
+    def _add_function_objective_master(
+        self, objective: Literal["Fekete", "Internal"], mode: int, maximize: bool
+    ) -> None:
         """Método auxiliar para configurar la función objetivo del maestro."""
         opt_sense = GRB.MAXIMIZE if maximize else GRB.MINIMIZE
         # Always compute and cache the per-arc area coefficient even for
         # "Internal" — it is needed by the CGSP-Y optimality cut as f in
         # f^T x̄.
-        self._cost_x = cost_function_area(self.points, self.x.keys(), mode=mode)
+        self._cost_x = cost_function_area(self.points, self.x.keys(), mode=mode)  # type: ignore[arg-type]
         if objective == "Fekete":
             self.model.setObjective(
-                gp.quicksum(self._cost_x[i] * self.x[i] for i in self.x.keys()),
+                gp.quicksum(self._cost_x[i] * self.x[i] for i in self.x.keys()),  # type: ignore[index]
                 opt_sense,
             )
         elif objective == "Internal":
@@ -154,11 +156,11 @@ class BendersMasterMixin:
         """Método auxiliar para añadir restricciones de grado al maestro."""
         for i in self.N_list:
             self.model.addConstr(
-                (gp.quicksum(self.x[i, j] for j in self.N_list if j != i and (i, j) in self.x) == 1),
+                (gp.quicksum(self.x[i, j] for j in self.N_list if j != i and (i, j) in self.x) == 1),  # type: ignore[comparison-overlap, index]
                 name=f"grado_salida_{i}",
             )
             self.model.addConstr(
-                (gp.quicksum(self.x[j, i] for j in self.N_list if j != i and (j, i) in self.x) == 1),
+                (gp.quicksum(self.x[j, i] for j in self.N_list if j != i and (j, i) in self.x) == 1),  # type: ignore[comparison-overlap, index]
                 name=f"grado_entrada_{i}",
             )
 
@@ -167,18 +169,18 @@ class BendersMasterMixin:
         for i in self.N_list:
             if i != 0:
                 self.model.addConstr(
-                    gp.quicksum(self.f[j, i] for j in self.N_list if j != i and (j, i) in self.f)
-                    - gp.quicksum(self.f[i, j] for j in self.N_list if j != i and (i, j) in self.f)
+                    gp.quicksum(self.f[j, i] for j in self.N_list if j != i and (j, i) in self.f)  # type: ignore[comparison-overlap, index]
+                    - gp.quicksum(self.f[i, j] for j in self.N_list if j != i and (i, j) in self.f)  # type: ignore[comparison-overlap, index]
                     == 1,
                     name=f"flujo_nodos_{i}",
                 )
         M = self.N - 1
-        for i, j in self.x.keys():
-            self.model.addConstr(self.f[i, j] <= M * self.x[i, j], name=f"flujo_capacidad_{i}_{j}")
+        for i, j in self.x.keys():  # type: ignore[assignment, str-unpack]
+            self.model.addConstr(self.f[i, j] <= M * self.x[i, j], name=f"flujo_capacidad_{i}_{j}")  # type: ignore[index]
 
     def _compute_crossing_arc_pairs(self) -> set[tuple[tuple[int, int], tuple[int, int]]]:
         if not hasattr(self, "_crossing_arc_pairs"):
-            A_II = compute_crossing_edges(self.triangles, self.points)
+            A_II = compute_crossing_edges(self.triangles, self.points)  # type: ignore[arg-type]
             pairs: set[tuple[tuple[int, int], tuple[int, int]]] = set()
             for p, q, r, s in A_II:
                 arc_1 = (int(p), int(q))
@@ -192,12 +194,12 @@ class BendersMasterMixin:
 
     def _add_crossing_constraints_master(self) -> None:
         """Método auxiliar para añadir restricciones de cruce al maestro."""
-        crossing = compute_crossing_edges(self.triangles, self.points)
+        crossing = compute_crossing_edges(self.triangles, self.points)  # type: ignore[arg-type]
         for cross in crossing:
             i, j, k, m = cross
-            if (i, j) in self.x and (j, i) in self.x and (k, m) in self.x and (m, k) in self.x:
+            if (i, j) in self.x and (j, i) in self.x and (k, m) in self.x and (m, k) in self.x:  # type: ignore[comparison-overlap]
                 self.model.addConstr(
-                    self.x[i, j] + self.x[j, i] + self.x[k, m] + self.x[m, k] <= 1,
+                    self.x[i, j] + self.x[j, i] + self.x[k, m] + self.x[m, k] <= 1,  # type: ignore[index]
                     name=f"crossing_{i}_{j}_{k}_{m}",
                 )
 
@@ -251,7 +253,7 @@ class BendersMasterMixin:
         for i in A_pp:
             for j_raw in self.CH:
                 j = int(j_raw)
-                if (i, j) not in self.x:
+                if (i, j) not in self.x:  # type: ignore[comparison-overlap]
                     continue  # arc removed by CH-cleanup or otherwise absent
 
                 # Signed cross-product test: is the left half-plane of i->j
@@ -274,11 +276,11 @@ class BendersMasterMixin:
 
                 idx_j = int(np.where(self.CH == j)[0][0])
                 j_next = int(self.CH[(idx_j + 1) % len(self.CH)])
-                if (j, j_next) not in self.x:
+                if (j, j_next) not in self.x:  # type: ignore[comparison-overlap]
                     continue  # next-hull arc was cleaned away; constraint vacuous
 
                 self.model.addConstr(
-                    self.x[i, j] <= self.x[j, j_next],
+                    self.x[i, j] <= self.x[j, j_next],  # type: ignore[index]
                     name=f"semiplano_master_{i}_{j}",
                 )
                 n_added += 1
@@ -296,10 +298,10 @@ class BendersMasterMixin:
             max_beneficio_real = 0.0
 
             for j1 in range(self.N):
-                if j1 == i or (i, j1) not in self.x:
+                if j1 == i or (i, j1) not in self.x:  # type: ignore[comparison-overlap]
                     continue
                 for j2 in range(j1 + 1, self.N):
-                    if j2 == i or (i, j2) not in self.x:
+                    if j2 == i or (i, j2) not in self.x:  # type: ignore[comparison-overlap]
                         continue
 
                     es_pareja_legal = True
@@ -317,8 +319,8 @@ class BendersMasterMixin:
 
             expr_knapsack = gp.LinExpr()
             for j in range(self.N):
-                if j != i and (i, j) in self.x:
-                    expr_knapsack.addTerms(self._cost_x.get((i, j), 0.0), self.x[i, j])
+                if j != i and (i, j) in self.x:  # type: ignore[comparison-overlap]
+                    expr_knapsack.addTerms(self._cost_x.get((i, j), 0.0), self.x[i, j])  # type: ignore[index]
 
             if expr_knapsack.size() > 0:
                 self.model.addConstr(
@@ -335,7 +337,7 @@ class BendersMasterMixin:
         Mirrors OAPCompactModel.inyectar_cliques_de_cruce.
         """
         logger.debug("[cliques] building intersection graph for clique constraints...")
-        aristas = [(i, j) for (i, j) in self.x.keys() if i < j]
+        aristas = [(i, j) for (i, j) in self.x.keys() if i < j]  # type: ignore[str-unpack]
 
         G_cruces = nx.Graph()
         G_cruces.add_nodes_from(aristas)
@@ -344,8 +346,8 @@ class BendersMasterMixin:
             for e2 in aristas[idx + 1 :]:
                 if e1[0] in e2 or e1[1] in e2:
                     continue
-                p1, p2 = self.points[e1[0]], self.points[e1[1]]
-                p3, p4 = self.points[e2[0]], self.points[e2[1]]
+                p1, p2 = self.points[e1[0]], self.points[e1[1]]  # type: ignore[call-overload]
+                p3, p4 = self.points[e2[0]], self.points[e2[1]]  # type: ignore[call-overload]
                 if segments_intersect(p1, p2, p3, p4):
                     G_cruces.add_edge(e1, e2)
 
@@ -357,9 +359,9 @@ class BendersMasterMixin:
                 expr_clique = gp.LinExpr()
                 for e in clique:
                     if e in self.x:
-                        expr_clique.addTerms(1.0, self.x[e[0], e[1]])
-                    if (e[1], e[0]) in self.x:
-                        expr_clique.addTerms(1.0, self.x[e[1], e[0]])
+                        expr_clique.addTerms(1.0, self.x[e[0], e[1]])  # type: ignore[index]
+                    if (e[1], e[0]) in self.x:  # type: ignore[comparison-overlap]
+                        expr_clique.addTerms(1.0, self.x[e[1], e[0]])  # type: ignore[index]
                 self.model.addConstr(
                     expr_clique <= 1,
                     name=f"clique_master_{n_added}",
@@ -392,10 +394,10 @@ class BendersMasterMixin:
         """
         # Construir lista de adyacencia ignorando orientación (componentes débiles)
         adj: dict[int, set[int]] = {i: set() for i in self.N_list}
-        for (i, j), v in x_sol.items():
+        for (i, j), v in x_sol.items():  # type: ignore[str-unpack]
             if v > 0.5:
-                adj[i].add(j)
-                adj[j].add(i)
+                adj[i].add(j)  # type: ignore[arg-type, index]
+                adj[j].add(i)  # type: ignore[arg-type, index]
 
         visited: set[int] = set()
         components: list[set[int]] = []

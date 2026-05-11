@@ -42,7 +42,7 @@ from models.OAPBaseModel import OAPBaseModel
 logger = logging.getLogger(__name__)
 
 
-class OAPInverseBendersModel(
+class OAPInverseBendersModel(  # type: ignore[misc]
     InvBendersMasterMixin,
     InvBendersSubMixin,
     InvBendersOptimizeMixin,

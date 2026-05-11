@@ -38,7 +38,7 @@ def extract_cut_features(logs: list[dict[str, Any]]) -> tuple[np.ndarray, list[i
                 all_keys.add(block_name)
 
     # 2. Construir la matriz X aplanada
-    all_keys = sorted(list(all_keys))  # Fijamos un orden estricto para las columnas
+    all_keys = sorted(list(all_keys))  # type: ignore[assignment]  # Fijamos un orden estricto
 
     for log in logs:
         iterations.append(log.get("iteration", 0))
@@ -62,7 +62,7 @@ def extract_cut_features(logs: list[dict[str, Any]]) -> tuple[np.ndarray, list[i
     return np.array(features), iterations, cut_types
 
 
-def plot_dimensionality_reduction(log_path: str, output_path: str = None) -> None:
+def plot_dimensionality_reduction(log_path: str, output_path: str = None) -> None:  # type: ignore[assignment]
     """
     Aplica PCA y UMAP a los vectores de cortes para visualizar el comportamiento de Benders.
     """
@@ -97,7 +97,7 @@ def plot_dimensionality_reduction(log_path: str, output_path: str = None) -> Non
     gs = GridSpec(1, 2)
 
     # Colormap basado en la progresión temporal (Iteración)
-    cmap = plt.cm.viridis
+    cmap = plt.cm.viridis  # type: ignore[attr-defined]
 
     # Subplot 1: PCA
     ax1 = fig.add_subplot(gs[0])

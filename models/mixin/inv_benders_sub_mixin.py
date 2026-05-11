@@ -326,7 +326,7 @@ class InvBendersSubMixin:
         for (a, b), constr in self.constrs_sub["alpha"].items():
             lam = constr.FarkasDual
             if abs(lam) > TOL:
-                v_comps["alpha"][a, b] = lam
+                v_comps["alpha"][a, b] = lam  # type: ignore[index]
                 for t in ta[a][b]:
                     cut_expr += lam * self.y[t]
                     cut_val += lam * y_sol[t]
@@ -335,7 +335,7 @@ class InvBendersSubMixin:
         for (a, b), constr in self.constrs_sub["alpha_p"].items():
             lam = constr.FarkasDual
             if abs(lam) > TOL:
-                v_comps["alpha_p"][a, b] = lam
+                v_comps["alpha_p"][a, b] = lam  # type: ignore[index]
                 cut_expr += lam  # constant +λ·1
                 for t in ta[a][b]:
                     cut_expr -= lam * self.yp[t]
@@ -346,7 +346,7 @@ class InvBendersSubMixin:
         for (i, j), constr in self.constrs_sub["beta"].items():
             lam = constr.FarkasDual
             if abs(lam) > TOL:
-                v_comps["beta"][i, j] = lam
+                v_comps["beta"][i, j] = lam  # type: ignore[index]
                 for t in ta[i][j]:
                     cut_expr += lam * self.y[t]
                     cut_val += lam * y_sol[t]
@@ -358,7 +358,7 @@ class InvBendersSubMixin:
         for (i, j), constr in self.constrs_sub["beta_p"].items():
             lam = constr.FarkasDual
             if abs(lam) > TOL:
-                v_comps["beta_p"][i, j] = lam
+                v_comps["beta_p"][i, j] = lam  # type: ignore[index]
                 for t in ta[j][i]:
                     cut_expr += lam * self.yp[t]
                     cut_val += lam * yp_sol[t]
@@ -370,7 +370,7 @@ class InvBendersSubMixin:
         for (i, j), constr in self.constrs_sub["gamma"].items():
             lam = constr.FarkasDual
             if abs(lam) > TOL:
-                v_comps["gamma"][i, j] = lam
+                v_comps["gamma"][i, j] = lam  # type: ignore[index]
                 for t in ta[i][j]:
                     cut_expr += lam * self.y[t]
                     cut_val += lam * y_sol[t]
@@ -379,7 +379,7 @@ class InvBendersSubMixin:
         for (i, j), constr in self.constrs_sub["delta"].items():
             lam = constr.FarkasDual
             if abs(lam) > TOL:
-                v_comps["delta"][i, j] = lam
+                v_comps["delta"][i, j] = lam  # type: ignore[index]
                 cut_expr += lam  # constant +λ·1
                 for t in ta[i][j]:
                     cut_expr -= lam * self.y[t]
@@ -390,7 +390,7 @@ class InvBendersSubMixin:
         for (i, j), constr in self.constrs_sub["gamma_p"].items():
             lam = constr.FarkasDual
             if abs(lam) > TOL:
-                v_comps["gamma_p"][i, j] = lam
+                v_comps["gamma_p"][i, j] = lam  # type: ignore[index]
                 for t in ta[i][j]:
                     cut_expr += lam * self.yp[t]
                     cut_val += lam * yp_sol[t]
@@ -399,7 +399,7 @@ class InvBendersSubMixin:
         for (i, j), constr in self.constrs_sub["delta_p"].items():
             lam = constr.FarkasDual
             if abs(lam) > TOL:
-                v_comps["delta_p"][i, j] = lam
+                v_comps["delta_p"][i, j] = lam  # type: ignore[index]
                 cut_expr += lam  # constant +λ·1
                 for t in ta[i][j]:
                     cut_expr -= lam * self.yp[t]

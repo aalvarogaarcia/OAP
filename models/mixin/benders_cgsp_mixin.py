@@ -213,7 +213,7 @@ class BendersCGSPMixin:
                     if user_weights and key in user_weights and isinstance(user_weights[key], dict):
                         sub[arc_key] = float(user_weights[key].get(arc_key, 1.0))
                     elif use_relaxed_l1:
-                        rhs_val = _rhs_for_key(key, arc_key, x_sol, self)
+                        rhs_val = _rhs_for_key(key, arc_key, x_sol, self)  # type: ignore[arg-type]
                         sub[arc_key] = 1.0 / (abs(rhs_val) + _RL1_EPS)
                     else:
                         sub[arc_key] = 1.0
@@ -521,7 +521,7 @@ class BendersCGSPMixin:
             keys_ap = list(self.constrs_yp["alpha_p"].keys())
             rhs_map_ap = {(i, j): 1.0 - x_sol.get((i, j), 0.0) for (i, j) in keys_ap}
             w_map_ap = weights.get("alpha_p", {})
-            u_ap, v_ap = _add_pi_indexed("alpha_p", keys_ap, rhs_map_ap, w_map_ap)
+            u_ap, v_ap = _add_pi_indexed("alpha_p", keys_ap, rhs_map_ap, w_map_ap)  # type: ignore[arg-type]
             pi_vars["u_alpha_p"] = u_ap
             pi_vars["v_alpha_p"] = v_ap
 
@@ -530,7 +530,7 @@ class BendersCGSPMixin:
             keys_bp = list(self.constrs_yp["beta_p"].keys())
             rhs_map_bp = {(i, j): x_sol.get((j, i), 0.0) - x_sol.get((i, j), 0.0) for (i, j) in keys_bp}
             w_map_bp = weights.get("beta_p", {})
-            u_bp, v_bp = _add_pi_indexed("beta_p", keys_bp, rhs_map_bp, w_map_bp)
+            u_bp, v_bp = _add_pi_indexed("beta_p", keys_bp, rhs_map_bp, w_map_bp)  # type: ignore[arg-type]
             pi_vars["u_beta_p"] = u_bp
             pi_vars["v_beta_p"] = v_bp
 
@@ -567,14 +567,14 @@ class BendersCGSPMixin:
         # ---- global_p: Σ_t yp[t] = N - |CH| ----
         if "global_p" in self.constrs_yp and isinstance(self.constrs_yp["global_p"], gp.Constr):
             rhs_global = self.constrs_yp["global_p"].RHS
-            w_global = float(weights.get("global_p", 1.0))
+            w_global = float(weights.get("global_p", 1.0))  # type: ignore[arg-type]
             u_g, v_g = _add_pi_scalar("global_p", rhs_global, w_global)
             pi_vars["u_global_p"] = u_g
             pi_vars["v_global_p"] = v_g
 
         # ---- r1_p: area balance (fixed RHS = CH_area) ----
         if "r1_p" in self.constrs_yp and isinstance(self.constrs_yp["r1_p"], gp.Constr):
-            w_r1 = float(weights.get("r1_p", 1.0))
+            w_r1 = float(weights.get("r1_p", 1.0))  # type: ignore[arg-type]
             u_r1, v_r1 = _add_pi_scalar("r1_p", self.convex_hull_area, w_r1)
             pi_vars["u_r1_p"] = u_r1
             pi_vars["v_r1_p"] = v_r1
@@ -584,7 +584,7 @@ class BendersCGSPMixin:
             keys_r2 = list(self.constrs_yp["r2_p"].keys())
             rhs_map_r2 = {k: 1.0 for k in keys_r2}
             w_map_r2 = weights.get("r2_p", {})
-            u_r2, v_r2 = _add_pi_indexed("r2_p", keys_r2, rhs_map_r2, w_map_r2)
+            u_r2, v_r2 = _add_pi_indexed("r2_p", keys_r2, rhs_map_r2, w_map_r2)  # type: ignore[arg-type]
             pi_vars["u_r2_p"] = u_r2
             pi_vars["v_r2_p"] = v_r2
 
@@ -595,7 +595,7 @@ class BendersCGSPMixin:
                 (i, j, k, s): 1.0 - x_sol.get((i, j), 0.0) - x_sol.get((s, k), 0.0) for (i, j, k, s) in keys_r3
             }
             w_map_r3 = weights.get("r3_p", {})
-            u_r3, v_r3 = _add_pi_indexed("r3_p", keys_r3, rhs_map_r3, w_map_r3)
+            u_r3, v_r3 = _add_pi_indexed("r3_p", keys_r3, rhs_map_r3, w_map_r3)  # type: ignore[arg-type]
             pi_vars["u_r3_p"] = u_r3
             pi_vars["v_r3_p"] = v_r3
 
@@ -686,7 +686,7 @@ class BendersCGSPMixin:
             keys_a = list(self.constrs_y["alpha"].keys())
             rhs_map_a = {(i, j): x_sol.get((i, j), 0.0) for (i, j) in keys_a}
             w_map_a = weights.get("alpha", {})
-            u_a, v_a = _add_pi_indexed("alpha", keys_a, rhs_map_a, w_map_a)
+            u_a, v_a = _add_pi_indexed("alpha", keys_a, rhs_map_a, w_map_a)  # type: ignore[arg-type]
             pi_vars["u_alpha"] = u_a
             pi_vars["v_alpha"] = v_a
 
@@ -695,7 +695,7 @@ class BendersCGSPMixin:
             keys_b = list(self.constrs_y["beta"].keys())
             rhs_map_b = {(i, j): x_sol.get((i, j), 0.0) - x_sol.get((j, i), 0.0) for (i, j) in keys_b}
             w_map_b = weights.get("beta", {})
-            u_b, v_b = _add_pi_indexed("beta", keys_b, rhs_map_b, w_map_b)
+            u_b, v_b = _add_pi_indexed("beta", keys_b, rhs_map_b, w_map_b)  # type: ignore[arg-type]
             pi_vars["u_beta"] = u_b
             pi_vars["v_beta"] = v_b
 
@@ -732,14 +732,14 @@ class BendersCGSPMixin:
         # ---- global: Σ_t y[t] = N - 2 ----
         if "global" in self.constrs_y and isinstance(self.constrs_y["global"], gp.Constr):
             rhs_global = self.constrs_y["global"].RHS
-            w_global = float(weights.get("global", 1.0))
+            w_global = float(weights.get("global", 1.0))  # type: ignore[arg-type]
             u_gl, v_gl = _add_pi_scalar("global", rhs_global, w_global)
             pi_vars["u_global"] = u_gl
             pi_vars["v_global"] = v_gl
 
         # ---- r1: area balance (fixed RHS = CH_area) ----
         if "r1" in self.constrs_y and isinstance(self.constrs_y["r1"], gp.Constr):
-            w_r1 = float(weights.get("r1", 1.0))
+            w_r1 = float(weights.get("r1", 1.0))  # type: ignore[arg-type]
             u_r1, v_r1 = _add_pi_scalar("r1", self.convex_hull_area, w_r1)
             pi_vars["u_r1"] = u_r1
             pi_vars["v_r1"] = v_r1
@@ -749,7 +749,7 @@ class BendersCGSPMixin:
             keys_r2 = list(self.constrs_y["r2"].keys())
             rhs_map_r2 = {k: 1.0 for k in keys_r2}
             w_map_r2 = weights.get("r2", {})
-            u_r2, v_r2 = _add_pi_indexed("r2", keys_r2, rhs_map_r2, w_map_r2)
+            u_r2, v_r2 = _add_pi_indexed("r2", keys_r2, rhs_map_r2, w_map_r2)  # type: ignore[arg-type]
             pi_vars["u_r2"] = u_r2
             pi_vars["v_r2"] = v_r2
 
@@ -760,7 +760,7 @@ class BendersCGSPMixin:
                 (i, j, k, s): 1.0 - x_sol.get((j, i), 0.0) - x_sol.get((k, s), 0.0) for (i, j, k, s) in keys_r3
             }
             w_map_r3 = weights.get("r3", {})
-            u_r3, v_r3 = _add_pi_indexed("r3", keys_r3, rhs_map_r3, w_map_r3)
+            u_r3, v_r3 = _add_pi_indexed("r3", keys_r3, rhs_map_r3, w_map_r3)  # type: ignore[arg-type]
             pi_vars["u_r3"] = u_r3
             pi_vars["v_r3"] = v_r3
 
@@ -775,9 +775,9 @@ class BendersCGSPMixin:
             # self._cost_x (NEVER from self.sub_y.ObjVal, which is the
             # artificial-slack minimum, not the area).
             cost_x: dict[str, Any] = getattr(self, "_cost_x", {})
-            f_dot_x = sum(cost_x.get(arc, 0.0) * x_sol.get(arc, 0.0) for arc in cost_x)
+            f_dot_x = sum(cost_x.get(arc, 0.0) * x_sol.get(arc, 0.0) for arc in cost_x)  # type: ignore[call-overload]
             pi0_contribution = f_dot_x - eta_sol
-            w_pi0 = float(weights.get("pi0", 1.0))
+            w_pi0 = float(weights.get("pi0", 1.0))  # type: ignore[arg-type]
             obj_expr.addTerms([pi0_contribution, -pi0_contribution], [pi0_pos, pi0_neg])
             norm_expr.addTerms([w_pi0, w_pi0], [pi0_pos, pi0_neg])
             pi_vars["pi0_pos"] = pi0_pos
@@ -865,26 +865,26 @@ class BendersCGSPMixin:
             ap_net = _net("u_alpha_p", "v_alpha_p")
             if ap_net:
                 witness["alpha_p"] = ap_net
-                for (i, j), pi_val in ap_net.items():
-                    cut_expr += pi_val * (1.0 - self.x[i, j])
+                for (i, j), pi_val in ap_net.items():  # type: ignore[str-unpack]
+                    cut_expr += pi_val * (1.0 - self.x[i, j])  # type: ignore[index]
 
             bp_net = _net("u_beta_p", "v_beta_p")
             if bp_net:
                 witness["beta_p"] = bp_net
-                for (i, j), pi_val in bp_net.items():
-                    cut_expr += pi_val * (self.x[j, i] - self.x[i, j])
+                for (i, j), pi_val in bp_net.items():  # type: ignore[str-unpack]
+                    cut_expr += pi_val * (self.x[j, i] - self.x[i, j])  # type: ignore[index]
 
             gp_net = _net("u_gamma_p", "v_gamma_p")
             if gp_net:
                 witness["gamma_p"] = gp_net
-                for (i, j), pi_val in gp_net.items():
-                    cut_expr += pi_val * self.x[j, i]
+                for (i, j), pi_val in gp_net.items():  # type: ignore[str-unpack]
+                    cut_expr += pi_val * self.x[j, i]  # type: ignore[index]
 
             dp_net = _net("u_delta_p", "v_delta_p")
             if dp_net:
                 witness["delta_p"] = dp_net
-                for (i, j), pi_val in dp_net.items():
-                    cut_expr += pi_val * (1.0 - self.x[i, j])
+                for (i, j), pi_val in dp_net.items():  # type: ignore[str-unpack]
+                    cut_expr += pi_val * (1.0 - self.x[i, j])  # type: ignore[index]
 
             gl_net = _net("u_global_p", "v_global_p")
             if gl_net and "scalar" in gl_net:
@@ -908,8 +908,8 @@ class BendersCGSPMixin:
             r3_net = _net("u_r3_p", "v_r3_p")
             if r3_net:
                 witness["r3_p"] = r3_net
-                for (i, j, k, s), pi_val in r3_net.items():
-                    cut_expr += pi_val * (1.0 - self.x[i, j] - self.x[s, k])
+                for (i, j, k, s), pi_val in r3_net.items():  # type: ignore[str-unpack]
+                    cut_expr += pi_val * (1.0 - self.x[i, j] - self.x[s, k])  # type: ignore[index]
 
         else:  # "y"
             constrs = self.constrs_y
@@ -917,26 +917,26 @@ class BendersCGSPMixin:
             a_net = _net("u_alpha", "v_alpha")
             if a_net:
                 witness["alpha"] = a_net
-                for (i, j), pi_val in a_net.items():
-                    cut_expr += pi_val * self.x[i, j]
+                for (i, j), pi_val in a_net.items():  # type: ignore[str-unpack]
+                    cut_expr += pi_val * self.x[i, j]  # type: ignore[index]
 
             b_net = _net("u_beta", "v_beta")
             if b_net:
                 witness["beta"] = b_net
-                for (i, j), pi_val in b_net.items():
-                    cut_expr += pi_val * (self.x[i, j] - self.x[j, i])
+                for (i, j), pi_val in b_net.items():  # type: ignore[str-unpack]
+                    cut_expr += pi_val * (self.x[i, j] - self.x[j, i])  # type: ignore[index]
 
             g_net = _net("u_gamma", "v_gamma")
             if g_net:
                 witness["gamma"] = g_net
-                for (i, j), pi_val in g_net.items():
-                    cut_expr += pi_val * self.x[i, j]
+                for (i, j), pi_val in g_net.items():  # type: ignore[str-unpack]
+                    cut_expr += pi_val * self.x[i, j]  # type: ignore[index]
 
             d_net = _net("u_delta", "v_delta")
             if d_net:
                 witness["delta"] = d_net
-                for (i, j), pi_val in d_net.items():
-                    cut_expr += pi_val * (1.0 - self.x[j, i])
+                for (i, j), pi_val in d_net.items():  # type: ignore[str-unpack]
+                    cut_expr += pi_val * (1.0 - self.x[j, i])  # type: ignore[index]
 
             gl_net = _net("u_global", "v_global")
             if gl_net and "scalar" in gl_net:
@@ -960,8 +960,8 @@ class BendersCGSPMixin:
             r3_net = _net("u_r3", "v_r3")
             if r3_net:
                 witness["r3"] = r3_net
-                for (i, j, k, s), pi_val in r3_net.items():
-                    cut_expr += pi_val * (1.0 - self.x[j, i] - self.x[k, s])
+                for (i, j, k, s), pi_val in r3_net.items():  # type: ignore[str-unpack]
+                    cut_expr += pi_val * (1.0 - self.x[j, i] - self.x[k, s])  # type: ignore[index]
 
         return cut_expr, cut_rhs, witness
 
@@ -987,7 +987,7 @@ class BendersCGSPMixin:
         if u_ap is not None:
             for k in u_ap.keys():
                 rhs = 1.0 - x_sol.get(k, 0.0)
-                obj.addTerms([rhs, -rhs], [u_ap[k], v_ap[k]])
+                obj.addTerms([rhs, -rhs], [u_ap[k], v_ap[k]])  # type: ignore[index]
 
         # beta_p: RHS = x[j,i] - x[i,j]
         u_bp = pi_vars.get("u_beta_p")
@@ -996,7 +996,7 @@ class BendersCGSPMixin:
             for k in u_bp.keys():
                 i, j = k
                 rhs = x_sol.get((j, i), 0.0) - x_sol.get((i, j), 0.0)
-                obj.addTerms([rhs, -rhs], [u_bp[k], v_bp[k]])
+                obj.addTerms([rhs, -rhs], [u_bp[k], v_bp[k]])  # type: ignore[index]
 
         # gamma_p: RHS = x[j,i]  (only u, no v)
         u_gp = pi_vars.get("u_gamma_p")
@@ -1032,7 +1032,7 @@ class BendersCGSPMixin:
         v_r2 = pi_vars.get("v_r2_p")
         if u_r2 is not None:
             for k in u_r2.keys():
-                obj.addTerms([1.0, -1.0], [u_r2[k], v_r2[k]])
+                obj.addTerms([1.0, -1.0], [u_r2[k], v_r2[k]])  # type: ignore[index]
 
         # r3_p: RHS = 1 - x[i,j] - x[s,k]
         u_r3 = pi_vars.get("u_r3_p")
@@ -1041,7 +1041,7 @@ class BendersCGSPMixin:
             for k in u_r3.keys():
                 i, j, ks, s = k
                 rhs = 1.0 - x_sol.get((i, j), 0.0) - x_sol.get((s, ks), 0.0)
-                obj.addTerms([rhs, -rhs], [u_r3[k], v_r3[k]])
+                obj.addTerms([rhs, -rhs], [u_r3[k], v_r3[k]])  # type: ignore[index]
 
         return obj
 
@@ -1071,7 +1071,7 @@ class BendersCGSPMixin:
         cache = getattr(self, "_cgsp_yp_cache", None)
         if cache is None:
             cgsp, pi_vars = self._build_cgsp_yp(x_sol, TOL=TOL)
-            self._cgsp_yp_cache: tuple[gp.Model, dict[str, Any]] = (cgsp, pi_vars)
+            self._cgsp_yp_cache: tuple[gp.Model, dict[str, Any]] = (cgsp, pi_vars)  # type: ignore[assignment, no-redef]
             return cgsp, pi_vars
         cgsp, pi_vars = cache
         # Update objective for new x_sol
@@ -1100,13 +1100,13 @@ class BendersCGSPMixin:
         cache = getattr(self, "_cgsp_y_cache", None)
         if cache is None:
             cgsp, pi_vars, pi0_var = self._build_cgsp_y(x_sol, TOL=TOL)
-            self._cgsp_y_cache: tuple[gp.Model, dict[str, Any], gp.Var | None] = (cgsp, pi_vars, pi0_var)
+            self._cgsp_y_cache: tuple[gp.Model, dict[str, Any], gp.Var | None] = (cgsp, pi_vars, pi0_var)  # type: ignore[assignment, no-redef]
             return cgsp, pi_vars, pi0_var
         cgsp, pi_vars, pi0_var = cache
         # For Y, delegate full rebuild to avoid eta_sol complexity for now.
         # Re-use model object by rebuilding from scratch (structural constraints unchanged).
         new_cgsp, new_pi_vars, new_pi0_var = self._build_cgsp_y(x_sol, TOL=TOL)
-        self._cgsp_y_cache = (new_cgsp, new_pi_vars, new_pi0_var)
+        self._cgsp_y_cache = (new_cgsp, new_pi_vars, new_pi0_var)  # type: ignore[assignment]
         return new_cgsp, new_pi_vars, new_pi0_var
 
     def get_cgsp_cut_yp(

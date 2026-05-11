@@ -178,7 +178,7 @@ class BendersPiMixin:
             crossing_pairs = self._compute_crossing_arc_pairs()
             plot_strengthening_constraints(
                 points=self.points,
-                ch=self.CH,
+                ch=self.CH,  # type: ignore[arg-type]
                 x_keys=list(self.x.keys()),
                 crossing_pairs=crossing_pairs,
             )
@@ -192,28 +192,28 @@ class BendersPiMixin:
         for (i, j), constr in self.constrs_y["alpha"].items():
             pi = constr.Pi
             if abs(pi) > TOL:
-                v_comps["alpha"][i, j] = pi
+                v_comps["alpha"][i, j] = pi  # type: ignore[index]
                 cut_y_expr += pi * self.x[i, j]
                 cut_y_val += pi * x_sol[i, j]
 
         for (i, j), constr in self.constrs_y["beta"].items():
             pi = constr.Pi
             if abs(pi) > TOL:
-                v_comps["beta"][i, j] = pi
+                v_comps["beta"][i, j] = pi  # type: ignore[index]
                 cut_y_expr += pi * (self.x[i, j] - self.x[j, i])
                 cut_y_val += pi * (x_sol[i, j] - x_sol[j, i])
 
         for (i, j), constr in self.constrs_y["gamma"].items():
             pi = constr.Pi
             if abs(pi) > TOL:
-                v_comps["gamma"][i, j] = pi
+                v_comps["gamma"][i, j] = pi  # type: ignore[index]
                 cut_y_expr += pi * self.x[i, j]
                 cut_y_val += pi * x_sol[i, j]
 
         for (i, j), constr in self.constrs_y["delta"].items():
             pi = constr.Pi
             if abs(pi) > TOL:
-                v_comps["delta"][i, j] = pi
+                v_comps["delta"][i, j] = pi  # type: ignore[index]
                 cut_y_expr += pi * (1 - self.x[j, i])
                 cut_y_val += pi * (1 - x_sol[j, i])
 
@@ -265,28 +265,28 @@ class BendersPiMixin:
         for (i, j), constr in self.constrs_yp["alpha_p"].items():
             pi = constr.Pi
             if abs(pi) > TOL:
-                v_comps_p["alpha_p"][i, j] = pi
+                v_comps_p["alpha_p"][i, j] = pi  # type: ignore[index]
                 cut_yp_expr += pi * (1 - self.x[i, j])
                 cut_yp_val += pi * (1 - x_sol[i, j])
 
         for (i, j), constr in self.constrs_yp["beta_p"].items():
             pi = constr.Pi
             if abs(pi) > TOL:
-                v_comps_p["beta_p"][i, j] = pi
+                v_comps_p["beta_p"][i, j] = pi  # type: ignore[index]
                 cut_yp_expr += pi * (self.x[j, i] - self.x[i, j])
                 cut_yp_val += pi * (x_sol[j, i] - x_sol[i, j])
 
         for (i, j), constr in self.constrs_yp["gamma_p"].items():
             pi = constr.Pi
             if abs(pi) > TOL:
-                v_comps_p["gamma_p"][i, j] = pi
+                v_comps_p["gamma_p"][i, j] = pi  # type: ignore[index]
                 cut_yp_expr += pi * self.x[j, i]
                 cut_yp_val += pi * x_sol[j, i]
 
         for (i, j), constr in self.constrs_yp["delta_p"].items():
             pi = constr.Pi
             if abs(pi) > TOL:
-                v_comps_p["delta_p"][i, j] = pi
+                v_comps_p["delta_p"][i, j] = pi  # type: ignore[index]
                 cut_yp_expr += pi * (1 - self.x[i, j])
                 cut_yp_val += pi * (1 - x_sol[i, j])
 
@@ -453,10 +453,10 @@ class BendersPiMixin:
         }
 
         if sum_constrain:
-            self.art_y["global_p"] = self.sub_y.addVar(lb=0, name="art_y_global_p")
-            self.art_y["global_n"] = self.sub_y.addVar(lb=0, name="art_y_global_n")
-            self.art_yp["global_p"] = self.sub_yp.addVar(lb=0, name="art_yp_global_p")
-            self.art_yp["global_n"] = self.sub_yp.addVar(lb=0, name="art_yp_global_n")
+            self.art_y["global_p"] = self.sub_y.addVar(lb=0, name="art_y_global_p")  # type: ignore[assignment]
+            self.art_y["global_n"] = self.sub_y.addVar(lb=0, name="art_y_global_n")  # type: ignore[assignment]
+            self.art_yp["global_p"] = self.sub_yp.addVar(lb=0, name="art_yp_global_p")  # type: ignore[assignment]
+            self.art_yp["global_n"] = self.sub_yp.addVar(lb=0, name="art_yp_global_n")  # type: ignore[assignment]
 
     def _establecer_objetivos_pi(self) -> None:
         """Define la función objetivo: Minimizar la suma de todas las variables artificiales."""
@@ -465,14 +465,14 @@ class BendersPiMixin:
             if isinstance(art_vars, gp.tupledict):
                 obj_y += art_vars.sum()
             else:
-                obj_y += art_vars  # Para las variables individuales como 'global_p'
+                obj_y += art_vars  # type: ignore[call-overload]  # individual vars como 'global_p'
 
         obj_yp = gp.LinExpr()
         for art_vars in self.art_yp.values():
             if isinstance(art_vars, gp.tupledict):
                 obj_yp += art_vars.sum()
             else:
-                obj_yp += art_vars
+                obj_yp += art_vars  # type: ignore[call-overload]
         # Phase-1 ALWAYS minimises the sum of artificials.
         # The master's ModelSense (maximize for MaxArea) is irrelevant here —
         # inheriting it would make sub_y/sub_yp unbounded when maximize=True.
@@ -487,12 +487,12 @@ class BendersPiMixin:
         # --- Restricciones Globales ---
         if sum_constrain:
             self.constrs_y["global"] = self.sub_y.addConstr(
-                gp.quicksum(self.y[t] for t in self.V_list) + self.art_y["global_p"] - self.art_y["global_n"]
+                gp.quicksum(self.y[t] for t in self.V_list) + self.art_y["global_p"] - self.art_y["global_n"]  # type: ignore[operator]
                 == self.N - 2,
                 name="triangulos_internos_totales",
             )
             self.constrs_yp["global_p"] = self.sub_yp.addConstr(
-                gp.quicksum(self.yp[t] for t in self.V_list) + self.art_yp["global_p"] - self.art_yp["global_n"]
+                gp.quicksum(self.yp[t] for t in self.V_list) + self.art_yp["global_p"] - self.art_yp["global_n"]  # type: ignore[operator]
                 == self.N - len(self.CH),
                 name="triangulos_externos_totales",
             )

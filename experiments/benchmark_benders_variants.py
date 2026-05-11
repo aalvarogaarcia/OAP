@@ -102,7 +102,7 @@ def run_single_solve(
         model.build(
             objective="Fekete",
             maximize=True,
-            benders_method=benders_method,
+            benders_method=benders_method,  # type: ignore[arg-type]
             use_deepest_cuts=use_deepest,
         )
 
@@ -279,4 +279,4 @@ def main():  # type: ignore[no-untyped-def]
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main())  # type: ignore[no-untyped-call]

@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 # ¡La herencia múltiple en todo su esplendor!
-class OAPBendersModel(
+class OAPBendersModel(  # type: ignore[misc]
     BendersMasterMixin,
     BendersDDMAMixin,  # F3 — before CGSP; shares sub_y/sub_yp
     BendersCGSPMixin,
@@ -68,15 +68,15 @@ class OAPBendersModel(
         # these and every subsequent call only re-sets the objective.  See
         # BendersCGSPMixin._compute_cgsp_objective and
         # BendersCGSPMixin.invalidate_cgsp_cache.
-        self._cgsp_yp_cache: tuple[Any, ...] | None = None
-        self._cgsp_y_cache: tuple[Any, ...] | None = None
+        self._cgsp_yp_cache: tuple[Any, ...] | None = None  # type: ignore[assignment]
+        self._cgsp_y_cache: tuple[Any, ...] | None = None  # type: ignore[assignment]
 
         # F3 — DDMA configuration (defaults off for backward compat)
         self.use_ddma: bool = False
 
         # Magnanti-Wong (pareto-optimal cuts) — defaults to off
         self.use_magnanti_wong: bool = False
-        self._core_point: dict[str, Any] | None = None
+        self._core_point: dict[str, Any] | None = None  # type: ignore[assignment]
         self._core_point_strategy: str = "lp_relaxation"
 
         # Para el logger de Farkas/Pi si deseas guardar archivos JSON
@@ -184,11 +184,11 @@ class OAPBendersModel(
             # strategy string and apply it after step 2.
             self._pending_cgsp_norm = "relaxed_l1"
         else:
-            self._pending_cgsp_norm = None
+            self._pending_cgsp_norm = None  # type: ignore[assignment]
 
         # 1. Construir el Maestro (Viene de BendersMasterMixin)
         self.build_master(
-            objective=objective,
+            objective=objective,  # type: ignore[arg-type]
             mode=mode,
             maximize=maximize,
             subtour=subtour,
@@ -216,13 +216,13 @@ class OAPBendersModel(
             self.cut_weights_yp = self._compute_relaxed_l1_weights("yp")
             # Invalidate any cached CGSP model so it is rebuilt with new weights
             self.invalidate_cgsp_cache()
-            self._pending_cgsp_norm = None
+            self._pending_cgsp_norm = None  # type: ignore[assignment]
 
         # Magnanti-Wong core point (must be after subproblems + master are built)
         self.use_magnanti_wong = use_magnanti_wong
         if use_magnanti_wong:
             self._core_point_strategy = core_point_strategy
-            self._core_point = self._compute_core_point(core_point_strategy)
+            self._core_point = self._compute_core_point(core_point_strategy)  # type: ignore[assignment]
         else:
             self._core_point = None
 

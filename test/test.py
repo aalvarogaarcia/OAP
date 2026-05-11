@@ -2,7 +2,7 @@ import time
 
 import networkx as nx
 
-from models import build_and_solve_model
+from models import build_and_solve_model  # type: ignore[attr-defined]
 from utils.model_stats import get_model_stats, get_ObjVal_int
 from utils.utils import write_prefile
 
@@ -66,5 +66,5 @@ if __name__ == "__main__":
         print(f"LP Relaxed Objective Value: {model_lp.ObjVal}")
         print("--------------------------------------------------\n")
 
-        lp, gap, ip, elapsed_time, nodes = get_model_stats(mod, model_lp)
+        lp, gap, ip, elapsed_time, nodes = get_model_stats(mod, model_lp)  # type: ignore[call-arg]
         print(f"Resultados: LP={lp}, Gap={gap}%, IP={ip}, Time={elapsed_time}s, Nodes={nodes}")

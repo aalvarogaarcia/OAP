@@ -46,12 +46,36 @@ class BendersOptimizeMixin:
     def get_pi_cut_y(self, x_sol: dict[Arc, float], TOL: float = ...) -> tuple[gp.LinExpr, float]: ...  # type: ignore[empty-body]
     def get_pi_cut_yp(self, x_sol: dict[Arc, float], TOL: float = ...) -> tuple[gp.LinExpr, float]: ...  # type: ignore[empty-body]
     def get_optimality_cut_y(self, x_sol: dict[Arc, float], TOL: float = ...) -> tuple[gp.LinExpr, float]: ...  # type: ignore[empty-body]
-    def get_cgsp_cut_y(self, x_sol: dict[Arc, float], eta_sol: float = ..., TOL: float = ...) -> tuple[gp.LinExpr | None, float | None, dict[str, Any]]: ...  # type: ignore[empty-body]
-    def get_cgsp_cut_yp(self, x_sol: dict[Arc, float], TOL: float = ...) -> tuple[gp.LinExpr | None, float | None, dict[str, Any]]: ...  # type: ignore[empty-body]
-    def get_mw_cut_y(self, x_sol: dict[Arc, float], TOL: float = ...) -> tuple[gp.LinExpr | None, float | None, dict[str, Any]]: ...  # type: ignore[empty-body]
-    def get_mw_cut_yp(self, x_sol: dict[Arc, float], TOL: float = ...) -> tuple[gp.LinExpr | None, float | None, dict[str, Any]]: ...  # type: ignore[empty-body]
-    def get_ddma_cut_y(self, x_sol: dict[Arc, float], eta_sol: float = ..., TOL: float = ...) -> tuple[gp.LinExpr | None, float | None, dict[str, Any]]: ...  # type: ignore[empty-body]
-    def get_ddma_cut_yp(self, x_sol: dict[Arc, float], TOL: float = ...) -> tuple[gp.LinExpr | None, float | None, dict[str, Any]]: ...  # type: ignore[empty-body]
+    def get_cgsp_cut_y(
+        self, x_sol: dict[Arc, float], eta_sol: float = ..., TOL: float = ...
+    ) -> tuple[gp.LinExpr | None, float | None, dict[str, Any]]:
+        raise NotImplementedError  # provided by sibling mixin
+
+    def get_cgsp_cut_yp(
+        self, x_sol: dict[Arc, float], TOL: float = ...
+    ) -> tuple[gp.LinExpr | None, float | None, dict[str, Any]]:
+        raise NotImplementedError  # provided by sibling mixin
+
+    def get_mw_cut_y(
+        self, x_sol: dict[Arc, float], TOL: float = ...
+    ) -> tuple[gp.LinExpr | None, float | None, dict[str, Any]]:
+        raise NotImplementedError  # provided by sibling mixin
+
+    def get_mw_cut_yp(
+        self, x_sol: dict[Arc, float], TOL: float = ...
+    ) -> tuple[gp.LinExpr | None, float | None, dict[str, Any]]:
+        raise NotImplementedError  # provided by sibling mixin
+
+    def get_ddma_cut_y(
+        self, x_sol: dict[Arc, float], eta_sol: float = ..., TOL: float = ...
+    ) -> tuple[gp.LinExpr | None, float | None, dict[str, Any]]:
+        raise NotImplementedError  # provided by sibling mixin
+
+    def get_ddma_cut_yp(
+        self, x_sol: dict[Arc, float], TOL: float = ...
+    ) -> tuple[gp.LinExpr | None, float | None, dict[str, Any]]:
+        raise NotImplementedError  # provided by sibling mixin
+
     def log_facets(self, filepath: str, var_prefixes: list[str] | str = ..., verbose: bool = ...) -> None: ...
 
     def _update_subproblem_rhs(self, x_sol: dict[Arc, float]) -> None:
@@ -92,10 +116,10 @@ class BendersOptimizeMixin:
             constr.RHS = 1 - x_sol[i, j]
 
         # R3 / R4 strengthening constraints (parameterised by x)
-        for (i, j, k, s), constr in self.constrs_y.get("r3", {}).items():
+        for (i, j, k, s), constr in self.constrs_y.get("r3", {}).items():  # type: ignore[misc]
             constr.RHS = 1 - x_sol.get((j, i), 0.0) - x_sol.get((k, s), 0.0)
 
-        for (i, j, k, s), constr in self.constrs_yp.get("r3_p", {}).items():
+        for (i, j, k, s), constr in self.constrs_yp.get("r3_p", {}).items():  # type: ignore[misc]
             constr.RHS = 1 - x_sol.get((i, j), 0.0) - x_sol.get((s, k), 0.0)
 
     def _benders_callback(self, model: gp.Model, where: int) -> None:
@@ -181,7 +205,7 @@ class BendersOptimizeMixin:
                     # --- CGSP / deepest-cut branch ---
                     cut_expr_y, cut_rhs_y, _witness_y = self.get_cgsp_cut_y(x_sol, eta_sol=eta_sol, TOL=TOL)
                     if cut_expr_y is not None:
-                        model.cbLazy(cut_expr_y <= cut_rhs_y)
+                        model.cbLazy(cut_expr_y <= cut_rhs_y)  # type: ignore[operator]
             elif use_ddma and (
                 y_status == GRB.INFEASIBLE
                 or (self.benders_method == "pi" and y_status == GRB.OPTIMAL and y_objval is not None and y_objval > TOL)
@@ -189,7 +213,7 @@ class BendersOptimizeMixin:
                 # --- DDMA branch (F3) ---
                 cut_expr_y, cut_rhs_y, _witness_y = self.get_ddma_cut_y(x_sol, eta_sol=eta_sol, TOL=TOL)
                 if cut_expr_y is not None:
-                    model.cbLazy(cut_expr_y <= cut_rhs_y)
+                    model.cbLazy(cut_expr_y <= cut_rhs_y)  # type: ignore[operator]
             elif use_mw and (
                 y_status == GRB.INFEASIBLE
                 or (self.benders_method == "pi" and y_status == GRB.OPTIMAL and y_objval is not None and y_objval > TOL)
@@ -197,7 +221,7 @@ class BendersOptimizeMixin:
                 # --- Magnanti-Wong branch ---
                 cut_expr_y, cut_rhs_y, _witness_y = self.get_mw_cut_y(x_sol, TOL=TOL)
                 if cut_expr_y is not None:
-                    model.cbLazy(cut_expr_y <= cut_rhs_y)
+                    model.cbLazy(cut_expr_y <= cut_rhs_y)  # type: ignore[operator]
                 else:
                     # MW fallback to legacy
                     if self.benders_method == "farkas":
@@ -242,17 +266,17 @@ class BendersOptimizeMixin:
                 # --- CGSP / deepest-cut branch ---
                 cut_expr_yp, cut_rhs_yp, _witness_yp = self.get_cgsp_cut_yp(x_sol, TOL=TOL)
                 if cut_expr_yp is not None:
-                    model.cbLazy(cut_expr_yp <= cut_rhs_yp)
+                    model.cbLazy(cut_expr_yp <= cut_rhs_yp)  # type: ignore[operator]
             elif use_ddma and _yp_violated:
                 # --- DDMA branch (F3) ---
                 cut_expr_yp, cut_rhs_yp, _witness_yp = self.get_ddma_cut_yp(x_sol, TOL=TOL)
                 if cut_expr_yp is not None:
-                    model.cbLazy(cut_expr_yp <= cut_rhs_yp)
+                    model.cbLazy(cut_expr_yp <= cut_rhs_yp)  # type: ignore[operator]
             elif use_mw and _yp_violated:
                 # --- Magnanti-Wong branch ---
                 cut_expr_yp, cut_rhs_yp, _witness_yp = self.get_mw_cut_yp(x_sol, TOL=TOL)
                 if cut_expr_yp is not None:
-                    model.cbLazy(cut_expr_yp <= cut_rhs_yp)
+                    model.cbLazy(cut_expr_yp <= cut_rhs_yp)  # type: ignore[operator]
                 else:
                     # MW fallback to legacy
                     if self.benders_method == "farkas":
@@ -470,7 +494,7 @@ class BendersOptimizeMixin:
             if use_deepest and needs_cut_y:
                 cut_expr_y, cut_rhs_y, _witness_y = self.get_cgsp_cut_y(x_sol, eta_sol=eta_sol, TOL=TOL)
                 if cut_expr_y is not None:
-                    self.model.addConstr(cut_expr_y <= cut_rhs_y, name=f"lp_cgsp_y_{self.iteration}")
+                    self.model.addConstr(cut_expr_y <= cut_rhs_y, name=f"lp_cgsp_y_{self.iteration}")  # type: ignore[operator]
                 else:
                     converged_y = True
             elif use_deepest and not needs_cut_y:
@@ -479,7 +503,7 @@ class BendersOptimizeMixin:
                 # --- DDMA branch (F3) ---
                 cut_expr_y, cut_rhs_y, _witness_y = self.get_ddma_cut_y(x_sol, eta_sol=eta_sol, TOL=TOL)
                 if cut_expr_y is not None:
-                    self.model.addConstr(cut_expr_y <= cut_rhs_y, name=f"lp_ddma_y_{self.iteration}")
+                    self.model.addConstr(cut_expr_y <= cut_rhs_y, name=f"lp_ddma_y_{self.iteration}")  # type: ignore[operator]
                 else:
                     converged_y = True
             elif use_ddma and not needs_cut_y:
@@ -488,7 +512,7 @@ class BendersOptimizeMixin:
                 # --- Magnanti-Wong branch ---
                 cut_expr_y, cut_rhs_y, _witness_y = self.get_mw_cut_y(x_sol, TOL=TOL)
                 if cut_expr_y is not None:
-                    self.model.addConstr(cut_expr_y <= cut_rhs_y, name=f"lp_mw_y_{self.iteration}")
+                    self.model.addConstr(cut_expr_y <= cut_rhs_y, name=f"lp_mw_y_{self.iteration}")  # type: ignore[operator]
                 else:
                     # MW fallback to legacy
                     if self.benders_method == "farkas":
@@ -546,7 +570,7 @@ class BendersOptimizeMixin:
             if use_deepest and needs_cut_yp:
                 cut_expr_yp, cut_rhs_yp, _witness_yp = self.get_cgsp_cut_yp(x_sol, TOL=TOL)
                 if cut_expr_yp is not None:
-                    self.model.addConstr(cut_expr_yp <= cut_rhs_yp, name=f"lp_cgsp_yp_{self.iteration}")
+                    self.model.addConstr(cut_expr_yp <= cut_rhs_yp, name=f"lp_cgsp_yp_{self.iteration}")  # type: ignore[operator]
                 else:
                     converged_yp = True
             elif use_deepest and not needs_cut_yp:
@@ -555,7 +579,7 @@ class BendersOptimizeMixin:
                 # --- DDMA branch (F3) ---
                 cut_expr_yp, cut_rhs_yp, _witness_yp = self.get_ddma_cut_yp(x_sol, TOL=TOL)
                 if cut_expr_yp is not None:
-                    self.model.addConstr(cut_expr_yp <= cut_rhs_yp, name=f"lp_ddma_yp_{self.iteration}")
+                    self.model.addConstr(cut_expr_yp <= cut_rhs_yp, name=f"lp_ddma_yp_{self.iteration}")  # type: ignore[operator]
                 else:
                     converged_yp = True
             elif use_ddma and not needs_cut_yp:
@@ -564,7 +588,7 @@ class BendersOptimizeMixin:
                 # --- Magnanti-Wong branch ---
                 cut_expr_yp, cut_rhs_yp, _witness_yp = self.get_mw_cut_yp(x_sol, TOL=TOL)
                 if cut_expr_yp is not None:
-                    self.model.addConstr(cut_expr_yp <= cut_rhs_yp, name=f"lp_mw_yp_{self.iteration}")
+                    self.model.addConstr(cut_expr_yp <= cut_rhs_yp, name=f"lp_mw_yp_{self.iteration}")  # type: ignore[operator]
                 else:
                     # MW fallback to legacy
                     if self.benders_method == "farkas":

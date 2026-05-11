@@ -163,7 +163,7 @@ class BendersFarkasMixin:
         if plot:
             plot_strengthening_constraints(
                 points=self.points,
-                ch=self.CH,
+                ch=self.CH,  # type: ignore[arg-type]
                 x_keys=list(self.x.keys()),
                 crossing_pairs=crossing_pairs,
             )
@@ -177,28 +177,28 @@ class BendersFarkasMixin:
         for (i, j), constr in self.constrs_y["alpha"].items():
             farkas = constr.FarkasDual
             if abs(farkas) > TOL:
-                v_comps["alpha"][i, j] = farkas
+                v_comps["alpha"][i, j] = farkas  # type: ignore[index]
                 cut_y_expr += farkas * self.x[i, j]
                 cut_y_val += farkas * x_sol[i, j]
 
         for (i, j), constr in self.constrs_y["beta"].items():
             farkas = constr.FarkasDual
             if abs(farkas) > TOL:
-                v_comps["beta"][i, j] = farkas
+                v_comps["beta"][i, j] = farkas  # type: ignore[index]
                 cut_y_expr += farkas * (self.x[i, j] - self.x[j, i])
                 cut_y_val += farkas * (x_sol[i, j] - x_sol[j, i])
 
         for (i, j), constr in self.constrs_y["gamma"].items():
             farkas = constr.FarkasDual
             if abs(farkas) > TOL:
-                v_comps["gamma"][i, j] = farkas
+                v_comps["gamma"][i, j] = farkas  # type: ignore[index]
                 cut_y_expr += farkas * self.x[i, j]
                 cut_y_val += farkas * x_sol[i, j]
 
         for (i, j), constr in self.constrs_y["delta"].items():
             farkas = constr.FarkasDual
             if abs(farkas) > TOL:
-                v_comps["delta"][i, j] = farkas
+                v_comps["delta"][i, j] = farkas  # type: ignore[index]
                 cut_y_expr += farkas * (1 - self.x[j, i])
                 cut_y_val += farkas * (1 - x_sol[j, i])
 
@@ -249,28 +249,28 @@ class BendersFarkasMixin:
         for (i, j), constr in self.constrs_yp["alpha_p"].items():
             farkas = constr.FarkasDual
             if abs(farkas) > TOL:
-                v_comps_p["alpha_p"][i, j] = farkas
+                v_comps_p["alpha_p"][i, j] = farkas  # type: ignore[index]
                 cut_yp_expr += farkas * (1 - self.x[i, j])
                 cut_yp_val += farkas * (1 - x_sol[i, j])
 
         for (i, j), constr in self.constrs_yp["beta_p"].items():
             farkas = constr.FarkasDual
             if abs(farkas) > TOL:
-                v_comps_p["beta_p"][i, j] = farkas
+                v_comps_p["beta_p"][i, j] = farkas  # type: ignore[index]
                 cut_yp_expr += farkas * (self.x[j, i] - self.x[i, j])
                 cut_yp_val += farkas * (x_sol[j, i] - x_sol[i, j])
 
         for (i, j), constr in self.constrs_yp["gamma_p"].items():
             farkas = constr.FarkasDual
             if abs(farkas) > TOL:
-                v_comps_p["gamma_p"][i, j] = farkas
+                v_comps_p["gamma_p"][i, j] = farkas  # type: ignore[index]
                 cut_yp_expr += farkas * self.x[j, i]
                 cut_yp_val += farkas * x_sol[j, i]
 
         for (i, j), constr in self.constrs_yp["delta_p"].items():
             farkas = constr.FarkasDual
             if abs(farkas) > TOL:
-                v_comps_p["delta_p"][i, j] = farkas
+                v_comps_p["delta_p"][i, j] = farkas  # type: ignore[index]
                 cut_yp_expr += farkas * (1 - self.x[i, j])
                 cut_yp_val += farkas * (1 - x_sol[i, j])
 
@@ -322,28 +322,28 @@ class BendersFarkasMixin:
         for (i, j), constr in self.constrs_y["alpha"].items():
             pi = constr.Pi
             if abs(pi) > TOL:
-                v_comps["alpha"][i, j] = pi
+                v_comps["alpha"][i, j] = pi  # type: ignore[index]
                 cut_y_expr += pi * self.x[i, j]
                 cut_y_val += pi * x_sol[i, j]
 
         for (i, j), constr in self.constrs_y["beta"].items():
             pi = constr.Pi
             if abs(pi) > TOL:
-                v_comps["beta"][i, j] = pi
+                v_comps["beta"][i, j] = pi  # type: ignore[index]
                 cut_y_expr += pi * (self.x[i, j] - self.x[j, i])
                 cut_y_val += pi * (x_sol[i, j] - x_sol[j, i])
 
         for (i, j), constr in self.constrs_y["gamma"].items():
             pi = constr.Pi
             if abs(pi) > TOL:
-                v_comps["gamma"][i, j] = pi
+                v_comps["gamma"][i, j] = pi  # type: ignore[index]
                 cut_y_expr += pi * self.x[i, j]
                 cut_y_val += pi * x_sol[i, j]
 
         for (i, j), constr in self.constrs_y["delta"].items():
             pi = constr.Pi
             if abs(pi) > TOL:
-                v_comps["delta"][i, j] = pi
+                v_comps["delta"][i, j] = pi  # type: ignore[index]
                 cut_y_expr += pi * (1 - self.x[j, i])
                 cut_y_val += pi * (1 - x_sol[j, i])
 
@@ -388,28 +388,28 @@ class BendersFarkasMixin:
         for (i, j), constr in self.constrs_yp["alpha_p"].items():
             pi = constr.Pi
             if abs(pi) > TOL:
-                v_comps["alpha_p"][i, j] = pi
+                v_comps["alpha_p"][i, j] = pi  # type: ignore[index]
                 cut_yp_expr += pi * (1 - self.x[i, j])
                 cut_yp_val += pi * (1 - x_sol[i, j])
 
         for (i, j), constr in self.constrs_yp["beta_p"].items():
             pi = constr.Pi
             if abs(pi) > TOL:
-                v_comps["beta_p"][i, j] = pi
+                v_comps["beta_p"][i, j] = pi  # type: ignore[index]
                 cut_yp_expr += pi * (self.x[j, i] - self.x[i, j])
                 cut_yp_val += pi * (x_sol[j, i] - x_sol[i, j])
 
         for (i, j), constr in self.constrs_yp["gamma_p"].items():
             pi = constr.Pi
             if abs(pi) > TOL:
-                v_comps["gamma_p"][i, j] = pi
+                v_comps["gamma_p"][i, j] = pi  # type: ignore[index]
                 cut_yp_expr += pi * self.x[j, i]
                 cut_yp_val += pi * x_sol[j, i]
 
         for (i, j), constr in self.constrs_yp["delta_p"].items():
             pi = constr.Pi
             if abs(pi) > TOL:
-                v_comps["delta_p"][i, j] = pi
+                v_comps["delta_p"][i, j] = pi  # type: ignore[index]
                 cut_yp_expr += pi * (1 - self.x[i, j])
                 cut_yp_val += pi * (1 - x_sol[i, j])
 

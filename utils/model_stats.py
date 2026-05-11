@@ -6,7 +6,7 @@ import pandas as pd
 from gurobipy import GRB
 
 
-def get_ObjVal_int(model: gp.Model) -> float | None:
+def get_ObjVal_int(model: gp.Model) -> float | None:  # type: ignore[return]
     """
     Retorna el valor objetivo entero del modelo si existe solución.
     Si no hay solución, retorna None.

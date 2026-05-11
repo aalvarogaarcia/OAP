@@ -17,8 +17,8 @@ def get_var_name(arc):  # type: ignore[no-untyped-def]
     return f"x_{arc[0]}_{arc[1]}"
 
 
-vars_left = [get_var_name(a) for a in arcs_left]
-vars_right = [get_var_name(a) for a in arcs_right]
+vars_left = [get_var_name(a) for a in arcs_left]  # type: ignore[no-untyped-call]
+vars_right = [get_var_name(a) for a in arcs_right]  # type: ignore[no-untyped-call]
 all_vars = vars_left + vars_right
 
 
@@ -53,7 +53,7 @@ def get_valid_cases(a_left, a_right, posiciones, constant: int = 0):  # type: ig
     for a in a_left:
         reverse = (a[1], a[0])
         if reverse in a_right:
-            anti_pairs.append((get_var_name(a), get_var_name(reverse)))
+            anti_pairs.append((get_var_name(a), get_var_name(reverse)))  # type: ignore[no-untyped-call]
 
     valid = []
     for comb in itertools.product([0, 1], repeat=len(all_vars)):
@@ -66,7 +66,7 @@ def get_valid_cases(a_left, a_right, posiciones, constant: int = 0):  # type: ig
         if any(d[v1] + d[v2] > 1 for v1, v2 in anti_pairs):
             continue
 
-        active_arcs = [a for a in all_arcs if d[get_var_name(a)] == 1]
+        active_arcs = [a for a in all_arcs if d[get_var_name(a)] == 1]  # type: ignore[no-untyped-call]
 
         # NUEVO: Filtro de Grado (Máx 1 entrada y Máx 1 salida por nodo)
         in_degree: dict[int, int] = {}
@@ -121,12 +121,12 @@ def mostrar_casos_secuencialmente(casos, posiciones):  # type: ignore[no-untyped
 
     for i, (case_dict, s_l, s_r) in enumerate(casos, 1):
         # Separar arcos
-        active_edges = [a for a in all_arcs if case_dict[get_var_name(a)] == 1]
-        inactive_edges = [a for a in all_arcs if case_dict[get_var_name(a)] == 0]
+        active_edges = [a for a in all_arcs if case_dict[get_var_name(a)] == 1]  # type: ignore[no-untyped-call]
+        inactive_edges = [a for a in all_arcs if case_dict[get_var_name(a)] == 0]  # type: ignore[no-untyped-call]
 
         # 1. Filtramos las tuplas activas de cada lado usando arcs_left y arcs_right
-        activas_izq = [get_var_name(a) for a in active_edges if a in arcs_left]
-        activas_der = [get_var_name(a) for a in active_edges if a in arcs_right]
+        activas_izq = [get_var_name(a) for a in active_edges if a in arcs_left]  # type: ignore[no-untyped-call]
+        activas_der = [get_var_name(a) for a in active_edges if a in arcs_right]  # type: ignore[no-untyped-call]
 
         # 2. Las unimos con un " + " para que parezca una ecuación. Si está vacío, ponemos "0"
         str_izq = " + ".join(activas_izq) if activas_izq else "0"
@@ -160,7 +160,7 @@ def mostrar_casos_secuencialmente(casos, posiciones):  # type: ignore[no-untyped
 
 
 # --- EJECUCIÓN PRINCIPAL ---
-posiciones = load_instance("instance/euro-night-0000010.instance")
+posiciones = load_instance("instance/euro-night-0000010.instance")  # type: ignore[no-untyped-call]
 casos_validos = get_valid_cases(arcs_left, arcs_right, posiciones)
-mostrar_casos_secuencialmente(casos_validos, posiciones)
+mostrar_casos_secuencialmente(casos_validos, posiciones)  # type: ignore[no-untyped-call]
 print("Análisis terminado.")

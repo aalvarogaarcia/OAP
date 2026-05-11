@@ -57,7 +57,7 @@ def _eval_cut(cut_expr: gp.LinExpr, x_sol: dict[str, Any]) -> float:
                 arc = (int(parts[1]), int(parts[2]))
         except (ValueError, IndexError):
             arc = None
-        x_val = x_sol.get(arc, 0.0) if arc is not None else 0.0
+        x_val = x_sol.get(arc, 0.0) if arc is not None else 0.0  # type: ignore[call-overload]
         val += coeff * x_val
     return val
 
@@ -89,7 +89,7 @@ def loaded_instance(request):  # type: ignore[no-untyped-def]
 def test_cgsp_cut_yp_violated_at_x_bar(loaded_instance):  # type: ignore[no-untyped-def]
     """Cut produced by get_cgsp_cut_yp must be strictly violated at x_bar."""
     instance_name, points, triangles = loaded_instance
-    model = _build_benders(points, triangles, instance_name)
+    model = _build_benders(points, triangles, instance_name)  # type: ignore[no-untyped-call]
 
     # Solve the LP relaxation to get a fractional x_bar that is likely to
     # violate Y' constraints.
@@ -102,7 +102,7 @@ def test_cgsp_cut_yp_violated_at_x_bar(loaded_instance):  # type: ignore[no-unty
     x_sol: dict[str, Any] = {}
     for (i, j), var in model.x.items():
         try:
-            x_sol[(i, j)] = var.X
+            x_sol[(i, j)] = var.X  # type: ignore[index]
         except gp.GurobiError:
             pass
 
@@ -125,7 +125,7 @@ def test_cgsp_cut_yp_violated_at_x_bar(loaded_instance):  # type: ignore[no-unty
 def test_cgsp_cut_y_violated_at_x_bar(loaded_instance):  # type: ignore[no-untyped-def]
     """Cut produced by get_cgsp_cut_y must be strictly violated at x_bar."""
     instance_name, points, triangles = loaded_instance
-    model = _build_benders(points, triangles, instance_name)
+    model = _build_benders(points, triangles, instance_name)  # type: ignore[no-untyped-call]
 
     model.solve(time_limit=30, verbose=False, relaxed=True)
 
@@ -135,7 +135,7 @@ def test_cgsp_cut_y_violated_at_x_bar(loaded_instance):  # type: ignore[no-untyp
     x_sol: dict[str, Any] = {}
     for (i, j), var in model.x.items():
         try:
-            x_sol[(i, j)] = var.X
+            x_sol[(i, j)] = var.X  # type: ignore[index]
         except gp.GurobiError:
             pass
 
@@ -157,7 +157,7 @@ def test_cgsp_cut_y_violated_at_x_bar(loaded_instance):  # type: ignore[no-untyp
 def test_cgsp_cut_yp_none_when_feasible(loaded_instance):  # type: ignore[no-untyped-def]
     """get_cgsp_cut_yp returns None when Y' is feasible at x_bar = 0."""
     instance_name, points, triangles = loaded_instance
-    model = _build_benders(points, triangles, instance_name)
+    model = _build_benders(points, triangles, instance_name)  # type: ignore[no-untyped-call]
 
     # x_sol = all zeros: sub_yp is trivially feasible (RHS ≥ 0 for all constrs)
     x_sol_zero: dict[str, Any] = {arc: 0.0 for arc in model.x}

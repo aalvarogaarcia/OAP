@@ -223,7 +223,7 @@ def run_single_solve(
 
         build_kwargs = dict(METHOD_CONFIG[method])  # shallow copy
         model.build(
-            objective=objective,
+            objective=objective,  # type: ignore[arg-type]
             maximize=maximize,
             **build_kwargs,
         )
@@ -418,7 +418,7 @@ def load_json_config(path: str) -> dict[str, Any]:
         logger.error("Unknown methods in config: %s", unknown_methods)
         sys.exit(1)
 
-    return cfg
+    return cfg  # type: ignore[no-any-return]
 
 
 # ---------------------------------------------------------------------------

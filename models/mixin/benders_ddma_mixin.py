@@ -306,7 +306,7 @@ class BendersDDMAMixin:
             w = weights.get(group, 0.0)
             if isinstance(pi_val, dict):
                 for key, piv in pi_val.items():
-                    rhs_k = _rhs(group, key)
+                    rhs_k = _rhs(group, key)  # type: ignore[arg-type]
                     numerator += piv * rhs_k
                     denominator += w * abs(piv)
             else:
@@ -358,44 +358,44 @@ class BendersDDMAMixin:
                         continue
                     if which == "yp":
                         if group == f"alpha{suffix}":
-                            i, j = key
-                            cut_expr.addTerms([-piv], [self.x[i, j]])
+                            i, j = key  # type: ignore[str-unpack]
+                            cut_expr.addTerms([-piv], [self.x[i, j]])  # type: ignore[index]
                             cut_rhs += -piv * 1.0
                         elif group == f"beta{suffix}":
-                            i, j = key
-                            cut_expr.addTerms([piv, -piv], [self.x[j, i], self.x[i, j]])
+                            i, j = key  # type: ignore[str-unpack]
+                            cut_expr.addTerms([piv, -piv], [self.x[j, i], self.x[i, j]])  # type: ignore[index]
                         elif group == f"gamma{suffix}":
-                            i, j = key
-                            cut_expr.addTerms([piv], [self.x[j, i]])
+                            i, j = key  # type: ignore[str-unpack]
+                            cut_expr.addTerms([piv], [self.x[j, i]])  # type: ignore[index]
                         elif group == f"delta{suffix}":
-                            i, j = key
-                            cut_expr.addTerms([-piv], [self.x[i, j]])
+                            i, j = key  # type: ignore[str-unpack]
+                            cut_expr.addTerms([-piv], [self.x[i, j]])  # type: ignore[index]
                             cut_rhs += -piv * 1.0
                         elif group == f"r2{suffix}":
                             cut_rhs += -piv * 1.0
                         elif group == f"r3{suffix}":
-                            i, j, k, s = key
-                            cut_expr.addTerms([-piv, -piv], [self.x[i, j], self.x[s, k]])
+                            i, j, k, s = key  # type: ignore[str-unpack]
+                            cut_expr.addTerms([-piv, -piv], [self.x[i, j], self.x[s, k]])  # type: ignore[index]
                             cut_rhs += -piv * 1.0
                     else:
                         if group == "alpha":
-                            i, j = key
-                            cut_expr.addTerms([piv], [self.x[i, j]])
+                            i, j = key  # type: ignore[str-unpack]
+                            cut_expr.addTerms([piv], [self.x[i, j]])  # type: ignore[index]
                         elif group == "beta":
-                            i, j = key
-                            cut_expr.addTerms([piv, -piv], [self.x[i, j], self.x[j, i]])
+                            i, j = key  # type: ignore[str-unpack]
+                            cut_expr.addTerms([piv, -piv], [self.x[i, j], self.x[j, i]])  # type: ignore[index]
                         elif group == "gamma":
-                            i, j = key
-                            cut_expr.addTerms([piv], [self.x[i, j]])
+                            i, j = key  # type: ignore[str-unpack]
+                            cut_expr.addTerms([piv], [self.x[i, j]])  # type: ignore[index]
                         elif group == "delta":
-                            i, j = key
-                            cut_expr.addTerms([-piv], [self.x[j, i]])
+                            i, j = key  # type: ignore[str-unpack]
+                            cut_expr.addTerms([-piv], [self.x[j, i]])  # type: ignore[index]
                             cut_rhs += -piv * 1.0
                         elif group == "r2":
                             cut_rhs += -piv * 1.0
                         elif group == "r3":
-                            i, j, k, s = key
-                            cut_expr.addTerms([-piv, -piv], [self.x[j, i], self.x[k, s]])
+                            i, j, k, s = key  # type: ignore[str-unpack]
+                            cut_expr.addTerms([-piv, -piv], [self.x[j, i], self.x[k, s]])  # type: ignore[index]
                             cut_rhs += -piv * 1.0
             else:
                 piv = pi_val

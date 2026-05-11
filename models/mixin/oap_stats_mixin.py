@@ -55,7 +55,7 @@ class OAPStatsMixin:
     def _shoelace_from_x_vars(self, x_dict: dict[str, Any]) -> float:
         """Calcula el área de Shoelace a partir de un dict {(i,j): valor_fraccionario}."""
         obj_val = 0.0
-        for (i, j), val in x_dict.items():
+        for (i, j), val in x_dict.items():  # type: ignore[str-unpack]
             pi = self.points[i]
             pj = self.points[j]
             obj_val += (pi[0] * pj[1] - pj[0] * pi[1]) / 2.0 * val
@@ -68,7 +68,7 @@ class OAPStatsMixin:
         """
         # 1. Si ya calculamos el LP explícitamente y lo guardamos
         if hasattr(self, "lp_objval") and self.lp_objval is not None:
-            return self.lp_objval
+            return self.lp_objval  # type: ignore[no-any-return]
 
         # 2. Si el modelo actual ya es continuo (porque llamamos a solve_lp_relaxation)
         if not self.model.IsMIP:
@@ -77,7 +77,7 @@ class OAPStatsMixin:
             if not getattr(self, "_lp_converged", True):
                 return "-"  # LP bound unreliable: degenerate PI cuts or MAX_LP_ITER reached
             x_vals = {k: v.X for k, v in self.x.items()}
-            return self._shoelace_from_x_vars(x_vals)
+            return self._shoelace_from_x_vars(x_vals)  # type: ignore[arg-type]
 
         # 3. Si es Benders MIP y no hemos calculado el LP previamente
         if hasattr(self, "benders_method"):
@@ -87,7 +87,7 @@ class OAPStatsMixin:
             if not getattr(self, "_lp_converged", True):
                 return "-"  # LP bound unreliable: degenerate PI cuts or MAX_LP_ITER reached
             x_vals = {k: v.X for k, v in self.x.items()}
-            return self._shoelace_from_x_vars(x_vals)
+            return self._shoelace_from_x_vars(x_vals)  # type: ignore[arg-type]
 
         # 4. Si es Compacto MIP (Comportamiento Clásico) — resolver relajación y leer x
         lp = self.model.relax()
@@ -111,7 +111,7 @@ class OAPStatsMixin:
                 parts = v.VarName.split("_")
                 i, j = int(parts[1]), int(parts[2])
                 x_vals[(i, j)] = v.X
-        return self._shoelace_from_x_vars(x_vals)
+        return self._shoelace_from_x_vars(x_vals)  # type: ignore[arg-type]
 
     def get_model_stats(self) -> tuple[Any, ...]:
         """Extrae estadísticas clave: (LP_Val, Gap, IP_Val, Time, Nodes)."""

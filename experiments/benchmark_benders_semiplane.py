@@ -219,7 +219,7 @@ def _dump_profile_csv(
     stats.calc_callees()
 
     rows = []
-    for (filename, lineno, funcname), (prim_calls, total_calls, tottime, cumtime, _callers) in stats.stats.items():
+    for (filename, lineno, funcname), (prim_calls, total_calls, tottime, cumtime, _callers) in stats.stats.items():  # type: ignore[attr-defined]
         if not _is_project_func(filename):
             continue
         row = {
@@ -321,12 +321,12 @@ def run_compact_solve(
 
         model = OAPCompactModel(points, triangles, name=f"bench-{stem}-compact")
         model.build(
-            objective=objective,
+            objective=objective,  # type: ignore[arg-type]
             maximize=maximize,
             subtour="SCF",
             sum_constrain=True,
             strengthen=strengthen,
-            semiplane=semiplane,
+            semiplane=semiplane,  # type: ignore[arg-type]
             use_knapsack=use_knapsack,
             use_cliques=use_cliques,
         )
@@ -430,15 +430,15 @@ def run_benders_solve(
 
         model = OAPBendersModel(points, triangles, name=f"bench-{stem}-{benders_method}")
         model.build(
-            objective=objective,
+            objective=objective,  # type: ignore[arg-type]
             maximize=maximize,
-            benders_method=benders_method,
-            subtour=subtour,
+            benders_method=benders_method,  # type: ignore[arg-type]
+            subtour=subtour,  # type: ignore[arg-type]
             sum_constrain=True,
             crosses_constrain=crosses_constrain,
             strengthen=strengthen,
             use_deepest_cuts=False,
-            semiplane=benders_semiplane,
+            semiplane=benders_semiplane,  # type: ignore[arg-type]
             use_knapsack=use_knapsack,
             use_cliques=use_cliques,
         )

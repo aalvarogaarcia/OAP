@@ -86,13 +86,13 @@ def build_and_solve(
     triangles = compute_triangles(points)
     model = OAPCompactModel(points, triangles, name=instance_name)
     model.build(
-        objective=_OBJECTIVE_MAP[obj],
+        objective=_OBJECTIVE_MAP[obj],  # type: ignore[arg-type]
         mode=mode,
         maximize=maximize,
-        subtour=subtour,
+        subtour=subtour,  # type: ignore[arg-type]
         sum_constrain=sum_constrain,
         strengthen=strengthen,
-        semiplane=semiplane,
+        semiplane=semiplane,  # type: ignore[arg-type]
         use_knapsack=use_knapsack,
         use_cliques=use_cliques,
         crossing_constrain=crossing_constrain,
@@ -217,7 +217,7 @@ def get_batch_config() -> dict[str, object] | None:
     config["time_limit"] = int(config["time_limit_str"].strip())
     del config["time_limit_str"]
 
-    return config
+    return config  # type: ignore[no-any-return]
 
 
 # ---------------------------------------------------------------------------
@@ -370,18 +370,18 @@ if __name__ == "__main__":
         print("\nCancelled.")
     else:
         main(
-            dir_path=_cfg["dir_path"],
-            ext=_cfg["ext"],
-            subtour=_cfg["subtour"],
-            obj=_cfg["obj"],
-            mode=_cfg["mode"],
-            maximize=_cfg["maximize"],
-            sum_constrain=_cfg["sum_constrain"],
-            strengthen=_cfg["strengthen"],
-            semiplane=_cfg["semiplane"],
-            use_knapsack=_cfg["use_knapsack"],
-            use_cliques=_cfg["use_cliques"],
-            crossing_constrain=_cfg["crossing_constrain"],
-            output_name=_cfg["output_name"],
-            time_limit=_cfg["time_limit"],
+            dir_path=_cfg["dir_path"],  # type: ignore[arg-type]
+            ext=_cfg["ext"],  # type: ignore[arg-type]
+            subtour=_cfg["subtour"],  # type: ignore[arg-type]
+            obj=_cfg["obj"],  # type: ignore[arg-type]
+            mode=_cfg["mode"],  # type: ignore[arg-type]
+            maximize=_cfg["maximize"],  # type: ignore[arg-type]
+            sum_constrain=_cfg["sum_constrain"],  # type: ignore[arg-type]
+            strengthen=_cfg["strengthen"],  # type: ignore[arg-type]
+            semiplane=_cfg["semiplane"],  # type: ignore[arg-type]
+            use_knapsack=_cfg["use_knapsack"],  # type: ignore[arg-type]
+            use_cliques=_cfg["use_cliques"],  # type: ignore[arg-type]
+            crossing_constrain=_cfg["crossing_constrain"],  # type: ignore[arg-type]
+            output_name=_cfg["output_name"],  # type: ignore[arg-type]
+            time_limit=_cfg["time_limit"],  # type: ignore[arg-type]
         )
