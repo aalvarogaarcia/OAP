@@ -1194,13 +1194,8 @@ class BendersCGSPMixin:
         """
         cache = getattr(self, "_cgsp_y_cache", None)
         if cache is None:
-<<<<<<< HEAD
-            cgsp, pi_vars, pi0_var = self._build_cgsp_y(x_sol, TOL=TOL)
-            self._cgsp_y_cache: tuple[gp.Model, dict, gp.Var | None] = (cgsp, pi_vars, pi0_var)
-=======
             cgsp, pi_vars, pi0_var = self._build_cgsp_y(x_sol, eta_sol=eta_sol, TOL=TOL)
             self._cgsp_y_cache: tuple[gp.Model, dict, "gp.Var | None"] = (cgsp, pi_vars, pi0_var)
->>>>>>> a7e9ac515eab256bc2bf25181295cd98350864a3
             return cgsp, pi_vars, pi0_var
         cgsp, pi_vars, pi0_var = cache
         new_obj = self._cgsp_y_obj_expr(pi_vars, x_sol, eta_sol=eta_sol)
