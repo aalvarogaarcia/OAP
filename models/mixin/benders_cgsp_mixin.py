@@ -164,7 +164,7 @@ class BendersCGSPMixin:
         which: str,
         constrs: dict,
         include_pi0: bool = False,
-        x_sol: "dict[Arc, float] | None" = None,
+        x_sol: dict[Arc, float] | None = None,
     ) -> dict[str, float | dict[tuple, float]]:
         """Build the weight dictionary for the L₁ normalisation constraint.
 
@@ -238,6 +238,89 @@ class BendersCGSPMixin:
                 weights["pi0"] = 1.0
 
         return weights
+
+    # ------------------------------------------------------------------
+    # Helper: static Relaxed-ℓ₁ weights from constraint structure
+    # ------------------------------------------------------------------
+
+    def _compute_relaxed_l1_weights(
+        self,
+        which: str,
+    ) -> dict[str, float | dict[tuple, float]]:
+        """Return static Relaxed-ℓ₁ weights derived from the constraint structure.
+
+        Called at build time (after ``build_farkas/pi_subproblems``) when
+        ``use_deepest_cuts=True`` and ``cgsp_norm='relaxed_l1'`` and no explicit
+        ``cut_weights_y/yp`` were supplied by the caller.
+
+        Weights are based on the number of master x-variables that appear in
+        each constraint's RHS  ``b_i(x̄)``  (Hosseini & Turner 2025, §3.3.2):
+
+            w = 1   for groups whose RHS contains one x-variable
+                    (alpha, gamma, delta and their ``_p`` counterparts)
+            w = 2   for groups whose RHS contains two x-variables
+                    (beta: ``x[j,i] - x[i,j]``; r3: ``1 - x[a] - x[b]``)
+            w = 0   for constant-RHS groups whose RHS does not depend on x̄
+                    (global, r1, r2 and their ``_p`` counterparts)
+
+        This matches the weight scheme documented and used by
+        ``BendersDDMAMixin._get_ddma_weights``, extended here to the full
+        nested-dict format expected by ``_resolve_weights``.
+
+        Parameters
+        ----------
+        which : 'y' | 'yp'
+            Selects ``self.constrs_y`` (``which='y'``) or
+            ``self.constrs_yp`` (``which='yp'``).
+
+        Returns
+        -------
+        dict
+            Mirrors the structure of ``constrs_y / constrs_yp``:
+
+            * If a constraint-group value is a ``dict[Arc, gp.Constr]``,
+              the returned entry is ``dict[Arc, float]`` with every arc
+              mapped to the group's scalar weight.
+            * If a constraint-group value is a scalar ``gp.Constr``,
+              the returned entry is a single ``float``.
+
+            Unknown group names default to weight ``1.0``.
+
+        Notes
+        -----
+        These are *structural* (x̄-independent) approximations of the true
+        Relaxed-ℓ₁ weights  ``1/(|b_i(x̄)| + ε)``.  The dynamic per-callback
+        version is computed inside ``_resolve_weights`` when ``cgsp_norm='relaxed_l1'``
+        and ``x_sol`` is provided.  Storing static weights here causes
+        ``_resolve_weights`` to enter the ``user_weights`` branch, which is
+        intentional: it pre-loads the normalisation with structural information
+        before the first x̄ is available.
+        """
+        constrs = self.constrs_yp if which == "yp" else self.constrs_y
+        suffix = "_p" if which == "yp" else ""
+
+        # Group-level structural weights — matches BendersDDMAMixin._get_ddma_weights
+        _group_weight: dict[str, float] = {
+            f"alpha{suffix}":  1.0,  # RHS = 1 - x[i,j]          → 1 x-var
+            f"beta{suffix}":   2.0,  # RHS = x[j,i] - x[i,j]     → 2 x-vars
+            f"gamma{suffix}":  1.0,  # RHS = x[j,i]               → 1 x-var
+            f"delta{suffix}":  1.0,  # RHS = 1 - x[i,j]           → 1 x-var
+            f"global{suffix}": 0.0,  # constant RHS               → 0
+            f"r1{suffix}":     0.0,  # constant RHS               → 0
+            f"r2{suffix}":     0.0,  # constant RHS = 1           → 0
+            f"r3{suffix}":     2.0,  # RHS = 1 - x[a] - x[b]     → 2 x-vars
+        }
+
+        result: dict[str, float | dict[tuple, float]] = {}
+        for key, val in constrs.items():
+            w = _group_weight.get(key, 1.0)  # unknown groups default to 1.0
+            if isinstance(val, dict):
+                result[key] = {arc_key: w for arc_key in val}
+            else:
+                # scalar gp.Constr
+                result[key] = w
+
+        return result
 
     # ------------------------------------------------------------------
     # B-1: Dual feasibility constraints  A^T π ≤ 0
@@ -739,10 +822,10 @@ class BendersCGSPMixin:
 
     def _reconstruct_cut_from_pi(
         self,
-        pi_vars: "dict[str, gp.Var | gp.tupledict]",
+        pi_vars: dict[str, gp.Var | gp.tupledict],
         which: str,  # "y" or "yp"
         TOL: float = _CGSP_TOL,
-    ) -> "tuple[gp.LinExpr, float, dict]":
+    ) -> tuple[gp.LinExpr, float, dict]:
         """Reconstruct a Benders cut from an already-solved pi_vars dict.
 
         This is the shared cut-reconstruction logic, separated so that both
@@ -978,6 +1061,18 @@ class BendersCGSPMixin:
 
         return obj
 
+    def invalidate_cgsp_cache(self) -> None:
+        """Reset the CGSP LP caches so the next callback rebuilds them from scratch.
+
+        Call this whenever the weights or constraint structure change at build
+        time (e.g. after ``_compute_relaxed_l1_weights`` stores new weights into
+        ``cut_weights_y / cut_weights_yp``).  Setting both cache attributes to
+        ``None`` causes ``_get_or_build_cgsp_yp`` and ``_get_or_build_cgsp_y``
+        to treat the next invocation as a first call and rebuild the full LP.
+        """
+        self._cgsp_yp_cache = None
+        self._cgsp_y_cache = None
+
     def _get_or_build_cgsp_yp(
         self,
         x_sol: dict[Arc, float],
@@ -1006,7 +1101,7 @@ class BendersCGSPMixin:
         x_sol: dict[Arc, float],
         eta_sol: float = 0.0,
         TOL: float = _CGSP_TOL,
-    ) -> tuple[gp.Model, dict, "gp.Var | None"]:
+    ) -> tuple[gp.Model, dict, gp.Var | None]:
         """Return a cached (and updated) CGSP Y model, building it on first call.
 
         On first call: delegates to _build_cgsp_y and stores result.
@@ -1021,7 +1116,7 @@ class BendersCGSPMixin:
         cache = getattr(self, "_cgsp_y_cache", None)
         if cache is None:
             cgsp, pi_vars, pi0_var = self._build_cgsp_y(x_sol, TOL=TOL)
-            self._cgsp_y_cache: tuple[gp.Model, dict, "gp.Var | None"] = (cgsp, pi_vars, pi0_var)
+            self._cgsp_y_cache: tuple[gp.Model, dict, gp.Var | None] = (cgsp, pi_vars, pi0_var)
             return cgsp, pi_vars, pi0_var
         cgsp, pi_vars, pi0_var = cache
         # For Y, delegate full rebuild to avoid eta_sol complexity for now.
@@ -1157,7 +1252,7 @@ class BendersCGSPMixin:
 def _rhs_for_key(
     group: str,
     arc_key: tuple,
-    x_sol: "dict[tuple, float]",
+    x_sol: dict[tuple, float],
     model: object,
 ) -> float:
     """Return the RHS value b_i(x_bar) for a given constraint group and key.

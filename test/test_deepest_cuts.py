@@ -272,3 +272,159 @@ def test_optimality_cut_flag_absent_for_fekete(warmup_rhs):
     assert witness.get("is_optimality_cut", False) is not True, (
         "Fekete objective must not produce an optimality cut witness."
     )
+
+
+# ---------------------------------------------------------------------------
+# Test 8a: _compute_relaxed_l1_weights — structure mirrors constrs_yp
+# ---------------------------------------------------------------------------
+
+def test_compute_relaxed_l1_weights_structure(built_benders_farkas):
+    """_compute_relaxed_l1_weights returns a dict with the same nested structure
+    as constrs_yp: dict-valued groups map every arc key to a float, scalar
+    groups map to a single float."""
+    model = built_benders_farkas
+
+    weights_yp = model._compute_relaxed_l1_weights("yp")
+    weights_y  = model._compute_relaxed_l1_weights("y")
+
+
+    for which, weights, constrs in (
+        ("yp", weights_yp, model.constrs_yp),
+        ("y",  weights_y,  model.constrs_y),
+    ):
+        assert set(weights.keys()) == set(constrs.keys()), (
+            f"_compute_relaxed_l1_weights('{which}') keys must match constrs_{which} keys. "
+            f"Got {set(weights.keys())}, expected {set(constrs.keys())}."
+        )
+        for key, val in constrs.items():
+            w = weights[key]
+            if isinstance(val, dict):
+                assert isinstance(w, dict), (
+                    f"Group '{key}' is arc-indexed in constrs_{which} — "
+                    f"weight must also be a dict, got {type(w)}."
+                )
+                assert set(w.keys()) == set(val.keys()), (
+                    f"Arc keys for group '{key}' differ: "
+                    f"got {set(w.keys())}, expected {set(val.keys())}."
+                )
+                for arc_key, wv in w.items():
+                    assert isinstance(wv, float), (
+                        f"Weight for {key}[{arc_key}] must be float, got {type(wv)}."
+                    )
+            else:
+                assert isinstance(w, float), (
+                    f"Scalar group '{key}' weight must be float, got {type(w)}."
+                )
+
+
+# ---------------------------------------------------------------------------
+# Test 8b: _compute_relaxed_l1_weights — group-level values are correct
+# ---------------------------------------------------------------------------
+
+def test_compute_relaxed_l1_weights_group_values(built_benders_farkas):
+    """Structural weights follow the Relaxed-ℓ₁ table:
+        alpha/gamma/delta → 1.0, beta/r3 → 2.0, global/r1/r2 → 0.0.
+    Groups absent from the model are simply skipped."""
+    model = built_benders_farkas
+
+    # Expected structural weights per group name
+    _EXPECTED: dict[str, float] = {
+        "alpha":    1.0,
+        "beta":     2.0,
+        "gamma":    1.0,
+        "delta":    1.0,
+        "global":   0.0,
+        "r1":       0.0,
+        "r2":       0.0,
+        "r3":       2.0,
+        "alpha_p":  1.0,
+        "beta_p":   2.0,
+        "gamma_p":  1.0,
+        "delta_p":  1.0,
+        "global_p": 0.0,
+        "r1_p":     0.0,
+        "r2_p":     0.0,
+        "r3_p":     2.0,
+    }
+
+    for which in ("y", "yp"):
+        weights = model._compute_relaxed_l1_weights(which)
+        for key, val in weights.items():
+            if key not in _EXPECTED:
+                continue  # unknown group — skip assertion
+            expected_w = _EXPECTED[key]
+            if isinstance(val, dict):
+                for arc_key, wv in val.items():
+                    assert wv == pytest.approx(expected_w), (
+                        f"Weight for {key}[{arc_key}] (which='{which}'): "
+                        f"expected {expected_w}, got {wv}."
+                    )
+            else:
+                assert val == pytest.approx(expected_w), (
+                    f"Scalar weight for '{key}' (which='{which}'): "
+                    f"expected {expected_w}, got {val}."
+                )
+
+
+# ---------------------------------------------------------------------------
+# Test 8c: build(use_deepest_cuts=True, cgsp_norm="relaxed_l1") does not crash
+# ---------------------------------------------------------------------------
+
+def test_build_with_use_deepest_cuts_relaxed_l1(small_instance):
+    """build(use_deepest_cuts=True, cgsp_norm='relaxed_l1') must not raise
+    AttributeError and must populate cut_weights_y / cut_weights_yp."""
+    points, triangles, _ = small_instance
+    from models.OAPBendersModel import OAPBendersModel
+
+    model = OAPBendersModel(points, triangles, name="test_rl1_build")
+    # This previously crashed with:
+    #   AttributeError: 'OAPBendersModel' object has no attribute
+    #   '_compute_relaxed_l1_weights'
+    model.build(
+        objective="Fekete",
+        maximize=False,
+        benders_method="farkas",
+        use_deepest_cuts=True,
+        cgsp_norm="relaxed_l1",
+    )
+
+    assert model.cut_weights_y is not None, (
+        "cut_weights_y must be a dict after build(use_deepest_cuts=True, "
+        "cgsp_norm='relaxed_l1')."
+    )
+    assert model.cut_weights_yp is not None, (
+        "cut_weights_yp must be a dict after build(use_deepest_cuts=True, "
+        "cgsp_norm='relaxed_l1')."
+    )
+    assert len(model.cut_weights_y) > 0, "cut_weights_y must not be empty."
+    assert len(model.cut_weights_yp) > 0, "cut_weights_yp must not be empty."
+
+
+# ---------------------------------------------------------------------------
+# Test 9: invalidate_cgsp_cache resets both cache attributes to None
+# ---------------------------------------------------------------------------
+
+def test_invalidate_cgsp_cache(warmup_rhs):
+    """invalidate_cgsp_cache must set _cgsp_yp_cache and _cgsp_y_cache to None."""
+    model, x_sol = warmup_rhs
+
+    # Populate the caches by triggering one CGSP build
+    model._get_or_build_cgsp_yp(x_sol)
+    model._get_or_build_cgsp_y(x_sol, eta_sol=0.0)
+
+    assert model._cgsp_yp_cache is not None, (
+        "Cache should be populated after _get_or_build_cgsp_yp."
+    )
+    assert model._cgsp_y_cache is not None, (
+        "Cache should be populated after _get_or_build_cgsp_y."
+    )
+
+    # Invalidate
+    model.invalidate_cgsp_cache()
+
+    assert model._cgsp_yp_cache is None, (
+        "_cgsp_yp_cache must be None after invalidate_cgsp_cache()."
+    )
+    assert model._cgsp_y_cache is None, (
+        "_cgsp_y_cache must be None after invalidate_cgsp_cache()."
+    )
