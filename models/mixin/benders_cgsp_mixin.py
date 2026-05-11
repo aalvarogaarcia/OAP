@@ -1096,6 +1096,91 @@ class BendersCGSPMixin:
         cgsp.update()
         return cgsp, pi_vars
 
+    def _cgsp_y_obj_expr(
+        self,
+        pi_vars: dict,
+        x_sol: dict[Arc, float],
+        eta_sol: float = 0.0,
+    ) -> gp.LinExpr:
+        """Rebuild the CGSP Y objective LinExpr from cached pi_vars + new x_sol/eta_sol.
+
+        Mirrors _cgsp_yp_obj_expr but for Y constraints.
+        """
+        obj = gp.LinExpr()
+
+        # alpha: RHS = x[i,j]
+        u_a = pi_vars.get("u_alpha")
+        v_a = pi_vars.get("v_alpha")
+        if u_a is not None:
+            for k in u_a.keys():
+                rhs = x_sol.get(k, 0.0)
+                obj.addTerms([rhs, -rhs], [u_a[k], v_a[k]])
+
+        # beta: RHS = x[i,j] - x[j,i]
+        u_b = pi_vars.get("u_beta")
+        v_b = pi_vars.get("v_beta")
+        if u_b is not None:
+            for k in u_b.keys():
+                i, j = k
+                rhs = x_sol.get((i, j), 0.0) - x_sol.get((j, i), 0.0)
+                obj.addTerms([rhs, -rhs], [u_b[k], v_b[k]])
+
+        # gamma: RHS = x[i,j]  (only u, no v)
+        u_g = pi_vars.get("u_gamma")
+        if u_g is not None:
+            for k in u_g.keys():
+                rhs = x_sol.get(k, 0.0)
+                obj.addTerms([rhs], [u_g[k]])
+
+        # delta: RHS = 1 - x[j,i]  (only v, π_δ = -v_δ → -rhs * v)
+        v_d = pi_vars.get("v_delta")
+        if v_d is not None:
+            for k in v_d.keys():
+                i, j = k
+                rhs = 1.0 - x_sol.get((j, i), 0.0)
+                obj.addTerms([-rhs], [v_d[k]])
+
+        # global: fixed RHS
+        u_gl = pi_vars.get("u_global")
+        v_gl = pi_vars.get("v_global")
+        if u_gl is not None and v_gl is not None:
+            rhs = self.constrs_y["global"].RHS  # type: ignore[attr-defined]
+            obj.addTerms([rhs, -rhs], [u_gl, v_gl])
+
+        # r1: fixed RHS = convex_hull_area
+        u_r1 = pi_vars.get("u_r1")
+        v_r1 = pi_vars.get("v_r1")
+        if u_r1 is not None and v_r1 is not None:
+            rhs = self.convex_hull_area  # type: ignore[attr-defined]
+            obj.addTerms([rhs, -rhs], [u_r1, v_r1])
+
+        # r2: fixed RHS = 1
+        u_r2 = pi_vars.get("u_r2")
+        v_r2 = pi_vars.get("v_r2")
+        if u_r2 is not None:
+            for k in u_r2.keys():
+                obj.addTerms([1.0, -1.0], [u_r2[k], v_r2[k]])
+
+        # r3: RHS = 1 - x[j,i] - x[k,s]
+        u_r3 = pi_vars.get("u_r3")
+        v_r3 = pi_vars.get("v_r3")
+        if u_r3 is not None:
+            for k in u_r3.keys():
+                i, j, ks, s = k
+                rhs = 1.0 - x_sol.get((j, i), 0.0) - x_sol.get((ks, s), 0.0)
+                obj.addTerms([rhs, -rhs], [u_r3[k], v_r3[k]])
+
+        # pi0 for Internal objective: contribution = pi0 * (f^T x - eta)
+        pi0_pos = pi_vars.get("pi0_pos")
+        pi0_neg = pi_vars.get("pi0_neg")
+        if pi0_pos is not None and pi0_neg is not None:
+            cost_x: dict = getattr(self, "_cost_x", {})
+            f_dot_x = sum(cost_x.get(arc, 0.0) * x_sol.get(arc, 0.0) for arc in cost_x)
+            contrib = f_dot_x - eta_sol
+            obj.addTerms([contrib, -contrib], [pi0_pos, pi0_neg])
+
+        return obj
+
     def _get_or_build_cgsp_y(
         self,
         x_sol: dict[Arc, float],
@@ -1104,26 +1189,24 @@ class BendersCGSPMixin:
     ) -> tuple[gp.Model, dict, gp.Var | None]:
         """Return a cached (and updated) CGSP Y model, building it on first call.
 
-        On first call: delegates to _build_cgsp_y and stores result.
-        On subsequent calls: rebuilds via _build_cgsp_y because the Y subproblem
-        objective also depends on eta_sol which changes across callbacks.
-        A full incremental obj-update helper for Y is deferred to a later task.
+        On first call: builds and caches the full LP structure.
+        On subsequent calls: updates only the objective via setObjective (no rebuild).
         """
-        # NOTE: Y caching is simpler to implement as a fresh build for now,
-        # since eta_sol also enters the objective (optimality cut mode).
-        # The structural constraints don't change so we still avoid constraint
-        # rebuild overhead by re-using the same model object with setObjective.
         cache = getattr(self, "_cgsp_y_cache", None)
         if cache is None:
+<<<<<<< HEAD
             cgsp, pi_vars, pi0_var = self._build_cgsp_y(x_sol, TOL=TOL)
             self._cgsp_y_cache: tuple[gp.Model, dict, gp.Var | None] = (cgsp, pi_vars, pi0_var)
+=======
+            cgsp, pi_vars, pi0_var = self._build_cgsp_y(x_sol, eta_sol=eta_sol, TOL=TOL)
+            self._cgsp_y_cache: tuple[gp.Model, dict, "gp.Var | None"] = (cgsp, pi_vars, pi0_var)
+>>>>>>> a7e9ac515eab256bc2bf25181295cd98350864a3
             return cgsp, pi_vars, pi0_var
         cgsp, pi_vars, pi0_var = cache
-        # For Y, delegate full rebuild to avoid eta_sol complexity for now.
-        # Re-use model object by rebuilding from scratch (structural constraints unchanged).
-        new_cgsp, new_pi_vars, new_pi0_var = self._build_cgsp_y(x_sol, TOL=TOL)
-        self._cgsp_y_cache = (new_cgsp, new_pi_vars, new_pi0_var)
-        return new_cgsp, new_pi_vars, new_pi0_var
+        new_obj = self._cgsp_y_obj_expr(pi_vars, x_sol, eta_sol=eta_sol)
+        cgsp.setObjective(new_obj, GRB.MAXIMIZE)
+        cgsp.update()
+        return cgsp, pi_vars, pi0_var
 
     def get_cgsp_cut_yp(
         self,
@@ -1244,6 +1327,43 @@ class BendersCGSPMixin:
 
         return cut_expr, cut_rhs, witness
 
+    # ------------------------------------------------------------------
+    # Cache management and weight utilities
+    # ------------------------------------------------------------------
+
+    def invalidate_cgsp_cache(self) -> None:
+        """Clear cached CGSP models so they are rebuilt with updated weights."""
+        self._cgsp_y_cache = None
+        self._cgsp_yp_cache = None
+
+    def _compute_relaxed_l1_weights(self, which: str) -> dict:
+        """Return static Relaxed-ℓ₁ column-sum weights for all constraint groups.
+
+        These are the group-level scalar weights from Hosseini & Turner (2025)
+        §3.3.2: one unit per x-variable that appears in the RHS of each group.
+        The same weights are used by BendersDDMAMixin._get_ddma_weights.
+
+        The result is structured as a per-arc weight dict compatible with the
+        user_weights argument of _resolve_weights (dict groups → {arc_key: float},
+        scalar groups → float).  Called at build() time after constrs_y/yp are
+        populated.
+        """
+        _STATIC: dict[str, float] = {
+            "alpha": 1.0, "beta": 2.0, "gamma": 1.0, "delta": 1.0,
+            "global": 0.0, "r1": 0.0, "r2": 0.0, "r3": 2.0,
+            "alpha_p": 1.0, "beta_p": 2.0, "gamma_p": 1.0, "delta_p": 1.0,
+            "global_p": 0.0, "r1_p": 0.0, "r2_p": 0.0, "r3_p": 2.0,
+        }
+        constrs = self.constrs_yp if which == "yp" else self.constrs_y  # type: ignore[attr-defined]
+        result: dict = {}
+        for group, val in constrs.items():
+            w = _STATIC.get(group, 1.0)
+            if isinstance(val, dict):
+                result[group] = {arc_key: w for arc_key in val}
+            else:
+                result[group] = w
+        return result
+
 
 # ------------------------------------------------------------------
 # Module-level helpers
@@ -1282,22 +1402,22 @@ def _rhs_for_key(
         i, j, k, s = arc_key
         return 1.0 - x.get((i, j), 0.0) - x.get((s, k), 0.0)
 
-    # Y groups
+    # Y groups — formulas match _update_subproblem_rhs and _build_cgsp_y
     if group == "alpha":
         i, j = arc_key
-        return 1.0 - x.get((i, j), 0.0)
+        return x.get((i, j), 0.0)
     if group == "beta":
         i, j = arc_key
-        return x.get((j, i), 0.0) - x.get((i, j), 0.0)
+        return x.get((i, j), 0.0) - x.get((j, i), 0.0)
     if group == "gamma":
         i, j = arc_key
-        return x.get((j, i), 0.0)
+        return x.get((i, j), 0.0)
     if group == "delta":
         i, j = arc_key
-        return 1.0 - x.get((i, j), 0.0)
+        return 1.0 - x.get((j, i), 0.0)
     if group == "r3":
         i, j, k, s = arc_key
-        return 1.0 - x.get((i, j), 0.0) - x.get((s, k), 0.0)
+        return 1.0 - x.get((j, i), 0.0) - x.get((k, s), 0.0)
 
     # Fixed-RHS groups: return 1.0 (weight = 1/(1+ε) ≈ 1.0 — effectively uniform)
     return 1.0

@@ -325,263 +325,240 @@ class BendersOptimizeMixin:
             logger.warning(f"La optimización terminó con estado: {self.model.Status}")
 
 
-    def solve_lp_relaxation(self, time_limit: int = 7200, verbose: bool = False, save_cuts: bool = False, polihedral: bool = False) -> None:
-        """
-        Resuelve la relajación LP del modelo usando un bucle manual de Benders.
-        (Obligatorio para LPs, ya que Gurobi no dispara callbacks MIPSOL en continuas).
-        """
-        logger.info("Iniciando resolución de la relajación LP con Benders...")
-        self.verbose = verbose
-        self.polihedral = polihedral
+    # ------------------------------------------------------------------ #
+    # LP relaxation helpers                                              #
+    # ------------------------------------------------------------------ #
 
-        # 1. Transformar el modelo a LP (in-place para mantener referencias a self.x)
+    def _setup_lp_model(self, time_limit: int, verbose: bool) -> None:
+        """Relax all variables to continuous and configure Gurobi LP parameters."""
         for v in self.model.getVars():
             if v.VType != GRB.CONTINUOUS:
                 v.VType = GRB.CONTINUOUS
-        
-        # PREVENCIÓN DE ERROR '.X': Acotar 'eta' inicialmente previene que el LP sea UNBOUNDED. 
-        if hasattr(self, 'eta'):
+        # Clamp eta to prevent UNBOUNDED LP before DualReductions takes effect
+        if hasattr(self, "eta"):
             if self.model.ModelSense == GRB.MAXIMIZE:
                 if self.eta.UB > 1e12:
                     self.eta.UB = 1e12
             else:
                 if self.eta.LB < -1e12:
                     self.eta.LB = -1e12
-        
         self.model.update()
-
-        # 2. Configurar parámetros para el bucle manual LP
         self.model.Params.Presolve = 1
-        self.model.Params.LazyConstraints = 0  # No usamos callbacks aquí
+        self.model.Params.LazyConstraints = 0
         self.model.Params.TimeLimit = time_limit
-        # DualReductions can cause Gurobi to report INF_OR_UNBD (status 4) instead of
-        # correctly solving the LP when eta is bounded. Disabling it forces Gurobi to
-        # distinguish infeasible from unbounded and solve correctly.
-        if hasattr(self, 'eta'):
+        # DualReductions can report INF_OR_UNBD (status 4) instead of solving when
+        # eta is bounded; disabling forces Gurobi to distinguish the two correctly.
+        if hasattr(self, "eta"):
             self.model.Params.DualReductions = 0
         if not verbose:
             self.model.Params.OutputFlag = 0
 
+    def _status_aware_cut(self, x_sol: dict, which: str, sub_status: int, TOL: float) -> tuple:
+        """Return (cut_expr, cut_val) using Farkas for INFEASIBLE, Pi for OPTIMAL.
+
+        Selecting by subproblem status rather than self.benders_method prevents
+        reading undefined .Pi attributes on INFEASIBLE subproblems, and prevents
+        injecting a trivially-satisfied Farkas cut on an OPTIMAL subproblem.
+        """
+        if which == "yp":
+            return (
+                self.get_farkas_cut_yp(x_sol, TOL)
+                if sub_status == GRB.INFEASIBLE
+                else self.get_pi_cut_yp(x_sol, TOL)
+            )
+        return (
+            self.get_farkas_cut_y(x_sol, TOL)
+            if sub_status == GRB.INFEASIBLE
+            else self.get_pi_cut_y(x_sol, TOL)
+        )
+
+    def _inject_lp_cut(self, cut_expr, cut_val: float, which: str, TOL: float, name: str) -> str:
+        """Inject a (cut_expr, cut_val) pair into the LP master, or diagnose failure.
+
+        Returns "injected", "converged" (sub genuinely satisfied), or "degenerate"
+        (all duals zero despite a real violation — outer loop must break).
+        """
+        if cut_val > TOL:
+            self.model.addConstr(cut_expr <= 0, name=name)
+            return "injected"
+        if cut_val < -TOL:
+            self.model.addConstr(cut_expr >= 0, name=name)
+            return "injected"
+        sub = self.sub_yp if which == "yp" else self.sub_y
+        if sub.Status == GRB.OPTIMAL and sub.ObjVal <= TOL:
+            return "converged"
+        # Sub violated but all dual multipliers are zero: dual degenerate basis.
+        return "degenerate"
+
+    def _dispatch_cut_lp(
+        self,
+        x_sol: dict,
+        eta_sol: float,
+        which: str,
+        needs_cut: bool,
+        TOL: float,
+        iter_label: str,
+    ) -> str:
+        """Dispatch cut generation for one subproblem branch in LP-relaxation mode.
+
+        Tries advanced generators (CGSP / DDMA / MW) first; on failure falls back to
+        a status-aware Farkas/Pi cut. Handles the Internal-objective optimality cut
+        (Y only) when no advanced method is active.
+
+        Returns "converged", "injected", or "degenerate".
+        """
+        if not needs_cut:
+            return "converged"
+
+        sub = self.sub_yp if which == "yp" else self.sub_y
+        sub_status = sub.Status
+        sfx = "yp" if which == "yp" else "y"
+        use_deepest = getattr(self, "use_deepest_cuts", False)
+        use_ddma    = getattr(self, "use_ddma", False)
+        use_mw      = getattr(self, "use_magnanti_wong", False)
+
+        # --- Advanced cut generators (CGSP / DDMA / MW) ---
+        cut_expr_adv = cut_rhs_adv = None
+        if use_deepest:
+            cut_expr_adv, cut_rhs_adv, _ = (
+                self.get_cgsp_cut_yp(x_sol, TOL=TOL) if which == "yp"
+                else self.get_cgsp_cut_y(x_sol, eta_sol=eta_sol, TOL=TOL)
+            )
+        elif use_ddma:
+            cut_expr_adv, cut_rhs_adv, _ = (
+                self.get_ddma_cut_yp(x_sol) if which == "yp"
+                else self.get_ddma_cut_y(x_sol, eta_sol=eta_sol)
+            )
+        elif use_mw:
+            cut_expr_adv, cut_rhs_adv, _ = (
+                self.get_mw_cut_yp(x_sol, TOL=TOL) if which == "yp"
+                else self.get_mw_cut_y(x_sol, TOL=TOL)
+            )
+
+        if cut_expr_adv is not None:
+            tag = "cgsp" if use_deepest else ("ddma" if use_ddma else "mw")
+            self.model.addConstr(cut_expr_adv <= cut_rhs_adv, name=f"lp_{tag}_{sfx}{iter_label}")
+            return "injected"
+
+        # --- Internal-objective optimality cut (Y only, no advanced method active) ---
+        if (
+            which == "y"
+            and not (use_deepest or use_ddma or use_mw)
+            and sub_status == GRB.OPTIMAL
+            and getattr(self, "objective", "Fekete") == "Internal"
+        ):
+            lp_rel_tol = max(TOL, 1e-5 * abs(eta_sol))
+            if sub.ObjVal > eta_sol + lp_rel_tol:
+                cut_expr, _ = self.get_optimality_cut_y(x_sol, TOL)
+                self.model.addConstr(self.eta >= cut_expr, name=f"lp_opt_cut_y{iter_label}")
+                return "injected"
+            if sub.ObjVal < eta_sol - lp_rel_tol:
+                cut_expr, _ = self.get_optimality_cut_y(x_sol, TOL)
+                self.model.addConstr(self.eta <= cut_expr, name=f"lp_opt_cut_y{iter_label}")
+                return "injected"
+            return "converged"
+
+        # --- Status-aware fallback: Farkas for INFEASIBLE, Pi for OPTIMAL-gap ---
+        cut_expr, cut_val = self._status_aware_cut(x_sol, which, sub_status, TOL)
+        return self._inject_lp_cut(cut_expr, cut_val, which, TOL, name=f"lp_cut_{sfx}{iter_label}")
+
+    # ------------------------------------------------------------------ #
+    # LP relaxation main loop                                             #
+    # ------------------------------------------------------------------ #
+
+    def solve_lp_relaxation(self, time_limit: int = 7200, verbose: bool = False, save_cuts: bool = False, polihedral: bool = False) -> None:
+        """Resuelve la relajación LP del modelo usando un bucle manual de Benders.
+
+        (Obligatorio para LPs, ya que Gurobi no dispara callbacks MIPSOL en continuas).
+        """
+        logger.info("Iniciando resolución de la relajación LP con Benders...")
+        self.verbose = verbose
+        self.polihedral = polihedral
+
+        self._setup_lp_model(time_limit=time_limit, verbose=verbose)
+
         TOL = 1e-6
         converged = False
         self.iteration = 0
-        MAX_LP_ITER = 500 * len(list(self.x))  # safety valve: O(n²) iterations max
+        MAX_LP_ITER = 500 * len(list(self.x))
 
-        # 3. Bucle Manual de Benders
         while not converged:
             self.iteration += 1
             if self.iteration > MAX_LP_ITER:
                 logger.error(
                     f"solve_lp_relaxation: no convergió tras {MAX_LP_ITER} iteraciones. "
-                    "Posible degeneración dual en el método PI. Abortando bucle."
+                    "Posible degeneración dual. Abortando bucle."
                 )
                 break
+
             if verbose:
                 logger.info(f"\n=== Iteración LP: {self.iteration} ===")
 
-            # Resolver el Maestro relajado
             self.model.optimize()
-            
-            # Evita fallo al acceder a `.X` si la relajación acaba infactible o no tiene solución
             if self.model.Status not in (GRB.OPTIMAL, GRB.SUBOPTIMAL):
-                logger.warning(f"El modelo Maestro LP terminó con estado {self.model.Status} en la iteración {self.iteration}.")
+                logger.warning(
+                    f"El modelo Maestro LP terminó con estado {self.model.Status} "
+                    f"en la iteración {self.iteration}."
+                )
                 break
-            
-            # Extraer solución fraccional (v.X funciona perfectamente para continuas)
-            x_sol = {k: v.X for k, v in self.x.items()}
-            
-                        # BIEN (extracción estándar):
-            if hasattr(self, 'eta'):
-                eta_sol = self.eta.X
-            else:
-                eta_sol = 0.0
 
-            # Actualizar RHS de los subproblemas
-            # (Restamos 1 a iteration temporalmente porque _update_subproblem_rhs suma 1 por dentro)
-            self.iteration -= 1 
+            x_sol = {k: v.X for k, v in self.x.items()}
+            eta_sol = self.eta.X if hasattr(self, "eta") else 0.0
+
+            # _update_subproblem_rhs increments self.iteration internally; compensate
+            self.iteration -= 1
             self._update_subproblem_rhs(x_sol)
 
-            # Resolver ambos subproblemas
             self.sub_y.optimize()
             self.sub_yp.optimize()
 
-            converged_y = False
-            converged_yp = False
-
-            use_deepest = getattr(self, "use_deepest_cuts", False)
-            use_mw = getattr(self, "use_magnanti_wong", False)
-            use_ddma = getattr(self, "use_ddma", False)
-
-            # --- Análisis del Subproblema Y ---
-            lp_y_status = self.sub_y.Status
-            lp_y_objval = self.sub_y.ObjVal if lp_y_status == GRB.OPTIMAL else None
             lp_rel_tol = max(TOL, 1e-5 * abs(eta_sol))
             needs_cut_y = (
-                lp_y_status == GRB.INFEASIBLE
+                self.sub_y.Status == GRB.INFEASIBLE
                 or (
                     self.benders_method == "pi"
-                    and lp_y_status == GRB.OPTIMAL
-                    and lp_y_objval is not None
-                    and lp_y_objval > TOL
+                    and self.sub_y.Status == GRB.OPTIMAL
+                    and self.sub_y.ObjVal > TOL
                 )
                 or (
-                    lp_y_status == GRB.OPTIMAL
+                    self.sub_y.Status == GRB.OPTIMAL
                     and getattr(self, "objective", "Fekete") == "Internal"
-                    and lp_y_objval is not None
-                    and lp_y_objval > eta_sol + lp_rel_tol  # gate: only fire on real violation
+                    and abs(self.sub_y.ObjVal - eta_sol) > lp_rel_tol
                 )
             )
-            if use_deepest and needs_cut_y:
-                cut_expr_y, cut_rhs_y, _witness_y = self.get_cgsp_cut_y(x_sol, eta_sol=eta_sol, TOL=TOL)
-                if cut_expr_y is not None:
-                    self.model.addConstr(cut_expr_y <= cut_rhs_y, name=f"lp_cgsp_y_{self.iteration}")
-                else:
-                    converged_y = True
-            elif use_deepest and not needs_cut_y:
-                converged_y = True
-            elif use_ddma and needs_cut_y:
-                # --- DDMA branch (F3) ---
-                cut_expr_y, cut_rhs_y, _witness_y = self.get_ddma_cut_y(x_sol, eta_sol=eta_sol, TOL=TOL)
-                if cut_expr_y is not None:
-                    self.model.addConstr(cut_expr_y <= cut_rhs_y, name=f"lp_ddma_y_{self.iteration}")
-                else:
-                    converged_y = True
-            elif use_ddma and not needs_cut_y:
-                converged_y = True
-            elif use_mw and needs_cut_y:
-                # --- Magnanti-Wong branch ---
-                cut_expr_y, cut_rhs_y, _witness_y = self.get_mw_cut_y(x_sol, TOL=TOL)
-                if cut_expr_y is not None:
-                    self.model.addConstr(cut_expr_y <= cut_rhs_y, name=f"lp_mw_y_{self.iteration}")
-                else:
-                    # MW fallback to legacy
-                    if self.benders_method == "farkas":
-                        cut_expr, cut_val = self.get_farkas_cut_y(x_sol, TOL)
-                    else:
-                        cut_expr, cut_val = self.get_pi_cut_y(x_sol, TOL)
-                    if cut_val > TOL:
-                        self.model.addConstr(cut_expr <= 0, name=f"lp_cut_y_{self.iteration}")
-                    elif cut_val < -TOL:
-                        self.model.addConstr(cut_expr >= 0, name=f"lp_cut_y_{self.iteration}")
-                    else:
-                        converged_y = True
-            elif use_mw and not needs_cut_y:
-                converged_y = True
-            elif self.sub_y.Status == GRB.INFEASIBLE or (
-                self.benders_method == "pi"
-                and self.sub_y.Status == GRB.OPTIMAL
-                and self.sub_y.ObjVal > TOL
-            ):
-                if self.benders_method == "farkas":
-                    cut_expr, cut_val = self.get_farkas_cut_y(x_sol, TOL)
-                else:
-                    cut_expr, cut_val = self.get_pi_cut_y(x_sol, TOL)
-
-                # Inyectar el corte duro en el Maestro
-                if cut_val > TOL:
-                    self.model.addConstr(cut_expr <= 0, name=f"lp_cut_y_{self.iteration}")
-                elif cut_val < -TOL:
-                    self.model.addConstr(cut_expr >= 0, name=f"lp_cut_y_{self.iteration}")
-                else:
-                    # Dual degenerate: all Pi = 0, cut is trivial (π^T x_sol = 0).
-                    # No constraint can be injected; mark as converged to exit loop.
-                    logger.warning(
-                        f"Iter {self.iteration}: corte PI para Y es trivial "
-                        f"(cut_val={cut_val:.2e}, sub_y.ObjVal={self.sub_y.ObjVal:.2e}). "
-                        "Degeneración dual — se marca Y como convergido."
-                    )
-                    converged_y = True
-
-            elif self.sub_y.Status == GRB.OPTIMAL and getattr(self, 'objective', 'Fekete') == "Internal":
-                if self.sub_y.ObjVal > eta_sol + TOL:
-                    cut_expr, _ = self.get_optimality_cut_y(x_sol, TOL)
-                    self.model.addConstr(self.eta >= cut_expr, name=f"lp_opt_cut_y_{self.iteration}")
-                elif self.sub_y.ObjVal < eta_sol - TOL:
-                    cut_expr, _ = self.get_optimality_cut_y(x_sol, TOL)
-                    self.model.addConstr(self.eta <= cut_expr, name=f"lp_opt_cut_y_{self.iteration}")
-                else:
-                    converged_y = True
-
-            else:
-                converged_y = True
-
-            # --- Análisis del Subproblema Y' ---
             needs_cut_yp = (
                 self.sub_yp.Status == GRB.INFEASIBLE
-                or (self.benders_method == "pi" and self.sub_yp.Status == GRB.OPTIMAL and self.sub_yp.ObjVal > TOL)
+                or (
+                    self.benders_method == "pi"
+                    and self.sub_yp.Status == GRB.OPTIMAL
+                    and self.sub_yp.ObjVal > TOL
+                )
             )
-            if use_deepest and needs_cut_yp:
-                cut_expr_yp, cut_rhs_yp, _witness_yp = self.get_cgsp_cut_yp(x_sol, TOL=TOL)
-                if cut_expr_yp is not None:
-                    self.model.addConstr(cut_expr_yp <= cut_rhs_yp, name=f"lp_cgsp_yp_{self.iteration}")
-                else:
-                    converged_yp = True
-            elif use_deepest and not needs_cut_yp:
-                converged_yp = True
-            elif use_ddma and needs_cut_yp:
-                # --- DDMA branch (F3) ---
-                cut_expr_yp, cut_rhs_yp, _witness_yp = self.get_ddma_cut_yp(x_sol, TOL=TOL)
-                if cut_expr_yp is not None:
-                    self.model.addConstr(cut_expr_yp <= cut_rhs_yp, name=f"lp_ddma_yp_{self.iteration}")
-                else:
-                    converged_yp = True
-            elif use_ddma and not needs_cut_yp:
-                converged_yp = True
-            elif use_mw and needs_cut_yp:
-                # --- Magnanti-Wong branch ---
-                cut_expr_yp, cut_rhs_yp, _witness_yp = self.get_mw_cut_yp(x_sol, TOL=TOL)
-                if cut_expr_yp is not None:
-                    self.model.addConstr(cut_expr_yp <= cut_rhs_yp, name=f"lp_mw_yp_{self.iteration}")
-                else:
-                    # MW fallback to legacy
-                    if self.benders_method == "farkas":
-                        cut_expr, cut_val = self.get_farkas_cut_yp(x_sol, TOL)
-                    else:
-                        cut_expr, cut_val = self.get_pi_cut_yp(x_sol, TOL)
-                    if cut_val > TOL:
-                        self.model.addConstr(cut_expr <= 0, name=f"lp_cut_yp_{self.iteration}")
-                    elif cut_val < -TOL:
-                        self.model.addConstr(cut_expr >= 0, name=f"lp_cut_yp_{self.iteration}")
-                    else:
-                        converged_yp = True
-            elif use_mw and not needs_cut_yp:
-                converged_yp = True
-            elif self.sub_yp.Status == GRB.INFEASIBLE or (
-                self.benders_method == "pi"
-                and self.sub_yp.Status == GRB.OPTIMAL
-                and self.sub_yp.ObjVal > TOL
-            ):
-                if self.benders_method == "farkas":
-                    cut_expr, cut_val = self.get_farkas_cut_yp(x_sol, TOL)
-                else:
-                    cut_expr, cut_val = self.get_pi_cut_yp(x_sol, TOL)
 
-                # Inyectar el corte duro en el Maestro
-                if cut_val > TOL:
-                    self.model.addConstr(cut_expr <= 0, name=f"lp_cut_yp_{self.iteration}")
-                elif cut_val < -TOL:
-                    self.model.addConstr(cut_expr >= 0, name=f"lp_cut_yp_{self.iteration}")
-                else:
-                    # Dual degenerate: all Pi = 0, cut is trivial (π^T x_sol = 0).
-                    logger.warning(
-                        f"Iter {self.iteration}: corte PI para Y' es trivial "
-                        f"(cut_val={cut_val:.2e}, sub_yp.ObjVal={self.sub_yp.ObjVal:.2e}). "
-                        "Degeneración dual — se marca Y' como convergido."
-                    )
-                    converged_yp = True
-            else:
-                converged_yp = True
+            iter_label = f"_{self.iteration}"
+            status_y  = self._dispatch_cut_lp(x_sol, eta_sol, "y",  needs_cut_y,  TOL, iter_label)
+            status_yp = self._dispatch_cut_lp(x_sol, 0.0,     "yp", needs_cut_yp, TOL, iter_label)
 
-            if self.polihedral:
-                self.poly_log_path = self.poly_log_path.replace("_iter_*.json", f"_iter_{self.iteration}.json")
-                self.log_facets(filepath=self.poly_log_path, var_prefixes=['x'], verbose=False)
+            if status_y == "degenerate" or status_yp == "degenerate":
+                logger.warning(
+                    f"Iter {self.iteration}: degeneración dual detectada "
+                    f"(Y={status_y}, Y'={status_yp}). No se puede inyectar un corte "
+                    "separador — abortando bucle LP con _lp_converged=False."
+                )
+                break
 
-            # --- Condición de parada ---
-            if converged_y and converged_yp:
+            if polihedral:
+                self.poly_log_path = self.poly_log_path.replace(
+                    "_iter_*.json", f"_iter_{self.iteration}.json"
+                )
+                self.log_facets(filepath=self.poly_log_path, var_prefixes=["x"], verbose=False)
+
+            if status_y == "converged" and status_yp == "converged":
                 converged = True
-                logger.info(f"Relajación LP convergida exitosamente tras {self.iteration} iteraciones.")
+                logger.info(
+                    f"Relajación LP convergida exitosamente tras {self.iteration} iteraciones."
+                )
 
-        # Signal: True only when the loop exited via genuine Benders convergence.
-        # False when it broke out (MAX_LP_ITER or degenerate PI cuts forced exit).
-        # Checked by get_objval_lp() to avoid reporting an unreliable LP bound.
+        # True only on genuine Benders convergence; False on MAX_LP_ITER,
+        # master infeasibility, or dual degeneracy.
         self._lp_converged: bool = converged
