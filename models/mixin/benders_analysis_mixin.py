@@ -196,7 +196,8 @@ class BendersAnalysisMixin:
                         continue
 
                     # Filtro Grado (Máx 1 in/out)
-                    in_degree, out_degree = {}, {}
+                    in_degree: dict[int, int] = {}
+                    out_degree: dict[int, int] = {}
                     invalido = False
                     for u, v in active_arcs:
                         out_degree[u] = out_degree.get(u, 0) + 1

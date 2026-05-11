@@ -137,10 +137,10 @@ class BendersPiMixin:
             )
 
         # R3/R4: crossing exclusion (with artificials for Phase-1 feasibility)
-        art_r3_p_y = self.art_y.get("r3_p", {})
-        art_r3_n_y = self.art_y.get("r3_n", {})
-        art_r3_p_yp = self.art_yp.get("r3_p", {})
-        art_r3_n_yp = self.art_yp.get("r3_n", {})
+        art_r3_p_y: dict[Any, gp.Var] = self.art_y.get("r3_p", {})
+        art_r3_n_y: dict[Any, gp.Var] = self.art_y.get("r3_n", {})
+        art_r3_p_yp: dict[Any, gp.Var] = self.art_yp.get("r3_p", {})
+        art_r3_n_yp: dict[Any, gp.Var] = self.art_yp.get("r3_n", {})
 
         for key in getattr(self, "_r3_keys", []):
             i, j, k, l = key

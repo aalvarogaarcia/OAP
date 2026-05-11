@@ -69,8 +69,8 @@ def get_valid_cases(a_left, a_right, posiciones, constant: int = 0):
         active_arcs = [a for a in all_arcs if d[get_var_name(a)] == 1]
 
         # NUEVO: Filtro de Grado (Máx 1 entrada y Máx 1 salida por nodo)
-        in_degree = {}
-        out_degree = {}
+        in_degree: dict[int, int] = {}
+        out_degree: dict[int, int] = {}
         grado_invalido = False
 
         for origen, destino in active_arcs:
