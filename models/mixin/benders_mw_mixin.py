@@ -29,10 +29,11 @@ Algorithmic Enhancement and Model Selection Criteria."
 
 Design spec: .claude/context/designs/2026-05-04-pi-cgsp-mw-implementation.md
 """
+
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import gurobipy as gp
 from gurobipy import GRB
@@ -124,7 +125,7 @@ class BendersMagnantiWongMixin:
             lp.setParam("TimeLimit", 60)
             lp.optimize()
             if lp.Status == GRB.OPTIMAL:
-                result: dict = {}
+                result: dict[Arc, float] = {}
                 for arc in getattr(self, "x", {}):
                     v = lp.getVarByName(f"x_{arc[0]}_{arc[1]}")
                     if v is not None:
@@ -132,8 +133,7 @@ class BendersMagnantiWongMixin:
                 return result
             else:
                 logger.warning(
-                    "Core point LP did not solve to optimality (status=%d). "
-                    "Falling back to uniform strategy.",
+                    "Core point LP did not solve to optimality (status=%d). Falling back to uniform strategy.",
                     lp.Status,
                 )
                 return self._compute_core_point("uniform")
@@ -149,7 +149,7 @@ class BendersMagnantiWongMixin:
         self,
         x_sol: dict[Arc, float],
         TOL: float = _MW_TOL,
-    ) -> tuple[gp.LinExpr, float, dict] | tuple[None, None, dict]:
+    ) -> tuple[gp.LinExpr, float, dict[str, Any]] | tuple[None, None, dict[str, Any]]:
         """Pareto-optimal cut for Y' subproblem.
 
         Returns (None, None, {'aborted': reason}) when:
@@ -181,9 +181,7 @@ class BendersMagnantiWongMixin:
 
         # Step 2: extract CGSP cut as fallback (always valid since q* > 0)
         try:
-            cgsp_cut_expr, cgsp_cut_rhs, cgsp_witness = (
-                self._reconstruct_cut_from_pi(pi_vars, which="yp", TOL=TOL)  # type: ignore[attr-defined]
-            )
+            cgsp_cut_expr, cgsp_cut_rhs, cgsp_witness = self._reconstruct_cut_from_pi(pi_vars, which="yp", TOL=TOL)  # type: ignore[attr-defined]
         except Exception as exc:  # noqa: BLE001
             logger.warning("MW (Y'): CGSP fallback reconstruction failed (%s).", exc)
             return None, None, {"aborted": "cgsp_recon_failed"}
@@ -201,7 +199,7 @@ class BendersMagnantiWongMixin:
         x_bar_expr = cgsp.getObjective()
 
         # Step 4: build the MW objective at x^0
-        x0_expr = _recompute_obj_at_x(pi_vars, core_point, "yp", self)  # type: ignore[arg-type]
+        x0_expr = _recompute_obj_at_x(pi_vars, core_point, "yp", self)
         if x0_expr is None:
             logger.debug("MW (Y'): x0_expr is None; using CGSP fallback.")
             return cgsp_cut_expr, cgsp_cut_rhs, cgsp_witness
@@ -217,9 +215,7 @@ class BendersMagnantiWongMixin:
             return cgsp_cut_expr, cgsp_cut_rhs, cgsp_witness
 
         if cgsp.Status not in (GRB.OPTIMAL, GRB.SUBOPTIMAL):
-            logger.debug(
-                "MW (Y'): secondary LP status=%d; using CGSP fallback.", cgsp.Status
-            )
+            logger.debug("MW (Y'): secondary LP status=%d; using CGSP fallback.", cgsp.Status)
             return cgsp_cut_expr, cgsp_cut_rhs, cgsp_witness
 
         if cgsp.ObjVal <= TOL:
@@ -248,7 +244,7 @@ class BendersMagnantiWongMixin:
         self,
         x_sol: dict[Arc, float],
         TOL: float = _MW_TOL,
-    ) -> tuple[gp.LinExpr, float, dict] | tuple[None, None, dict]:
+    ) -> tuple[gp.LinExpr, float, dict[str, Any]] | tuple[None, None, dict[str, Any]]:
         """Pareto-optimal cut for Y subproblem. Symmetric to get_mw_cut_yp."""
         core_point = getattr(self, "_core_point", None)
         if not core_point:
@@ -274,9 +270,7 @@ class BendersMagnantiWongMixin:
 
         # Step 2: extract CGSP cut as fallback (always valid since q* > 0)
         try:
-            cgsp_cut_expr, cgsp_cut_rhs, cgsp_witness = (
-                self._reconstruct_cut_from_pi(pi_vars, which="y", TOL=TOL)  # type: ignore[attr-defined]
-            )
+            cgsp_cut_expr, cgsp_cut_rhs, cgsp_witness = self._reconstruct_cut_from_pi(pi_vars, which="y", TOL=TOL)  # type: ignore[attr-defined]
         except Exception as exc:  # noqa: BLE001
             logger.warning("MW (Y): CGSP fallback reconstruction failed (%s).", exc)
             return None, None, {"aborted": "cgsp_recon_failed"}
@@ -290,7 +284,7 @@ class BendersMagnantiWongMixin:
         x_bar_expr = cgsp.getObjective()
 
         # Step 4: build the MW objective at x^0
-        x0_expr = _recompute_obj_at_x(pi_vars, core_point, "y", self)  # type: ignore[arg-type]
+        x0_expr = _recompute_obj_at_x(pi_vars, core_point, "y", self)
         if x0_expr is None:
             logger.debug("MW (Y): x0_expr is None; using CGSP fallback.")
             return cgsp_cut_expr, cgsp_cut_rhs, cgsp_witness
@@ -306,9 +300,7 @@ class BendersMagnantiWongMixin:
             return cgsp_cut_expr, cgsp_cut_rhs, cgsp_witness
 
         if cgsp.Status not in (GRB.OPTIMAL, GRB.SUBOPTIMAL):
-            logger.debug(
-                "MW (Y): secondary LP status=%d; using CGSP fallback.", cgsp.Status
-            )
+            logger.debug("MW (Y): secondary LP status=%d; using CGSP fallback.", cgsp.Status)
             return cgsp_cut_expr, cgsp_cut_rhs, cgsp_witness
 
         if cgsp.ObjVal <= TOL:
@@ -333,8 +325,9 @@ class BendersMagnantiWongMixin:
 # Module-level helpers (not methods — avoid polluting the mixin namespace)
 # ------------------------------------------------------------------
 
+
 def _recompute_obj_at_x(
-    pi_vars: dict,
+    pi_vars: dict[str, Any],
     x_sol: dict[Arc, float],
     which: str,
     model: object,
@@ -356,7 +349,7 @@ def _recompute_obj_at_x(
     expr = gp.LinExpr()
 
     # Helper: add contribution of a pi variable group with given RHS dict
-    def _add_indexed(u_key: str, v_key: str, rhs_map: dict) -> None:
+    def _add_indexed(u_key: str, v_key: str, rhs_map: dict[Any, float]) -> None:
         u_vars = pi_vars.get(u_key)
         v_vars = pi_vars.get(v_key)
         if u_vars is None and v_vars is None:
@@ -367,17 +360,21 @@ def _recompute_obj_at_x(
             if abs(rhs_k) < 1e-15:
                 continue
             if u_vars is not None:
-                expr.addTerms([rhs_k], [u_vars[k]])  # type: ignore[index]
+                expr.addTerms([rhs_k], [u_vars[k]])
             if v_vars is not None:
-                expr.addTerms([-rhs_k], [v_vars[k]])  # type: ignore[index]
+                expr.addTerms([-rhs_k], [v_vars[k]])
 
     # alpha[_p]: RHS = 1 - x[i,j]  (yp) or x[i,j] (y)
     if which == "yp":
-        alpha_rhs = {k: 1.0 - x_sol.get(k, 0.0) for k in pi_vars.get(f"u_alpha{suffix}", {}).keys()  # type: ignore[union-attr]
-                     or pi_vars.get(f"v_alpha{suffix}", {}).keys()}  # type: ignore[union-attr]
+        alpha_rhs = {
+            k: 1.0 - x_sol.get(k, 0.0)
+            for k in pi_vars.get(f"u_alpha{suffix}", {}).keys() or pi_vars.get(f"v_alpha{suffix}", {}).keys()
+        }
     else:
-        alpha_rhs = {k: x_sol.get(k, 0.0) for k in pi_vars.get(f"u_alpha{suffix}", {}).keys()  # type: ignore[union-attr]
-                     or pi_vars.get(f"v_alpha{suffix}", {}).keys()}  # type: ignore[union-attr]
+        alpha_rhs = {
+            k: x_sol.get(k, 0.0)
+            for k in pi_vars.get(f"u_alpha{suffix}", {}).keys() or pi_vars.get(f"v_alpha{suffix}", {}).keys()
+        }
     _add_indexed(f"u_alpha{suffix}", f"v_alpha{suffix}", alpha_rhs)
 
     # beta[_p]: RHS = x[j,i] - x[i,j]  (yp) or x[i,j] - x[j,i]  (y)
@@ -399,7 +396,7 @@ def _recompute_obj_at_x(
         for k in gamma_keys:
             rhs_k = gamma_rhs.get(k, 0.0)
             if abs(rhs_k) > 1e-15:
-                expr.addTerms([rhs_k], [u_g[k]])  # type: ignore[index]
+                expr.addTerms([rhs_k], [u_g[k]])
 
     # delta[_p]: RHS = 1 - x[i,j]  (yp) or 1 - x[j,i]  (y)  — only -v_delta
     delta_keys = list((pi_vars.get(f"v_delta{suffix}") or {}).keys())
@@ -412,13 +409,13 @@ def _recompute_obj_at_x(
         for k in delta_keys:
             rhs_k = delta_rhs.get(k, 0.0)
             if abs(rhs_k) > 1e-15:
-                expr.addTerms([-rhs_k], [v_d[k]])  # type: ignore[index]
+                expr.addTerms([-rhs_k], [v_d[k]])
 
     # global[_p]: constant RHS — contributes to objective as π * RHS
     constrs = getattr(model, "constrs_yp" if which == "yp" else "constrs_y", {})
     global_rhs = constrs.get(f"global{suffix}")
     if global_rhs is not None and hasattr(global_rhs, "RHS"):
-        rhs_val = global_rhs.RHS  # type: ignore[attr-defined]
+        rhs_val = global_rhs.RHS
         u_gl = pi_vars.get(f"u_global{suffix}")
         v_gl = pi_vars.get(f"v_global{suffix}")
         if isinstance(u_gl, gp.Var):
@@ -436,13 +433,13 @@ def _recompute_obj_at_x(
     # r2[_p]: constant RHS = 1 per arc  (≤ constraint, π_r2 = -v_r2)
     v_r2 = pi_vars.get(f"v_r2{suffix}")
     if v_r2 is not None and not isinstance(v_r2, gp.Var):
-        for k in v_r2.keys():  # type: ignore[union-attr]
-            expr.addTerms([-1.0], [v_r2[k]])  # type: ignore[index]
+        for k in v_r2.keys():
+            expr.addTerms([-1.0], [v_r2[k]])
 
     # r3[_p]: RHS = 1 - x[i,j] - x[k,s]  (≤ constraint, π_r3 = -v_r3)
     v_r3 = pi_vars.get(f"v_r3{suffix}")
     if v_r3 is not None and not isinstance(v_r3, gp.Var):
-        for k in v_r3.keys():  # type: ignore[union-attr]
+        for k in v_r3.keys():
             if which == "yp":
                 i, j, ks, s = k
                 rhs_k = 1.0 - x_sol.get((i, j), 0.0) - x_sol.get((s, ks), 0.0)
@@ -450,6 +447,6 @@ def _recompute_obj_at_x(
                 i, j, k2, s = k
                 rhs_k = 1.0 - x_sol.get((j, i), 0.0) - x_sol.get((k2, s), 0.0)
             if abs(rhs_k) > 1e-15:
-                expr.addTerms([-rhs_k], [v_r3[k]])  # type: ignore[index]
+                expr.addTerms([-rhs_k], [v_r3[k]])
 
     return expr
