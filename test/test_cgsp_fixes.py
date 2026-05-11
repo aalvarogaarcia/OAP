@@ -12,6 +12,7 @@ Validates:
 
 Tests auto-skip when fixture is absent.
 """
+
 from __future__ import annotations
 
 import logging
@@ -127,9 +128,7 @@ class TestCGSPFix5CallbackGate:
         cgsp_lp, _, cgsp_ip, _, cgsp_nodes = model2.get_model_stats()
 
         # CGSP should not emit redundant cuts → node count ≤ baseline
-        assert (
-            cgsp_nodes <= baseline_nodes * 1.1
-        ), f"CGSP redundant cuts: {cgsp_nodes} > {baseline_nodes * 1.1}"
+        assert cgsp_nodes <= baseline_nodes * 1.1, f"CGSP redundant cuts: {cgsp_nodes} > {baseline_nodes * 1.1}"
 
 
 class TestCGSPFix6ObjValGuard:
@@ -200,6 +199,4 @@ class TestCGSPIPEqualityConstraint:
         if ip is not None and lp is not None:
             # RelGap = (IP - LP) / LP for maximization
             # For tight instances, gap should be < 5%
-            assert (
-                gap < 5.0 if gap is not None else True
-            ), f"Large gap {gap}% suggests weak formulation"
+            assert gap < 5.0 if gap is not None else True, f"Large gap {gap}% suggests weak formulation"

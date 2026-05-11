@@ -32,45 +32,39 @@ print(f"Resultados: LP={lp}, Gap={gap}%, IP={ip}, Time={elapsed_time}s, Nodes={n
 
 
 if __name__ == "__main__":
-        files = ['instance/stars-0000015.instance']
-        for file in files:
-            write_prefile(file)
-            start_time = time.time()
-            mod = build_and_solve_model(
-                instance_path=file,
-                verbose=True,
-                plot=False,
-                time_limit=7200000,
-                maximize=True,
-                sum_constrain=False
-            )
-            end_time = time.time()
-            print(f"Processed {file} in {end_time - start_time:.2f} seconds.")
-            print("--------------------------------------------------\n")
-            print("Results Summary:\n")
-            print(f"Instance: {file}")
-            print(f"Objective Value: {get_ObjVal_int(mod)}")
-            print(f"Status: {mod.Status}")
-            print(f"Number of Variables: {mod.NumVars}")
-            print(f"Number of Constraints: {mod.NumConstrs}")
-            print("--------------------------------------------------\n")
-            print(f"Obtain tour result: {mod._x_results}")
-            G = nx.DiGraph()
-            G.add_edges_from(mod._x_results)
-            cycles = list(nx.simple_cycles(G))
-            
-            print(f"Obtain ordered tour: {cycles}")
-            model_lp = mod.relax()
-            model_lp.setParam('OutputFlag', 1 if False else 0)
-            model_lp.optimize()
-            outputfile = 'outputs/Others/' + file.split('/')[-1].split('.')[0]
-            mod.write(outputfile + '.lp')
-            print("--------------------------------------------------\n")
-            print("LP Relaxation Results Summary:\n")
-            print(f"LP Status: {model_lp.Status}")
-            print(f"LP Relaxed Objective Value: {model_lp.ObjVal}")
-            print("--------------------------------------------------\n")
+    files = ["instance/stars-0000015.instance"]
+    for file in files:
+        write_prefile(file)
+        start_time = time.time()
+        mod = build_and_solve_model(
+            instance_path=file, verbose=True, plot=False, time_limit=7200000, maximize=True, sum_constrain=False
+        )
+        end_time = time.time()
+        print(f"Processed {file} in {end_time - start_time:.2f} seconds.")
+        print("--------------------------------------------------\n")
+        print("Results Summary:\n")
+        print(f"Instance: {file}")
+        print(f"Objective Value: {get_ObjVal_int(mod)}")
+        print(f"Status: {mod.Status}")
+        print(f"Number of Variables: {mod.NumVars}")
+        print(f"Number of Constraints: {mod.NumConstrs}")
+        print("--------------------------------------------------\n")
+        print(f"Obtain tour result: {mod._x_results}")
+        G = nx.DiGraph()
+        G.add_edges_from(mod._x_results)
+        cycles = list(nx.simple_cycles(G))
 
-            lp, gap, ip, elapsed_time, nodes = get_model_stats(mod, model_lp)
-            print(f"Resultados: LP={lp}, Gap={gap}%, IP={ip}, Time={elapsed_time}s, Nodes={nodes}")
-        
+        print(f"Obtain ordered tour: {cycles}")
+        model_lp = mod.relax()
+        model_lp.setParam("OutputFlag", 1 if False else 0)
+        model_lp.optimize()
+        outputfile = "outputs/Others/" + file.split("/")[-1].split(".")[0]
+        mod.write(outputfile + ".lp")
+        print("--------------------------------------------------\n")
+        print("LP Relaxation Results Summary:\n")
+        print(f"LP Status: {model_lp.Status}")
+        print(f"LP Relaxed Objective Value: {model_lp.ObjVal}")
+        print("--------------------------------------------------\n")
+
+        lp, gap, ip, elapsed_time, nodes = get_model_stats(mod, model_lp)
+        print(f"Resultados: LP={lp}, Gap={gap}%, IP={ip}, Time={elapsed_time}s, Nodes={nodes}")

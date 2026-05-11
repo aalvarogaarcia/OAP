@@ -1,7 +1,7 @@
 # models/mixin/benders_optimize_mixin.py
 import logging
 import os
-from typing import Literal
+from typing import Any, Literal
 
 import gurobipy as gp
 from gurobipy import GRB
@@ -10,11 +10,13 @@ logger = logging.getLogger(__name__)
 
 Arc = tuple[int, int]
 
+
 class BendersOptimizeMixin:
     """
     Mixin encargado de la orquestación, actualización de RHS,
     el Callback de Gurobi y la resolución general del modelo.
     """
+
     constrs_y: dict[str, dict[Arc, gp.Constr]]
     constrs_yp: dict[str, dict[Arc, gp.Constr]]
     iteration: int
@@ -24,10 +26,10 @@ class BendersOptimizeMixin:
     sub_yp: gp.Model
     benders_method: str
     objective: Literal["Fekete", "Internal"]
-    
+
     def _update_subproblem_rhs(self, x_sol: dict[Arc, float]) -> None:
         """
-        Actualiza los lados derechos (RHS) de los subproblemas Y y Y' 
+        Actualiza los lados derechos (RHS) de los subproblemas Y y Y'
         usando la solución propuesta por el problema Maestro.
         """
         self.iteration += 1
@@ -35,38 +37,38 @@ class BendersOptimizeMixin:
         # ==========================================
         # ACTUALIZAR RHS PARA EL SUBPROBLEMA Y
         # ==========================================
-        for (i, j), constr in self.constrs_y.get('alpha', {}).items():
+        for (i, j), constr in self.constrs_y.get("alpha", {}).items():
             constr.RHS = x_sol[i, j]
-            
-        for (i, j), constr in self.constrs_y.get('beta', {}).items():
+
+        for (i, j), constr in self.constrs_y.get("beta", {}).items():
             constr.RHS = x_sol[i, j] - x_sol[j, i]
-            
-        for (i, j), constr in self.constrs_y.get('gamma', {}).items():
+
+        for (i, j), constr in self.constrs_y.get("gamma", {}).items():
             constr.RHS = x_sol[i, j]
-            
-        for (i, j), constr in self.constrs_y.get('delta', {}).items():
+
+        for (i, j), constr in self.constrs_y.get("delta", {}).items():
             constr.RHS = 1 - x_sol[j, i]
 
         # ==========================================
         # ACTUALIZAR RHS PARA EL SUBPROBLEMA Y'
         # ==========================================
-        for (i, j), constr in self.constrs_yp.get('alpha_p', {}).items():
+        for (i, j), constr in self.constrs_yp.get("alpha_p", {}).items():
             constr.RHS = 1 - x_sol[i, j]
-            
-        for (i, j), constr in self.constrs_yp.get('beta_p', {}).items():
+
+        for (i, j), constr in self.constrs_yp.get("beta_p", {}).items():
             constr.RHS = x_sol[j, i] - x_sol[i, j]
-            
-        for (i, j), constr in self.constrs_yp.get('gamma_p', {}).items():
+
+        for (i, j), constr in self.constrs_yp.get("gamma_p", {}).items():
             constr.RHS = x_sol[j, i]
-            
-        for (i, j), constr in self.constrs_yp.get('delta_p', {}).items():
+
+        for (i, j), constr in self.constrs_yp.get("delta_p", {}).items():
             constr.RHS = 1 - x_sol[i, j]
 
         # R3 / R4 strengthening constraints (parameterised by x)
-        for (i, j, k, s), constr in self.constrs_y.get('r3', {}).items():
+        for (i, j, k, s), constr in self.constrs_y.get("r3", {}).items():
             constr.RHS = 1 - x_sol.get((j, i), 0.0) - x_sol.get((k, s), 0.0)
 
-        for (i, j, k, s), constr in self.constrs_yp.get('r3_p', {}).items():
+        for (i, j, k, s), constr in self.constrs_yp.get("r3_p", {}).items():
             constr.RHS = 1 - x_sol.get((i, j), 0.0) - x_sol.get((s, k), 0.0)
 
     def _benders_callback(self, model: gp.Model, where: int) -> None:
@@ -87,7 +89,7 @@ class BendersOptimizeMixin:
             # Inicializar buffers de logging: acumulan mensajes durante el callback
             # y se vacían al salir, evitando I/O síncrono dentro del hot-path del solver.
             self._log_buffer: list[str] = []
-            self._cut_buffer: list[dict] = []
+            self._cut_buffer: list[dict[str, Any]] = []
 
             # 1. Extraer la solución actual del Maestro (x_bar)
             x_sol = model.cbGetSolution(self.x)
@@ -96,24 +98,23 @@ class BendersOptimizeMixin:
             # los subproblemas Benders.  Si hay subtours, se retorna inmediatamente
             # para no desperdiciar tiempo resolviendo Y/Y' sobre una solución
             # topológicamente inválida. ---
-            if getattr(self, '_subtour_method', 'SCF') == 'DFJ':
+            if getattr(self, "_subtour_method", "SCF") == "DFJ":
                 components = self._detect_subtour_components(x_sol)
                 if len(components) > 1:
                     for S in components:
                         if 1 < len(S) < self.N:
                             model.cbLazy(
-                                gp.quicksum(
-                                    self.x[i, j]
-                                    for i in S for j in S
-                                    if i != j and (i, j) in self.x
-                                ) <= len(S) - 1
+                                gp.quicksum(self.x[i, j] for i in S for j in S if i != j and (i, j) in self.x)
+                                <= len(S) - 1
                             )
                     # Vaciar buffers (vacíos en este caso) y salir
                     self._log_buffer = []
                     self._cut_buffer = []
                     return
 
-            eta_sol = model.cbGetSolution(self.eta) if hasattr(self, 'objective') and self.objective == "Internal" else 0.0
+            eta_sol = (
+                model.cbGetSolution(self.eta) if hasattr(self, "objective") and self.objective == "Internal" else 0.0
+            )
 
             # 2. Inyectar x_bar en los RHS de los subproblemas
             self._update_subproblem_rhs(x_sol)
@@ -183,9 +184,7 @@ class BendersOptimizeMixin:
             elif not use_deepest:
                 # --- Legacy Farkas / Pi branch ---
                 if self.sub_y.Status == GRB.INFEASIBLE or (
-                    self.benders_method == "pi"
-                    and self.sub_y.Status == GRB.OPTIMAL
-                    and self.sub_y.ObjVal > TOL
+                    self.benders_method == "pi" and self.sub_y.Status == GRB.OPTIMAL and self.sub_y.ObjVal > TOL
                 ):
                     # Generar corte según el método elegido
                     if self.benders_method == "farkas":
@@ -199,7 +198,7 @@ class BendersOptimizeMixin:
                     elif cut_val < -TOL:
                         model.cbLazy(cut_expr >= 0)
 
-                elif self.sub_y.Status == GRB.OPTIMAL and getattr(self, 'objective', 'Fekete') == "Internal":
+                elif self.sub_y.Status == GRB.OPTIMAL and getattr(self, "objective", "Fekete") == "Internal":
                     rel_tol = max(TOL, 1e-5 * abs(eta_sol))
                     if self.sub_y.ObjVal > eta_sol + rel_tol:
                         cut_expr, _ = self.get_optimality_cut_y(x_sol, TOL)
@@ -209,9 +208,8 @@ class BendersOptimizeMixin:
                         model.cbLazy(self.eta <= cut_expr)
 
             # 5. Análisis del Subproblema Y'
-            _yp_violated = (
-                self.sub_yp.Status == GRB.INFEASIBLE
-                or (self.benders_method == "pi" and self.sub_yp.Status == GRB.OPTIMAL and self.sub_yp.ObjVal > TOL)
+            _yp_violated = self.sub_yp.Status == GRB.INFEASIBLE or (
+                self.benders_method == "pi" and self.sub_yp.Status == GRB.OPTIMAL and self.sub_yp.ObjVal > TOL
             )
             if use_deepest and _yp_violated:
                 # --- CGSP / deepest-cut branch ---
@@ -253,47 +251,55 @@ class BendersOptimizeMixin:
                         model.cbLazy(cut_expr >= 0)
 
             # --- Vaciar buffers de logging fuera del hot-path del solver ---
-            _log_buf = getattr(self, '_log_buffer', [])
-            _cut_buf = getattr(self, '_cut_buffer', [])
+            _log_buf = getattr(self, "_log_buffer", [])
+            _cut_buf = getattr(self, "_cut_buffer", [])
             if _log_buf:
                 logger.info("\n".join(_log_buf))
-            if _cut_buf and hasattr(self, 'log_path'):
+            if _cut_buf and hasattr(self, "log_path"):
                 try:
                     from utils.utils import log_benders_cut
+
                     for _entry in _cut_buf:
                         log_benders_cut(
                             filepath=self.log_path,
-                            iteration=_entry['iteration'],
-                            node_depth=_entry['node_depth'],
-                            subproblem_type=_entry['subproblem_type'],
-                            x_sol={},   # ya no se pasa x_sol al JSON (reducción de tamaño)
-                            v_components=_entry['v_components'],
-                            cut_value=_entry['cut_value'],
-                            tolerance=_entry['tolerance'],
+                            iteration=_entry["iteration"],
+                            node_depth=_entry["node_depth"],
+                            subproblem_type=_entry["subproblem_type"],
+                            x_sol={},  # ya no se pasa x_sol al JSON (reducción de tamaño)
+                            v_components=_entry["v_components"],
+                            cut_value=_entry["cut_value"],
+                            tolerance=_entry["tolerance"],
                             cut_expr=None,
-                            sense=_entry['sense'],
+                            sense=_entry["sense"],
                         )
                 except NameError:
                     pass
             self._log_buffer = []
             self._cut_buffer = []
 
-    def solve(self, save_cuts: bool = False, time_limit: int = 7200, verbose: bool = False, relaxed: bool = False, polihedral: bool = False) -> None:
+    def solve(
+        self,
+        save_cuts: bool = False,
+        time_limit: int = 7200,
+        verbose: bool = False,
+        relaxed: bool = False,
+        polihedral: bool = False,
+    ) -> None:
         """
         Configura el modelo y ejecuta la optimización con el callback.
         """
         logger.info(f"Iniciando resolución del modelo (Límite: {time_limit}s)...")
-        
+
         # Guardar configuración local
         self.verbose = verbose
         self.save_cuts = save_cuts
-        #self.log_path = None  # Se asignará si save_cuts es True
+        # self.log_path = None  # Se asignará si save_cuts es True
         self.polihedral = polihedral
-        
+
         # Parámetros obligatorios de Gurobi para Benders
         self.model.Params.LazyConstraints = 1
         self.model.Params.TimeLimit = time_limit
-        
+
         # Desactivar salida de consola de Gurobi si no somos verbose
         if not verbose:
             self.model.Params.OutputFlag = 0
@@ -302,11 +308,11 @@ class BendersOptimizeMixin:
             _log_parent = os.path.dirname(self.log_path)
             if _log_parent:
                 os.makedirs(_log_parent, exist_ok=True)
-            with open(self.log_path, 'w'):
+            with open(self.log_path, "w"):
                 pass
-        
+
         # Dentro del Solver / Callback de Benders:
-        
+
         if relaxed:
             logger.info("Resolviendo la relajación LP del modelo usando un bucle manual de Benders...")
             self.solve_lp_relaxation(time_limit=time_limit, verbose=verbose)
@@ -324,8 +330,9 @@ class BendersOptimizeMixin:
         else:
             logger.warning(f"La optimización terminó con estado: {self.model.Status}")
 
-
-    def solve_lp_relaxation(self, time_limit: int = 7200, verbose: bool = False, save_cuts: bool = False, polihedral: bool = False) -> None:
+    def solve_lp_relaxation(
+        self, time_limit: int = 7200, verbose: bool = False, save_cuts: bool = False, polihedral: bool = False
+    ) -> None:
         """
         Resuelve la relajación LP del modelo usando un bucle manual de Benders.
         (Obligatorio para LPs, ya que Gurobi no dispara callbacks MIPSOL en continuas).
@@ -338,16 +345,16 @@ class BendersOptimizeMixin:
         for v in self.model.getVars():
             if v.VType != GRB.CONTINUOUS:
                 v.VType = GRB.CONTINUOUS
-        
-        # PREVENCIÓN DE ERROR '.X': Acotar 'eta' inicialmente previene que el LP sea UNBOUNDED. 
-        if hasattr(self, 'eta'):
+
+        # PREVENCIÓN DE ERROR '.X': Acotar 'eta' inicialmente previene que el LP sea UNBOUNDED.
+        if hasattr(self, "eta"):
             if self.model.ModelSense == GRB.MAXIMIZE:
                 if self.eta.UB > 1e12:
                     self.eta.UB = 1e12
             else:
                 if self.eta.LB < -1e12:
                     self.eta.LB = -1e12
-        
+
         self.model.update()
 
         # 2. Configurar parámetros para el bucle manual LP
@@ -357,7 +364,7 @@ class BendersOptimizeMixin:
         # DualReductions can cause Gurobi to report INF_OR_UNBD (status 4) instead of
         # correctly solving the LP when eta is bounded. Disabling it forces Gurobi to
         # distinguish infeasible from unbounded and solve correctly.
-        if hasattr(self, 'eta'):
+        if hasattr(self, "eta"):
             self.model.Params.DualReductions = 0
         if not verbose:
             self.model.Params.OutputFlag = 0
@@ -381,24 +388,26 @@ class BendersOptimizeMixin:
 
             # Resolver el Maestro relajado
             self.model.optimize()
-            
+
             # Evita fallo al acceder a `.X` si la relajación acaba infactible o no tiene solución
             if self.model.Status not in (GRB.OPTIMAL, GRB.SUBOPTIMAL):
-                logger.warning(f"El modelo Maestro LP terminó con estado {self.model.Status} en la iteración {self.iteration}.")
+                logger.warning(
+                    f"El modelo Maestro LP terminó con estado {self.model.Status} en la iteración {self.iteration}."
+                )
                 break
-            
+
             # Extraer solución fraccional (v.X funciona perfectamente para continuas)
             x_sol = {k: v.X for k, v in self.x.items()}
-            
-                        # BIEN (extracción estándar):
-            if hasattr(self, 'eta'):
+
+            # BIEN (extracción estándar):
+            if hasattr(self, "eta"):
                 eta_sol = self.eta.X
             else:
                 eta_sol = 0.0
 
             # Actualizar RHS de los subproblemas
             # (Restamos 1 a iteration temporalmente porque _update_subproblem_rhs suma 1 por dentro)
-            self.iteration -= 1 
+            self.iteration -= 1
             self._update_subproblem_rhs(x_sol)
 
             # Resolver ambos subproblemas
@@ -468,9 +477,7 @@ class BendersOptimizeMixin:
             elif use_mw and not needs_cut_y:
                 converged_y = True
             elif self.sub_y.Status == GRB.INFEASIBLE or (
-                self.benders_method == "pi"
-                and self.sub_y.Status == GRB.OPTIMAL
-                and self.sub_y.ObjVal > TOL
+                self.benders_method == "pi" and self.sub_y.Status == GRB.OPTIMAL and self.sub_y.ObjVal > TOL
             ):
                 if self.benders_method == "farkas":
                     cut_expr, cut_val = self.get_farkas_cut_y(x_sol, TOL)
@@ -492,7 +499,7 @@ class BendersOptimizeMixin:
                     )
                     converged_y = True
 
-            elif self.sub_y.Status == GRB.OPTIMAL and getattr(self, 'objective', 'Fekete') == "Internal":
+            elif self.sub_y.Status == GRB.OPTIMAL and getattr(self, "objective", "Fekete") == "Internal":
                 if self.sub_y.ObjVal > eta_sol + TOL:
                     cut_expr, _ = self.get_optimality_cut_y(x_sol, TOL)
                     self.model.addConstr(self.eta >= cut_expr, name=f"lp_opt_cut_y_{self.iteration}")
@@ -506,9 +513,8 @@ class BendersOptimizeMixin:
                 converged_y = True
 
             # --- Análisis del Subproblema Y' ---
-            needs_cut_yp = (
-                self.sub_yp.Status == GRB.INFEASIBLE
-                or (self.benders_method == "pi" and self.sub_yp.Status == GRB.OPTIMAL and self.sub_yp.ObjVal > TOL)
+            needs_cut_yp = self.sub_yp.Status == GRB.INFEASIBLE or (
+                self.benders_method == "pi" and self.sub_yp.Status == GRB.OPTIMAL and self.sub_yp.ObjVal > TOL
             )
             if use_deepest and needs_cut_yp:
                 cut_expr_yp, cut_rhs_yp, _witness_yp = self.get_cgsp_cut_yp(x_sol, TOL=TOL)
@@ -547,9 +553,7 @@ class BendersOptimizeMixin:
             elif use_mw and not needs_cut_yp:
                 converged_yp = True
             elif self.sub_yp.Status == GRB.INFEASIBLE or (
-                self.benders_method == "pi"
-                and self.sub_yp.Status == GRB.OPTIMAL
-                and self.sub_yp.ObjVal > TOL
+                self.benders_method == "pi" and self.sub_yp.Status == GRB.OPTIMAL and self.sub_yp.ObjVal > TOL
             ):
                 if self.benders_method == "farkas":
                     cut_expr, cut_val = self.get_farkas_cut_yp(x_sol, TOL)
@@ -574,7 +578,7 @@ class BendersOptimizeMixin:
 
             if self.polihedral:
                 self.poly_log_path = self.poly_log_path.replace("_iter_*.json", f"_iter_{self.iteration}.json")
-                self.log_facets(filepath=self.poly_log_path, var_prefixes=['x'], verbose=False)
+                self.log_facets(filepath=self.poly_log_path, var_prefixes=["x"], verbose=False)
 
             # --- Condición de parada ---
             if converged_y and converged_yp:

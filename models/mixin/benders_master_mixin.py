@@ -1,6 +1,6 @@
 # models/mixin/benders_master_mixin.py
 import logging
-from typing import Literal
+from typing import Any, Literal
 
 import gurobipy as gp
 import networkx as nx
@@ -24,8 +24,8 @@ class BendersMasterMixin:
     points: NumericArray
     triangles: IndexArray
     triangles_adj_list: TrianglesAdjList
-    x: dict
-    f: dict
+    x: dict[str, Any]
+    f: dict[str, Any]
     eta: gp.Var
     _cost_x: dict[tuple[int, int], float]  # per-arc Fekete area coefficients
 
@@ -101,7 +101,7 @@ class BendersMasterMixin:
 
         # Variables de flujo SCF: solo se crean si el método de subtour es SCF.
         # Con DFJ el maestro no lleva variables auxiliares de flujo.
-        if getattr(self, '_subtour_method', 'SCF') == 'SCF':
+        if getattr(self, "_subtour_method", "SCF") == "SCF":
             self.f = {
                 (i, j): self.model.addVar(vtype=GRB.CONTINUOUS, lb=0, name=f"f_{i}_{j}")
                 for i in self.N_list
@@ -305,16 +305,12 @@ class BendersMasterMixin:
                     for k in range(self.N):
                         if k in (i, j1, j2):
                             continue
-                        if point_in_triangle(
-                            self.points[k], self.points[j1], self.points[i], self.points[j2]
-                        ):
+                        if point_in_triangle(self.points[k], self.points[j1], self.points[i], self.points[j2]):
                             es_pareja_legal = False
                             break
 
                     if es_pareja_legal:
-                        beneficio_pareja = (
-                            self._cost_x.get((i, j1), 0.0) + self._cost_x.get((i, j2), 0.0)
-                        )
+                        beneficio_pareja = self._cost_x.get((i, j1), 0.0) + self._cost_x.get((i, j2), 0.0)
                         if beneficio_pareja > max_beneficio_real:
                             max_beneficio_real = beneficio_pareja
 
@@ -375,7 +371,7 @@ class BendersMasterMixin:
     # DFJ support: subtour detection via BFS (no networkx in hot-path)
     # ------------------------------------------------------------------
 
-    def _detect_subtour_components(self, x_sol: dict) -> list[set[int]]:
+    def _detect_subtour_components(self, x_sol: dict[str, Any]) -> list[set[int]]:
         """Detecta componentes débilmente conexas en la solución entera x_sol.
 
         Implementado con BFS pura sobre el diccionario x_sol para evitar el

@@ -4,6 +4,7 @@ This module contains no Gurobi dependency and no side-effects at import time.
 All heavy geometry computation (triangulation, crossing-edge detection, etc.)
 lives here so it can be tested and reused without a solver licence.
 """
+
 from __future__ import annotations
 
 import csv
@@ -27,6 +28,7 @@ PointLookup = dict[int, tuple[float, float]] | NDArray[np.int64]
 # ---------------------------------------------------------------------------
 # I/O helpers
 # ---------------------------------------------------------------------------
+
 
 def read_data(file_path: str) -> list[str]:
     """Read a file and return its lines as a stripped list."""
@@ -85,6 +87,7 @@ def read_indexed_instance(filepath: str) -> NDArray[np.int64]:
 # Convex hull
 # ---------------------------------------------------------------------------
 
+
 def compute_convex_hull(points: NDArray[np.int64]) -> NDArray[np.int64]:
     """Return the indices of convex-hull vertices (scipy ordering)."""
     hull = ConvexHull(points)
@@ -105,6 +108,7 @@ def compute_convex_hull_area(points: NDArray[np.int64]) -> float:
 # ---------------------------------------------------------------------------
 # Geometric predicates
 # ---------------------------------------------------------------------------
+
 
 def orientation_2d(
     a: tuple[int, int],
@@ -135,11 +139,7 @@ def contains_proper(
     o2 = orientation_2d(p1, q1, q2)
     o3 = orientation_2d(p2, q2, p1)
     o4 = orientation_2d(p2, q2, q1)
-    return (
-        o1 != 0 and o2 != 0 and o3 != 0 and o4 != 0
-        and o1 != o2
-        and o3 != o4
-    )
+    return o1 != 0 and o2 != 0 and o3 != 0 and o4 != 0 and o1 != o2 and o3 != o4
 
 
 def point_in_triangle(
@@ -163,10 +163,7 @@ def signed_area(
     p3: NDArray[np.int64],
 ) -> float:
     """Signed area of triangle *p1 p2 p3* (positive = CCW)."""
-    return 0.5 * (
-        (p2[0] - p1[0]) * (p3[1] - p1[1])
-        - (p2[1] - p1[1]) * (p3[0] - p1[0])
-    )
+    return 0.5 * ((p2[0] - p1[0]) * (p3[1] - p1[1]) - (p2[1] - p1[1]) * (p3[0] - p1[0]))
 
 
 def is_colineal(
@@ -188,6 +185,7 @@ def segments_intersect(
 
     Endpoint-only intersections are excluded.
     """
+
     def _ccw(
         A: NDArray[np.int64],
         B: NDArray[np.int64],
@@ -195,10 +193,7 @@ def segments_intersect(
     ) -> np.bool_:
         return (C[1] - A[1]) * (B[0] - A[0]) > (B[1] - A[1]) * (C[0] - A[0])
 
-    if (
-        np.array_equal(p1, p3) or np.array_equal(p1, p4)
-        or np.array_equal(p2, p3) or np.array_equal(p2, p4)
-    ):
+    if np.array_equal(p1, p3) or np.array_equal(p1, p4) or np.array_equal(p2, p3) or np.array_equal(p2, p4):
         return False
     d1 = _ccw(p1, p3, p4) != _ccw(p2, p3, p4)
     d2 = _ccw(p1, p2, p3) != _ccw(p1, p2, p4)
@@ -208,6 +203,7 @@ def segments_intersect(
 # ---------------------------------------------------------------------------
 # Triangulation
 # ---------------------------------------------------------------------------
+
 
 def compute_triangles(points: NDArray[np.int64]) -> NDArray[np.int64]:
     """Compute all valid (empty, non-degenerate) triangles for a point set.
@@ -250,9 +246,7 @@ def compute_triangles(points: NDArray[np.int64]) -> NDArray[np.int64]:
             ]
             for _edge_pos, (va, vb) in enumerate(tri_edges_directed):
                 if (va, vb) == hull_edge_cw:
-                    tri_idx = np.array(
-                        [tri_idx[0], tri_idx[2], tri_idx[1]], dtype=np.int64
-                    )
+                    tri_idx = np.array([tri_idx[0], tri_idx[2], tri_idx[1]], dtype=np.int64)
                     break
 
         # Reject triangles with chord edges (hull–hull edges that are not hull edges)
@@ -278,9 +272,7 @@ def compute_triangles(points: NDArray[np.int64]) -> NDArray[np.int64]:
         for m in range(n):
             if m in (i, j, k):
                 continue
-            if point_in_triangle(
-                points[m], points[tri_idx[0]], points[tri_idx[1]], points[tri_idx[2]]
-            ):
+            if point_in_triangle(points[m], points[tri_idx[0]], points[tri_idx[1]], points[tri_idx[2]]):
                 contains_other = True
                 break
 
@@ -304,10 +296,7 @@ def are_triangles_incompatible(
     # AABB quick-reject
     t1x, t1y = t1_arr[:, 0], t1_arr[:, 1]
     t2x, t2y = t2_arr[:, 0], t2_arr[:, 1]
-    if (
-        np.max(t1x) < np.min(t2x) or np.min(t1x) > np.max(t2x)
-        or np.max(t1y) < np.min(t2y) or np.min(t1y) > np.max(t2y)
-    ):
+    if np.max(t1x) < np.min(t2x) or np.min(t1x) > np.max(t2x) or np.max(t1y) < np.min(t2y) or np.min(t1y) > np.max(t2y):
         return False
 
     edges1 = [(t1_arr[0], t1_arr[1]), (t1_arr[1], t1_arr[2]), (t1_arr[2], t1_arr[0])]
@@ -439,15 +428,16 @@ def iter_directed_crossing_pairs(
     """
     for row in crossing_edges:
         a, b, c, d = int(row[0]), int(row[1]), int(row[2]), int(row[3])
-        yield (a, b), (c, d)   # F/F
-        yield (b, a), (d, c)   # R/R
-        yield (a, b), (d, c)   # F/R
-        yield (b, a), (c, d)   # R/F
+        yield (a, b), (c, d)  # F/F
+        yield (b, a), (d, c)  # R/R
+        yield (a, b), (d, c)  # F/R
+        yield (b, a), (c, d)  # R/F
 
 
 # ---------------------------------------------------------------------------
 # Triangle metrics
 # ---------------------------------------------------------------------------
+
 
 def cost_function_area(
     points: NDArray[np.int64],
@@ -486,10 +476,7 @@ def triangles_area(
     points: NDArray[np.int64],
 ) -> list[float]:
     """Return the signed area of each triangle."""
-    return [
-        signed_area(points[tri[0]], points[tri[1]], points[tri[2]])
-        for tri in triangles
-    ]
+    return [signed_area(points[tri[0]], points[tri[1]], points[tri[2]]) for tri in triangles]
 
 
 def triangles_adjacency_list(
@@ -533,6 +520,7 @@ def minimal_triangle_adjency_list(
 # File I/O — pre-processing file
 # ---------------------------------------------------------------------------
 
+
 def write_prefile(file_path: str) -> None:
     """Compute geometric structures for an instance and write a ``.pre`` file."""
     points = read_indexed_instance(file_path)
@@ -549,14 +537,8 @@ def write_prefile(file_path: str) -> None:
 
     with open(out_file, "w") as fh:
         fh.write(f"# Preprocesing information of intance {base_name}\n")
-        fh.write(
-            "# Points\tConvex_Hull\tTriangles\tCrossing_segments\t"
-            "Incompatible_Triangles\tTime\n"
-        )
-        fh.write(
-            f"{n_points}\t{len(hull)}\t{len(triangles)}\t"
-            f"{len(crossing)}\t{len(incompatible)}\t0.0\t0.0\n"
-        )
+        fh.write("# Points\tConvex_Hull\tTriangles\tCrossing_segments\tIncompatible_Triangles\tTime\n")
+        fh.write(f"{n_points}\t{len(hull)}\t{len(triangles)}\t{len(crossing)}\t{len(incompatible)}\t0.0\t0.0\n")
         fh.write("POINTS\n")
         for idx, pt in enumerate(points):
             fh.write(f"{idx}\t{float(pt[0])}\t{float(pt[1])}\n")
@@ -583,6 +565,7 @@ def write_prefile(file_path: str) -> None:
 # Metrics export
 # ---------------------------------------------------------------------------
 
+
 def extract_metric_to_csv(
     input_tsv: str,
     output_csv: str,
@@ -601,9 +584,7 @@ def extract_metric_to_csv(
             if reader.fieldnames is None:
                 raise ValueError(f"Empty TSV file: {input_tsv}")
             if min_col not in reader.fieldnames or max_col not in reader.fieldnames:
-                raise ValueError(
-                    f"Columns '{min_col}' and/or '{max_col}' not found in {input_tsv}."
-                )
+                raise ValueError(f"Columns '{min_col}' and/or '{max_col}' not found in {input_tsv}.")
             writer = csv.writer(csv_fh)
             writer.writerow(["instance", f"{metric.lower()}_min", f"{metric.lower()}_max"])
             for row in reader:

@@ -4,6 +4,7 @@ Functions in this module write and read structured cut-log files in JSON Lines
 format.  No Gurobi model is constructed here; the only Gurobi dependency is
 reading coefficient data from ``gp.LinExpr``.
 """
+
 from __future__ import annotations
 
 import json
@@ -26,6 +27,7 @@ SerializedRayData = dict[str, SerializedCoeffMap | float]
 # ---------------------------------------------------------------------------
 # Serialisation helpers
 # ---------------------------------------------------------------------------
+
 
 def serialize_expr(expr: gp.LinExpr | None) -> SerializedExpr | None:
     """Convert a Gurobi ``LinExpr`` to a JSON-serialisable dict.
@@ -75,6 +77,7 @@ def format_cut_string(cut_expr: SerializedExpr, sense: str | None) -> str:
 # Write
 # ---------------------------------------------------------------------------
 
+
 def log_benders_cut(
     filepath: str,
     iteration: int,
@@ -103,20 +106,14 @@ def log_benders_cut(
         cut_expr: Optional Gurobi expression for the generated cut.
         sense: Cut sense (``'<='``, ``'>='``, or ``None``).
     """
-    active_x: SerializedCoeffMap = {
-        f"{i}_{j}": round(val, 4)
-        for (i, j), val in x_sol.items()
-        if abs(val) > tolerance
-    }
+    active_x: SerializedCoeffMap = {f"{i}_{j}": round(val, 4) for (i, j), val in x_sol.items() if abs(val) > tolerance}
 
     ray_data: SerializedRayData = {}
     for comp_name, values in v_components.items():
         if values:
             if isinstance(values, dict):
                 typed = cast(dict[Arc, float], values)
-                ray_data[comp_name] = {
-                    f"{k[0]}_{k[1]}": round(v, 4) for k, v in typed.items()
-                }
+                ray_data[comp_name] = {f"{k[0]}_{k[1]}": round(v, 4) for k, v in typed.items()}
             else:
                 ray_data[comp_name] = round(cast(float, values), 4)
 
@@ -173,38 +170,28 @@ def log_inv_benders_cut(
             (in master variables ``y`` / ``yp``).
         sense: Cut sense (``'<='``, ``'>='``, or ``None``).
     """
-    active_y: SerializedCoeffMap = {
-        str(t): round(val, 4)
-        for t, val in y_sol.items()
-        if abs(val) > tolerance
-    }
-    active_yp: SerializedCoeffMap = {
-        str(t): round(val, 4)
-        for t, val in yp_sol.items()
-        if abs(val) > tolerance
-    }
+    active_y: SerializedCoeffMap = {str(t): round(val, 4) for t, val in y_sol.items() if abs(val) > tolerance}
+    active_yp: SerializedCoeffMap = {str(t): round(val, 4) for t, val in yp_sol.items() if abs(val) > tolerance}
 
     ray_data: SerializedRayData = {}
     for comp_name, values in v_components.items():
         if values:
             if isinstance(values, dict):
                 typed = cast(dict[Arc, float], values)
-                ray_data[comp_name] = {
-                    f"{k[0]}_{k[1]}": round(v, 4) for k, v in typed.items()
-                }
+                ray_data[comp_name] = {f"{k[0]}_{k[1]}": round(v, 4) for k, v in typed.items()}
             else:
                 ray_data[comp_name] = round(cast(float, values), 4)
 
     record: dict[str, Any] = {
-        "iteration":        iteration,
-        "node_depth":       node_depth,
-        "subproblem":       "X",
-        "cut_value":        round(cut_value, 6),
-        "sense":            sense,
-        "active_y":         active_y,
-        "active_yp":        active_yp,
-        "dual_components":  ray_data,
-        "cut_expr":         serialize_expr(cut_expr),
+        "iteration": iteration,
+        "node_depth": node_depth,
+        "subproblem": "X",
+        "cut_value": round(cut_value, 6),
+        "sense": sense,
+        "active_y": active_y,
+        "active_yp": active_yp,
+        "dual_components": ray_data,
+        "cut_expr": serialize_expr(cut_expr),
     }
 
     dir_name = os.path.dirname(filepath)
@@ -217,6 +204,7 @@ def log_inv_benders_cut(
 # ---------------------------------------------------------------------------
 # Read
 # ---------------------------------------------------------------------------
+
 
 def load_farkas_logs(filepath: str) -> list[dict[str, Any]]:
     """Load Benders cut records from a JSONL file.

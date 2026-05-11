@@ -1,6 +1,6 @@
 # models/OAPBendersModel.py
 import logging
-from typing import Literal
+from typing import Any, Literal
 
 import gurobipy as gp
 import numpy as np
@@ -24,9 +24,9 @@ logger = logging.getLogger(__name__)
 # ¡La herencia múltiple en todo su esplendor!
 class OAPBendersModel(
     BendersMasterMixin,
-    BendersDDMAMixin,            # F3 — before CGSP; shares sub_y/sub_yp
+    BendersDDMAMixin,  # F3 — before CGSP; shares sub_y/sub_yp
     BendersCGSPMixin,
-    BendersMagnantiWongMixin,    # after CGSP — shares dual variable structure
+    BendersMagnantiWongMixin,  # after CGSP — shares dual variable structure
     BendersFarkasMixin,
     BendersPiMixin,
     BendersOptimizeMixin,
@@ -55,12 +55,12 @@ class OAPBendersModel(
         self.iteration = 0
         self.cortes_añadidos = 0
         self.benders_method = "farkas"  # Valor por defecto
-        self._subtour_method = "SCF"    # Valor por defecto; actualizado en build()
+        self._subtour_method = "SCF"  # Valor por defecto; actualizado en build()
 
         # CGSP (deepest cuts) configuration — defaults to off for backward compat
         self.use_deepest_cuts: bool = False
-        self.cut_weights_y: dict | None = None
-        self.cut_weights_yp: dict | None = None
+        self.cut_weights_y: dict[str, Any] | None = None
+        self.cut_weights_yp: dict[str, Any] | None = None
         self.cgsp_norm: str = "misd"  # "misd" (uniform) | "relaxed_l1"
 
         # F2.4 — model caches for the CGSP separation LPs.  ``None`` means
@@ -68,15 +68,15 @@ class OAPBendersModel(
         # these and every subsequent call only re-sets the objective.  See
         # BendersCGSPMixin._compute_cgsp_objective and
         # BendersCGSPMixin.invalidate_cgsp_cache.
-        self._cgsp_yp_cache: tuple | None = None
-        self._cgsp_y_cache: tuple | None = None
+        self._cgsp_yp_cache: tuple[Any, ...] | None = None
+        self._cgsp_y_cache: tuple[Any, ...] | None = None
 
         # F3 — DDMA configuration (defaults off for backward compat)
         self.use_ddma: bool = False
 
         # Magnanti-Wong (pareto-optimal cuts) — defaults to off
         self.use_magnanti_wong: bool = False
-        self._core_point: dict | None = None
+        self._core_point: dict[str, Any] | None = None
         self._core_point_strategy: str = "lp_relaxation"
 
         # Para el logger de Farkas/Pi si deseas guardar archivos JSON
@@ -101,8 +101,8 @@ class OAPBendersModel(
         strengthen: bool = False,
         plot_strengthen: bool = False,
         use_deepest_cuts: bool = False,
-        cut_weights_y: dict | None = None,
-        cut_weights_yp: dict | None = None,
+        cut_weights_y: dict[str, Any] | None = None,
+        cut_weights_yp: dict[str, Any] | None = None,
         semiplane: Literal[0, 1] = 0,
         use_knapsack: bool = False,
         use_cliques: bool = False,

@@ -18,6 +18,7 @@ This test requires a valid Gurobi licence.  It is skipped automatically when
 ``gurobipy`` cannot create a model (licence error is caught as a
 ``gurobipy.GurobiError``).
 """
+
 from __future__ import annotations
 
 import logging
@@ -51,12 +52,13 @@ Path("outputs/Others/Testing").mkdir(parents=True, exist_ok=True)
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _load(instance_name: str):
     """Load points and triangles, skip if the instance file is absent."""
     path = BASE_DIR / "instance" / f"{instance_name}.instance"
     if not path.exists():
         pytest.skip(f"Instance file not found: {path}")
-    points    = read_indexed_instance(str(path))
+    points = read_indexed_instance(str(path))
     triangles = compute_triangles(points)
     return points, triangles
 
@@ -82,11 +84,10 @@ def _compact_internal_obj(instance_name: str) -> float:
 def _inv_benders_obj(instance_name: str) -> float:
     """Solve OAPInverseBendersModel and return the optimal objective value."""
     import gurobipy as gp
+
     points, triangles = _load(instance_name)
     try:
-        model = OAPInverseBendersModel(
-            points, triangles, name=f"{instance_name}_inv_benders"
-        )
+        model = OAPInverseBendersModel(points, triangles, name=f"{instance_name}_inv_benders")
     except gp.GurobiError as exc:
         pytest.skip(f"Gurobi licence error: {exc}")
 
@@ -94,16 +95,14 @@ def _inv_benders_obj(instance_name: str) -> float:
     model.solve(time_limit=120, verbose=False, save_cuts=False)
 
     if model.model.SolCount == 0:
-        pytest.skip(
-            f"OAPInverseBendersModel found no solution for {instance_name} "
-            f"within the time limit."
-        )
+        pytest.skip(f"OAPInverseBendersModel found no solution for {instance_name} within the time limit.")
     return float(model.model.ObjVal)
 
 
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("instance_name", INSTANCE_NAMES)
 def test_inv_benders_matches_compact(instance_name: str) -> None:
@@ -118,15 +117,12 @@ def test_inv_benders_matches_compact(instance_name: str) -> None:
         pytest.skip(f"Gurobi not available: {exc}")
 
     compact_val = _compact_internal_obj(instance_name)
-    inv_val     = _inv_benders_obj(instance_name)
+    inv_val = _inv_benders_obj(instance_name)
 
-    logger.info(
-        f"{instance_name}: compact={compact_val:.6f}  inv_benders={inv_val:.6f}"
-    )
+    logger.info(f"{instance_name}: compact={compact_val:.6f}  inv_benders={inv_val:.6f}")
 
     assert inv_val == pytest.approx(compact_val, rel=1e-3), (
-        f"Objective mismatch for {instance_name}: "
-        f"InvBenders={inv_val:.6f} vs Compact={compact_val:.6f}"
+        f"Objective mismatch for {instance_name}: InvBenders={inv_val:.6f} vs Compact={compact_val:.6f}"
     )
 
 

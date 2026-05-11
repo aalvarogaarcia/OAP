@@ -4,6 +4,7 @@ All functions in this module are side-effect-only (they produce plots or
 save image files).  None of them are required by the solver pipeline and
 they should never be imported unconditionally in hot paths.
 """
+
 from __future__ import annotations
 
 import os
@@ -21,10 +22,10 @@ from numpy.typing import NDArray
 from utils.benders_log import SerializedCoeffMap, SerializedExpr, SerializedRayData, parse_edge
 from utils.geometry import Arc, PointLookup, compute_convex_hull
 
-
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _ensure_dir(path: str) -> None:
     """Create the parent directory of *path* if it does not exist."""
@@ -36,6 +37,7 @@ def _ensure_dir(path: str) -> None:
 # ---------------------------------------------------------------------------
 # Solution plot
 # ---------------------------------------------------------------------------
+
 
 def plot_solution(model: gp.Model, title: str = "Solution") -> None:
     """Draw the tour stored in *model._x_results* over *model._points_*."""
@@ -64,16 +66,23 @@ def plot_solution(model: gp.Model, title: str = "Solution") -> None:
     for i, pt in enumerate(points):
         if i in hull_set:
             plt.annotate(
-                str(i), (pt[0], pt[1]),
-                textcoords="offset points", xytext=(5, 5),
-                fontsize=10, color="red", fontweight="bold",
+                str(i),
+                (pt[0], pt[1]),
+                textcoords="offset points",
+                xytext=(5, 5),
+                fontsize=10,
+                color="red",
+                fontweight="bold",
                 bbox=dict(boxstyle="round,pad=0.3", facecolor="yellow", alpha=0.7),
             )
         else:
             plt.annotate(
-                str(i), (pt[0], pt[1]),
-                textcoords="offset points", xytext=(5, 5),
-                fontsize=9, color="black",
+                str(i),
+                (pt[0], pt[1]),
+                textcoords="offset points",
+                xytext=(5, 5),
+                fontsize=9,
+                color="black",
                 bbox=dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.6),
             )
 
@@ -87,6 +96,7 @@ def plot_solution(model: gp.Model, title: str = "Solution") -> None:
 # ---------------------------------------------------------------------------
 # Benders cut diagnostics
 # ---------------------------------------------------------------------------
+
 
 def plot_farkas_ray_network(
     log_entry: dict[str, Any],
@@ -131,16 +141,25 @@ def plot_farkas_ray_network(
     nx.draw_networkx_nodes(G, pos, node_color="lightgray", node_size=300, edgecolors="black")
     nx.draw_networkx_labels(G, pos, font_size=10)
     nx.draw_networkx_edges(
-        G, pos,
+        G,
+        pos,
         edgelist=active_edges,
-        edge_color="gray", style="dashed", alpha=0.6, width=2, arrows=True,
+        edge_color="gray",
+        style="dashed",
+        alpha=0.6,
+        width=2,
+        arrows=True,
     )
 
     color_map: dict[str, str] = {
-        "alpha": "red", "alpha_p": "darkred",
-        "beta": "blue", "beta_p": "darkblue",
-        "gamma": "green", "gamma_p": "darkgreen",
-        "delta": "orange", "delta_p": "darkorange",
+        "alpha": "red",
+        "alpha_p": "darkred",
+        "beta": "blue",
+        "beta_p": "darkblue",
+        "gamma": "green",
+        "gamma_p": "darkgreen",
+        "delta": "orange",
+        "delta_p": "darkorange",
     }
 
     legend_handles: list[Line2D] = []
@@ -156,16 +175,18 @@ def plot_farkas_ray_network(
                 nx.spring_layout(G, pos=pos, fixed=list(pos.keys()), seed=42),
             )
         nx.draw_networkx_edges(
-            G, pos,
+            G,
+            pos,
             edgelist=farkas_edges,
-            edge_color=color, width=2.5, arrows=True,
+            edge_color=color,
+            width=2.5,
+            arrows=True,
             connectionstyle="arc3,rad=0.1",
         )
         legend_handles.append(Line2D([0], [0], color=color, lw=2.5, label=f"Rayo {comp_name}"))
 
     legend_handles.append(
-        Line2D([0], [0], color="gray", linestyle="dashed", lw=2,
-               label=r"Solución candidata $\bar{x}$")
+        Line2D([0], [0], color="gray", linestyle="dashed", lw=2, label=r"Solución candidata $\bar{x}$")
     )
     plt.title(
         f"Iteración: {iteration} | Subproblema: {subproblem}\nViolación: {violation}",
@@ -229,9 +250,7 @@ def plot_cut_weights(
         return
 
     coeffs = cast(SerializedCoeffMap, cut_data["coeffs"])
-    sorted_coeffs: SerializedCoeffMap = dict(
-        sorted(coeffs.items(), key=lambda item: abs(item[1]), reverse=True)
-    )
+    sorted_coeffs: SerializedCoeffMap = dict(sorted(coeffs.items(), key=lambda item: abs(item[1]), reverse=True))
     names = list(sorted_coeffs.keys())
     values = list(sorted_coeffs.values())
 
@@ -239,9 +258,7 @@ def plot_cut_weights(
     colors = ["red" if v < 0 else "blue" for v in values]
     plt.bar(names, values, color=colors)
     plt.xticks(rotation=45, ha="right")
-    plt.title(
-        f"Pesos del Corte - Iteración {log_entry['iteration']} ({log_entry['subproblem']})"
-    )
+    plt.title(f"Pesos del Corte - Iteración {log_entry['iteration']} ({log_entry['subproblem']})")
     plt.ylabel("Coeficiente en el Maestro")
     plt.grid(axis="y", linestyle="--", alpha=0.7)
     plt.tight_layout()
@@ -297,6 +314,7 @@ def plot_sankey_traceability(
 # Strengthening-constraint diagnostics
 # ---------------------------------------------------------------------------
 
+
 def plot_strengthening_constraints(
     points: NDArray[np.int64],
     ch: NDArray[np.int64],
@@ -323,9 +341,12 @@ def plot_strengthening_constraints(
     for i, pt in enumerate(points):
         color = "crimson" if i in ch_set else "black"
         ax.annotate(
-            str(i), (pt[0], pt[1]),
-            textcoords="offset points", xytext=(5, 5),
-            fontsize=8, color=color,
+            str(i),
+            (pt[0], pt[1]),
+            textcoords="offset points",
+            xytext=(5, 5),
+            fontsize=8,
+            color=color,
         )
 
     # Convex hull boundary
@@ -334,24 +355,30 @@ def plot_strengthening_constraints(
         ax.plot(
             [points[u, 0], points[v, 0]],
             [points[u, 1], points[v, 1]],
-            color="green", linestyle="--", linewidth=1.2, alpha=0.6,
+            color="green",
+            linestyle="--",
+            linewidth=1.2,
+            alpha=0.6,
         )
 
     # All master arcs (light grey, undirected to reduce clutter)
     drawn_undirected: set[tuple[int, int]] = set()
-    for (i, j) in x_keys:
+    for i, j in x_keys:
         key = (min(i, j), max(i, j))
         if key not in drawn_undirected:
             drawn_undirected.add(key)
             ax.plot(
                 [points[i, 0], points[j, 0]],
                 [points[i, 1], points[j, 1]],
-                color="lightgrey", linewidth=0.6, alpha=0.5, zorder=1,
+                color="lightgrey",
+                linewidth=0.6,
+                alpha=0.5,
+                zorder=1,
             )
 
     # R3 crossing pairs — draw each crossing pair once, colour-coded
     already_drawn: set[frozenset[tuple[int, int]]] = set()
-    for (arc_a, arc_b) in crossing_pairs:
+    for arc_a, arc_b in crossing_pairs:
         pair_key: frozenset[tuple[int, int]] = frozenset({arc_a, arc_b})
         if pair_key in already_drawn:
             continue
@@ -366,15 +393,20 @@ def plot_strengthening_constraints(
         ax.plot(
             [points[ia, 0], points[ja, 0]],
             [points[ia, 1], points[ja, 1]],
-            color="darkorange", linewidth=1.5, alpha=0.7, zorder=3,
+            color="darkorange",
+            linewidth=1.5,
+            alpha=0.7,
+            zorder=3,
         )
         ax.plot(
             [points[ib, 0], points[jb, 0]],
             [points[ib, 1], points[jb, 1]],
-            color="darkorange", linewidth=1.5, alpha=0.7, zorder=3,
+            color="darkorange",
+            linewidth=1.5,
+            alpha=0.7,
+            zorder=3,
         )
-        ax.plot([mx_a, mx_b], [my_a, my_b], color="darkorange", linewidth=0.8,
-                linestyle=":", alpha=0.5, zorder=2)
+        ax.plot([mx_a, mx_b], [my_a, my_b], color="darkorange", linewidth=0.8, linestyle=":", alpha=0.5, zorder=2)
 
     legend_handles = [
         Line2D([0], [0], color="green", linestyle="--", lw=1.2, label="CH boundary"),
@@ -383,8 +415,7 @@ def plot_strengthening_constraints(
     ]
     ax.legend(handles=legend_handles, loc="best", fontsize=9)
     ax.set_title(
-        f"Strengthening constraints — {len(x_keys)} arcs, "
-        f"{len(already_drawn)} crossing pairs",
+        f"Strengthening constraints — {len(x_keys)} arcs, {len(already_drawn)} crossing pairs",
         fontsize=11,
     )
     ax.set_aspect("equal")

@@ -5,8 +5,10 @@ Verifies that:
    triggered it (i.e. cut_expr(x_bar) > cut_rhs + TOL).
 2. No cut is emitted when the subproblem is feasible at the given x.
 """
+
 import logging
 from pathlib import Path
+from typing import Any
 
 import gurobipy as gp
 import pytest
@@ -35,7 +37,8 @@ if not INSTANCE_FILES:
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _eval_cut(cut_expr: gp.LinExpr, x_sol: dict) -> float:
+
+def _eval_cut(cut_expr: gp.LinExpr, x_sol: dict[str, Any]) -> float:
     """Evaluate a Gurobi LinExpr at a given x_sol dict (arc -> float)."""
     val = cut_expr.getConstant()
     for k in range(cut_expr.size()):
@@ -60,9 +63,7 @@ def _eval_cut(cut_expr: gp.LinExpr, x_sol: dict) -> float:
 
 
 def _build_benders(points, triangles, instance_name, objective="Fekete", maximize=False):
-    model = OAPBendersModel(
-        points, triangles, name=f"CGSP_validity_{instance_name}"
-    )
+    model = OAPBendersModel(points, triangles, name=f"CGSP_validity_{instance_name}")
     model.build(objective=objective, maximize=maximize, benders_method="farkas")
     return model
 
@@ -70,6 +71,7 @@ def _build_benders(points, triangles, instance_name, objective="Fekete", maximiz
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(params=INSTANCE_FILES, ids=[f.stem for f in INSTANCE_FILES])
 def loaded_instance(request):
@@ -82,6 +84,7 @@ def loaded_instance(request):
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 def test_cgsp_cut_yp_violated_at_x_bar(loaded_instance):
     """Cut produced by get_cgsp_cut_yp must be strictly violated at x_bar."""
@@ -96,7 +99,7 @@ def test_cgsp_cut_yp_violated_at_x_bar(loaded_instance):
         pytest.skip(f"sub_yp not initialised for {instance_name}")
 
     # Extract x_sol from the master LP solution
-    x_sol: dict = {}
+    x_sol: dict[str, Any] = {}
     for (i, j), var in model.x.items():
         try:
             x_sol[(i, j)] = var.X
@@ -110,15 +113,12 @@ def test_cgsp_cut_yp_violated_at_x_bar(loaded_instance):
 
     if cut_expr is None:
         # No violation found — that is valid (subproblem may be feasible)
-        assert witness.get("aborted") in ("no_violation", "solve_failed"), (
-            f"Unexpected abort reason: {witness}"
-        )
+        assert witness.get("aborted") in ("no_violation", "solve_failed"), f"Unexpected abort reason: {witness}"
         pytest.skip(f"No violated cut for {instance_name}: {witness}")
 
     lhs_val = _eval_cut(cut_expr, x_sol)
     assert lhs_val > cut_rhs + 1e-6, (
-        f"[{instance_name}] Cut not violated at x_bar: "
-        f"lhs={lhs_val:.8f} <= rhs={cut_rhs:.8f}. witness={witness}"
+        f"[{instance_name}] Cut not violated at x_bar: lhs={lhs_val:.8f} <= rhs={cut_rhs:.8f}. witness={witness}"
     )
 
 
@@ -132,7 +132,7 @@ def test_cgsp_cut_y_violated_at_x_bar(loaded_instance):
     if model.sub_y is None:
         pytest.skip(f"sub_y not initialised for {instance_name}")
 
-    x_sol: dict = {}
+    x_sol: dict[str, Any] = {}
     for (i, j), var in model.x.items():
         try:
             x_sol[(i, j)] = var.X
@@ -145,15 +145,12 @@ def test_cgsp_cut_y_violated_at_x_bar(loaded_instance):
     cut_expr, cut_rhs, witness = model.get_cgsp_cut_y(x_sol)
 
     if cut_expr is None:
-        assert witness.get("aborted") in ("no_violation", "solve_failed"), (
-            f"Unexpected abort reason: {witness}"
-        )
+        assert witness.get("aborted") in ("no_violation", "solve_failed"), f"Unexpected abort reason: {witness}"
         pytest.skip(f"No violated cut for {instance_name}: {witness}")
 
     lhs_val = _eval_cut(cut_expr, x_sol)
     assert lhs_val > cut_rhs + 1e-6, (
-        f"[{instance_name}] Cut not violated at x_bar: "
-        f"lhs={lhs_val:.8f} <= rhs={cut_rhs:.8f}. witness={witness}"
+        f"[{instance_name}] Cut not violated at x_bar: lhs={lhs_val:.8f} <= rhs={cut_rhs:.8f}. witness={witness}"
     )
 
 
@@ -163,7 +160,7 @@ def test_cgsp_cut_yp_none_when_feasible(loaded_instance):
     model = _build_benders(points, triangles, instance_name)
 
     # x_sol = all zeros: sub_yp is trivially feasible (RHS ≥ 0 for all constrs)
-    x_sol_zero: dict = {arc: 0.0 for arc in model.x}
+    x_sol_zero: dict[str, Any] = {arc: 0.0 for arc in model.x}
 
     # Force the sub_yp to be solved at x=0 by calling its internal update
     # (The public entry point calls _build_cgsp_yp internally, so just call it)
@@ -174,6 +171,5 @@ def test_cgsp_cut_yp_none_when_feasible(loaded_instance):
         lhs_val = _eval_cut(cut_expr, x_sol_zero)
         # It's acceptable to emit a cut only if it truly violates at x=0
         assert lhs_val > cut_rhs + 1e-6, (
-            f"[{instance_name}] Spurious cut emitted at x=0: "
-            f"lhs={lhs_val:.8f} rhs={cut_rhs:.8f}"
+            f"[{instance_name}] Spurious cut emitted at x=0: lhs={lhs_val:.8f} rhs={cut_rhs:.8f}"
         )

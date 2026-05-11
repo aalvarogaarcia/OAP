@@ -2,12 +2,13 @@ import argparse
 import json
 import sys
 import time
+from typing import Any
 
 from models import OAPBendersModel, OAPCompactModel
 from utils.utils import compute_triangles, read_indexed_instance
 
 
-def _parse_weight_dict(s: str | None, flag: str) -> dict | None:
+def _parse_weight_dict(s: str | None, flag: str) -> dict[str, Any] | None:
     """Parse a weight-dict string into a Python dict.
 
     Accepted formats:
