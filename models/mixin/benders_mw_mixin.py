@@ -44,6 +44,36 @@ logger = logging.getLogger(__name__)
 
 _MW_TOL = 1e-8
 
+# Minimum effective violation of cut_expr(x̄) - cut_rhs required for a cut to
+# meaningfully cut off x̄ in Gurobi's lazy-constraint mechanism.  Gurobi treats
+# constraints as satisfied within FeasibilityTol (~1e-6 default), so we demand
+# strictly more than that to guarantee the lazy cut rejects x̄.
+_MIN_EFFECTIVE_VIOLATION = 1e-5
+
+
+def _eval_lin_expr_at_x(
+    cut_expr: gp.LinExpr,
+    x_sol: dict[Arc, float],
+) -> float:
+    """Evaluate a master-space LinExpr (built from self.x[i,j] vars) at x_sol.
+
+    The LinExpr's variable names are of the form 'x_{i}_{j}'.  Constants
+    accumulated in the LinExpr (via `getConstant()`) are also included.
+    """
+    val = cut_expr.getConstant()
+    for k in range(cut_expr.size()):
+        v = cut_expr.getVar(k)
+        coef = cut_expr.getCoeff(k)
+        name = v.VarName
+        parts = name.split("_")
+        if len(parts) >= 3 and parts[0] == "x":
+            try:
+                arc = (int(parts[1]), int(parts[2]))
+                val += coef * x_sol.get(arc, 0.0)
+            except ValueError:
+                pass
+    return val
+
 
 class BendersMagnantiWongMixin:
     """Pareto-optimal Benders cuts (Magnanti & Wong, 1981).
@@ -158,6 +188,14 @@ class BendersMagnantiWongMixin:
             logger.warning("MW (Y'): CGSP fallback reconstruction failed (%s).", exc)
             return None, None, {"aborted": "cgsp_recon_failed"}
 
+        # Verify the CGSP fallback cut effectively violates x̄.  q_opt reported
+        # by Gurobi can be a small positive number that does not translate into
+        # a meaningful violation of the reconstructed cut at x̄ (numerical drift
+        # from the normalisation + accumulated rounding in LinExpr terms).
+        cgsp_violation = _eval_lin_expr_at_x(cgsp_cut_expr, x_sol) - cgsp_cut_rhs
+        if cgsp_violation <= _MIN_EFFECTIVE_VIOLATION:
+            return None, None, {"aborted": "weak_cgsp_cut", "violation": cgsp_violation}
+
         # Step 3: capture the complete Pareto expression from the CGSP objective
         # (cgsp.getObjective() is COMPLETE — includes r1, r2, r3 groups too)
         x_bar_expr = cgsp.getObjective()
@@ -194,6 +232,13 @@ class BendersMagnantiWongMixin:
                 pi_vars, which="yp", TOL=TOL
             )
             witness["mw"] = True
+            # Verify the MW cut effectively cuts off x̄.  Pareto constraint should
+            # guarantee π^T b(x̄) = q_opt, but numerical drift can reduce the
+            # violation below Gurobi's lazy-cut tolerance.
+            mw_violation = _eval_lin_expr_at_x(cut_expr, x_sol) - cut_rhs
+            if mw_violation <= _MIN_EFFECTIVE_VIOLATION:
+                # Fall back to CGSP cut (already verified strong above).
+                return cgsp_cut_expr, cgsp_cut_rhs, cgsp_witness
             return cut_expr, cut_rhs, witness
         except Exception as exc:  # noqa: BLE001
             logger.warning("MW (Y'): MW cut reconstruction failed (%s); using CGSP fallback.", exc)
@@ -236,6 +281,11 @@ class BendersMagnantiWongMixin:
             logger.warning("MW (Y): CGSP fallback reconstruction failed (%s).", exc)
             return None, None, {"aborted": "cgsp_recon_failed"}
 
+        # Verify the CGSP fallback cut effectively violates x̄.
+        cgsp_violation = _eval_lin_expr_at_x(cgsp_cut_expr, x_sol) - cgsp_cut_rhs
+        if cgsp_violation <= _MIN_EFFECTIVE_VIOLATION:
+            return None, None, {"aborted": "weak_cgsp_cut", "violation": cgsp_violation}
+
         # Step 3: capture the complete Pareto expression from the CGSP objective
         x_bar_expr = cgsp.getObjective()
 
@@ -270,6 +320,9 @@ class BendersMagnantiWongMixin:
                 pi_vars, which="y", TOL=TOL
             )
             witness["mw"] = True
+            mw_violation = _eval_lin_expr_at_x(cut_expr, x_sol) - cut_rhs
+            if mw_violation <= _MIN_EFFECTIVE_VIOLATION:
+                return cgsp_cut_expr, cgsp_cut_rhs, cgsp_witness
             return cut_expr, cut_rhs, witness
         except Exception as exc:  # noqa: BLE001
             logger.warning("MW (Y): MW cut reconstruction failed (%s); using CGSP fallback.", exc)
