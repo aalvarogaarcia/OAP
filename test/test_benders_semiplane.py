@@ -36,7 +36,7 @@ INSTANCE_STARS_10 = "instance/stars-0000010.instance"
 
 
 @pytest.fixture(scope="module")
-def us_night_8():
+def us_night_8():  # type: ignore[no-untyped-def]
     """Load us-night-0000008 once for all tests that need it."""
     path = Path(INSTANCE_US_NIGHT_8)
     if not path.exists():
@@ -47,7 +47,7 @@ def us_night_8():
 
 
 @pytest.fixture(scope="module")
-def us_night_10():
+def us_night_10():  # type: ignore[no-untyped-def]
     """Load us-night-0000010 once for all tests that need it."""
     path = Path(INSTANCE_US_NIGHT_10)
     if not path.exists():
@@ -58,7 +58,7 @@ def us_night_10():
 
 
 @pytest.fixture(scope="module")
-def stars_10():
+def stars_10():  # type: ignore[no-untyped-def]
     """Load stars-0000010 once for CH-cleanup stress test."""
     path = Path(INSTANCE_STARS_10)
     if not path.exists():
@@ -74,7 +74,7 @@ def stars_10():
 
 
 @pytest.mark.gurobi
-def test_semiplane_master_adds_constraints(us_night_8):
+def test_semiplane_master_adds_constraints(us_night_8):  # type: ignore[no-untyped-def]
     """Semiplane=1 strictly increases master NumConstrs vs semiplane=0."""
     points, triangles = us_night_8
 
@@ -98,7 +98,7 @@ def test_semiplane_master_adds_constraints(us_night_8):
 
 
 @pytest.mark.gurobi
-def test_semiplane_master_preserves_subproblems(us_night_8):
+def test_semiplane_master_preserves_subproblems(us_night_8):  # type: ignore[no-untyped-def]
     """Subproblems Y and Y' are structurally identical regardless of master semiplane."""
     points, triangles = us_night_8
 
@@ -128,7 +128,7 @@ def test_semiplane_master_preserves_subproblems(us_night_8):
 
 @pytest.mark.gurobi
 @pytest.mark.slow
-def test_semiplane_master_preserves_optimum(us_night_10):
+def test_semiplane_master_preserves_optimum(us_night_10):  # type: ignore[no-untyped-def]
     """IP optimum is identical with and without master semiplane (validity check)."""
     points, triangles = us_night_10
 
@@ -158,7 +158,7 @@ def test_semiplane_master_preserves_optimum(us_night_10):
 
 
 @pytest.mark.gurobi
-def test_semiplane_master_no_keyerror_on_ch_cleanup(stars_10):
+def test_semiplane_master_no_keyerror_on_ch_cleanup(stars_10):  # type: ignore[no-untyped-def]
     """Build with semiplane=1 must not raise KeyError on any instance family."""
     points, triangles = stars_10
 

@@ -62,7 +62,7 @@ def extract_cut_features(logs: list[dict[str, Any]]) -> tuple[np.ndarray, list[i
     return np.array(features), iterations, cut_types
 
 
-def plot_dimensionality_reduction(log_path: str, output_path: str = None):
+def plot_dimensionality_reduction(log_path: str, output_path: str = None) -> None:
     """
     Aplica PCA y UMAP a los vectores de cortes para visualizar el comportamiento de Benders.
     """

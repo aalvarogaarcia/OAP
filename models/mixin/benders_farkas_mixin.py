@@ -444,7 +444,16 @@ class BendersFarkasMixin:
 
         return cut_yp_expr, cut_yp_val
 
-    def _log_and_print_farkas(self, v_components, cut_val, sub_name, TOL, x_sol, cut_expr, sense=None):
+    def _log_and_print_farkas(
+        self,
+        v_components: dict[str, Any],
+        cut_val: float,
+        sub_name: str,
+        TOL: float,
+        x_sol: dict[Arc, float],
+        cut_expr: gp.LinExpr,
+        sense: str | None = None,
+    ) -> None:
         """Método auxiliar interno para registrar el log del rayo de Farkas.
 
         Implementación con buffer: NO realiza I/O ni llamadas a logger dentro
@@ -522,7 +531,7 @@ class BendersFarkasMixin:
                 except NameError:
                     logger.warning("No se pudo guardar el log estructurado: log_benders_cut no está definido.")
 
-    def _add_sum_constrain_farkas(self):
+    def _add_sum_constrain_farkas(self) -> None:
         """Método auxiliar para añadir la restricción de suma en los subproblemas."""
         self.constrs_y["global"] = self.sub_y.addConstr(
             gp.quicksum(self.y[t] for t in self.V_list) == self.N - 2, name="triangulos_internos_totales"
@@ -531,7 +540,7 @@ class BendersFarkasMixin:
             gp.quicksum(self.yp[t] for t in self.V_list) == self.N - len(self.CH), name="triangulos_externos_totales"
         )
 
-    def _add_A_prime_constrs_farkas(self):
+    def _add_A_prime_constrs_farkas(self) -> None:
         """Método auxiliar para añadir las restricciones de A' en los subproblemas."""
         A_prime = []
         for i in range(len(self.CH)):
@@ -547,7 +556,7 @@ class BendersFarkasMixin:
                 gp.quicksum(self.yp[t] for t in self.triangles_adj_list[i][j]) == 0, name=f"alpha_p_{i}_{j}"
             )
 
-    def _add_non_ch_constr_farkas(self):
+    def _add_non_ch_constr_farkas(self) -> None:
         """Método auxiliar para añadir las restricciones de no-ch in los subproblemas."""
         for i in self.N_list:
             for j in self.N_list:

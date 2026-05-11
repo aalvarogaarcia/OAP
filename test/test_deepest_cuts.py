@@ -36,7 +36,7 @@ INSTANCE_PATH_10 = "instance/us-night-0000010.instance"
 
 
 @pytest.fixture(scope="module")
-def small_instance():
+def small_instance():  # type: ignore[no-untyped-def]
     """Load the smallest available fixture (8 or 10 points) for fast tests."""
     for path_str in (INSTANCE_PATH_8, INSTANCE_PATH_10):
         path = Path(path_str)
@@ -50,7 +50,7 @@ def small_instance():
 
 
 @pytest.fixture(scope="module")
-def built_benders_farkas(small_instance):
+def built_benders_farkas(small_instance):  # type: ignore[no-untyped-def]
     """OAPBendersModel built with farkas method and subproblems populated."""
     points, triangles, _path = small_instance
     from models.OAPBendersModel import OAPBendersModel
@@ -67,7 +67,7 @@ def built_benders_farkas(small_instance):
 
 
 @pytest.fixture(scope="module")
-def warmup_rhs(built_benders_farkas):
+def warmup_rhs(built_benders_farkas):  # type: ignore[no-untyped-def]
     """Return model with subproblem RHS updated to all-zero x_sol."""
     model = built_benders_farkas
     x_sol = {arc: 0.0 for arc in model.x.keys()}
@@ -80,7 +80,7 @@ def warmup_rhs(built_benders_farkas):
 # ---------------------------------------------------------------------------
 
 
-def test_cgsp_yp_construction(warmup_rhs):
+def test_cgsp_yp_construction(warmup_rhs):  # type: ignore[no-untyped-def]
     """_build_cgsp_yp returns a valid Gurobi model with L₁ normalisation."""
     model, x_sol = warmup_rhs
 
@@ -101,7 +101,7 @@ def test_cgsp_yp_construction(warmup_rhs):
 # ---------------------------------------------------------------------------
 
 
-def test_cgsp_y_construction_fekete(warmup_rhs):
+def test_cgsp_y_construction_fekete(warmup_rhs):  # type: ignore[no-untyped-def]
     """_build_cgsp_y for Fekete objective returns a model without π₀."""
     model, x_sol = warmup_rhs
 
@@ -123,7 +123,7 @@ def test_cgsp_y_construction_fekete(warmup_rhs):
 # ---------------------------------------------------------------------------
 
 
-def test_get_cgsp_cut_yp_structure(warmup_rhs):
+def test_get_cgsp_cut_yp_structure(warmup_rhs):  # type: ignore[no-untyped-def]
     """get_cgsp_cut_yp must return (LinExpr, float, dict)."""
     model, x_sol = warmup_rhs
 
@@ -143,7 +143,7 @@ def test_get_cgsp_cut_yp_structure(warmup_rhs):
 # ---------------------------------------------------------------------------
 
 
-def test_get_cgsp_cut_y_structure(warmup_rhs):
+def test_get_cgsp_cut_y_structure(warmup_rhs):  # type: ignore[no-untyped-def]
     """get_cgsp_cut_y must return (LinExpr, float, dict)."""
     model, x_sol = warmup_rhs
 
@@ -163,7 +163,7 @@ def test_get_cgsp_cut_y_structure(warmup_rhs):
 # ---------------------------------------------------------------------------
 
 
-def test_backward_compat_default_is_false(small_instance):
+def test_backward_compat_default_is_false(small_instance):  # type: ignore[no-untyped-def]
     """OAPBendersModel.build() without use_deepest_cuts stores False."""
     points, triangles, _ = small_instance
     from models.OAPBendersModel import OAPBendersModel
@@ -179,7 +179,7 @@ def test_backward_compat_default_is_false(small_instance):
 # ---------------------------------------------------------------------------
 
 
-def test_backward_compat_mip_solve(small_instance):
+def test_backward_compat_mip_solve(small_instance):  # type: ignore[no-untyped-def]
     """Benders MIP with use_deepest_cuts=False must match compact model."""
     points, triangles, _ = small_instance
     from models.OAPBendersModel import OAPBendersModel
@@ -212,7 +212,7 @@ def test_backward_compat_mip_solve(small_instance):
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_weights_defaults(warmup_rhs):
+def test_resolve_weights_defaults(warmup_rhs):  # type: ignore[no-untyped-def]
     """_resolve_weights with no custom weights returns all-1.0 values."""
     model, _ = warmup_rhs
     model.cut_weights_y = None
@@ -233,7 +233,7 @@ def test_resolve_weights_defaults(warmup_rhs):
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_weights_custom_scalar(warmup_rhs):
+def test_resolve_weights_custom_scalar(warmup_rhs):  # type: ignore[no-untyped-def]
     """_resolve_weights uses custom scalar weight when provided."""
     model, _ = warmup_rhs
     model.cut_weights_yp = {"global_p": 2.5}
@@ -252,7 +252,7 @@ def test_resolve_weights_custom_scalar(warmup_rhs):
 # ---------------------------------------------------------------------------
 
 
-def test_optimality_cut_flag_absent_for_fekete(warmup_rhs):
+def test_optimality_cut_flag_absent_for_fekete(warmup_rhs):  # type: ignore[no-untyped-def]
     """For Fekete objective, get_cgsp_cut_y witness must not contain is_optimality_cut=True."""
     model, x_sol = warmup_rhs
 
@@ -272,7 +272,7 @@ def test_optimality_cut_flag_absent_for_fekete(warmup_rhs):
 # ---------------------------------------------------------------------------
 
 
-def test_compute_relaxed_l1_weights_structure(built_benders_farkas):
+def test_compute_relaxed_l1_weights_structure(built_benders_farkas):  # type: ignore[no-untyped-def]
     """_compute_relaxed_l1_weights returns a dict with the same nested structure
     as constrs_yp: dict-valued groups map every arc key to a float, scalar
     groups map to a single float."""
@@ -309,7 +309,7 @@ def test_compute_relaxed_l1_weights_structure(built_benders_farkas):
 # ---------------------------------------------------------------------------
 
 
-def test_compute_relaxed_l1_weights_group_values(built_benders_farkas):
+def test_compute_relaxed_l1_weights_group_values(built_benders_farkas):  # type: ignore[no-untyped-def]
     """Structural weights follow the Relaxed-ℓ₁ table:
         alpha/gamma/delta → 1.0, beta/r3 → 2.0, global/r1/r2 → 0.0.
     Groups absent from the model are simply skipped."""
@@ -357,7 +357,7 @@ def test_compute_relaxed_l1_weights_group_values(built_benders_farkas):
 # ---------------------------------------------------------------------------
 
 
-def test_build_with_use_deepest_cuts_relaxed_l1(small_instance):
+def test_build_with_use_deepest_cuts_relaxed_l1(small_instance):  # type: ignore[no-untyped-def]
     """build(use_deepest_cuts=True, cgsp_norm='relaxed_l1') must not raise
     AttributeError and must populate cut_weights_y / cut_weights_yp."""
     points, triangles, _ = small_instance
@@ -390,7 +390,7 @@ def test_build_with_use_deepest_cuts_relaxed_l1(small_instance):
 # ---------------------------------------------------------------------------
 
 
-def test_invalidate_cgsp_cache(warmup_rhs):
+def test_invalidate_cgsp_cache(warmup_rhs):  # type: ignore[no-untyped-def]
     """invalidate_cgsp_cache must set _cgsp_yp_cache and _cgsp_y_cache to None."""
     model, x_sol = warmup_rhs
 

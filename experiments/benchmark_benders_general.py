@@ -156,7 +156,7 @@ def get_system_info() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def _safe_round(value, ndigits: int):
+def _safe_round(value, ndigits: int):  # type: ignore[no-untyped-def]
     """Round numeric values; pass through anything else (None, "-", strings) as None.
 
     F1.2 (audit ref. .claude/context/reviews/2026-05-04-cgsp-paper-dissonance.md §2.4):
@@ -456,7 +456,7 @@ def write_report(
     methods: list[str] = cfg["methods"]
     instances_order = list(dict.fromkeys(r["instance"] for r in results))
 
-    def _fmt(v) -> str:
+    def _fmt(v) -> str:  # type: ignore[no-untyped-def]
         return str(v) if v is not None else "—"
 
     with open(path, "w", encoding="utf-8") as f:

@@ -138,7 +138,7 @@ def run_single_solve(
         }
 
 
-def main():
+def main():  # type: ignore[no-untyped-def]
     """Run benchmark suite and generate reports."""
     # Validate instance files exist
     instances = [

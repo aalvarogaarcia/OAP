@@ -97,7 +97,7 @@ BENDERS_VARIANTS = [
 
 
 @pytest.fixture(params=INSTANCE_FILES, ids=[p.stem for p in INSTANCE_FILES])
-def instance(request):
+def instance(request):  # type: ignore[no-untyped-def]
     """Load an instance file and return (name, points, triangles)."""
     path: Path = request.param
     points = read_indexed_instance(str(path))
@@ -112,7 +112,7 @@ def instance(request):
 
 @pytest.mark.parametrize("maximize", [True, False], ids=["max", "min"])
 @pytest.mark.parametrize("variant", BENDERS_VARIANTS)
-def test_ip_equivalence(instance, variant: BendersVariant, maximize: bool):
+def test_ip_equivalence(instance, variant: BendersVariant, maximize: bool) -> None:  # type: ignore[no-untyped-def]
     """
     Compact MIP optimal value must equal Benders MIP optimal value
     for every instance, maximize flag and Benders variant.
@@ -166,7 +166,7 @@ def test_ip_equivalence(instance, variant: BendersVariant, maximize: bool):
 
 @pytest.mark.parametrize("maximize", [True, False], ids=["max", "min"])
 @pytest.mark.parametrize("variant", BENDERS_VARIANTS)
-def test_lp_equivalence(instance, variant: BendersVariant, maximize: bool):
+def test_lp_equivalence(instance, variant: BendersVariant, maximize: bool) -> None:  # type: ignore[no-untyped-def]
     """
     Compact LP relaxation bound must equal Benders LP relaxation bound
     for every instance, maximize flag and Benders variant.
@@ -218,7 +218,7 @@ def test_lp_equivalence(instance, variant: BendersVariant, maximize: bool):
 
 
 @pytest.mark.parametrize("maximize", [True, False], ids=["max", "min"])
-def test_benders_variant_parity(instance, maximize: bool):
+def test_benders_variant_parity(instance, maximize: bool) -> None:  # type: ignore[no-untyped-def]
     """
     All Benders variants must agree on the IP optimal value.
 

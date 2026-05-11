@@ -41,7 +41,7 @@ class OAPBuilderMixin:
     zp: dict[Arc, gp.Var]
     _abs_areas: list[float]
 
-    def _create_variables(self, subtour: str, objective: str, mode: int):
+    def _create_variables(self, subtour: str, objective: str, mode: int) -> None:
         """Crea todas las variables y limpia los arcos inválidos de la envolvente convexa (CH)."""
         # Variables principales
         self.x = {
@@ -118,7 +118,7 @@ class OAPBuilderMixin:
                     if i != j and (i not in self.CH or j not in self.CH)
                 }
 
-    def _set_objective(self, objective: str, mode: int, maximize: bool):
+    def _set_objective(self, objective: str, mode: int, maximize: bool) -> None:
         """Define la función objetivo."""
         optimizer = GRB.MAXIMIZE if maximize else GRB.MINIMIZE
         at = [
@@ -156,7 +156,7 @@ class OAPBuilderMixin:
             sum_td = 3 * gp.quicksum(td[i, j, k] for i, j, k in td.keys())
             self.model.setObjective(1 / 3 * (sum_x + sum_z + sum_td), optimizer)
 
-    def _add_degree_constraints(self):
+    def _add_degree_constraints(self) -> None:
         """Restricciones básicas de grado de entrada y salida."""
         for i in self.N_list:
             self.model.addConstr(
@@ -168,7 +168,7 @@ class OAPBuilderMixin:
                 name=f"Grado_entrada_{i}",
             )
 
-    def _add_subtour_constraints(self, subtour: str):
+    def _add_subtour_constraints(self, subtour: str) -> None:
         """Restricciones de eliminación de subtours (SEC)."""
         if subtour == "SCF":
             for i in self.N_list:
@@ -210,7 +210,7 @@ class OAPBuilderMixin:
                             if i != j and (i, j) in self.x:
                                 self.model.addConstr(self.f_mcf[k, i, j] <= self.x[i, j], name=f"mcf_cap_{k}_{i}_{j}")
 
-    def _add_sum_constraints(self):
+    def _add_sum_constraints(self) -> None:
         """Restricciones adicionales para asegurar que el número total de triángulos internos y externos sea correcto."""
         self.model.addConstr(
             gp.quicksum(self.y[i] for i in self.V_list) == self.N - 2, name="triangulos_internos_totales"
@@ -219,7 +219,7 @@ class OAPBuilderMixin:
             gp.quicksum(self.yp[i] for i in self.V_list) == self.N - len(self.CH), name="triangulos_externos_totales"
         )
 
-    def _add_triangle_ch_constraints(self):
+    def _add_triangle_ch_constraints(self) -> None:
         """Restricciones de los triángulos y su relación con la envolvente convexa."""
 
         for i in range(len(self.CH)):
@@ -235,7 +235,7 @@ class OAPBuilderMixin:
                     name=f"CH_arcos_externos_{a}_{b}",
                 )
 
-    def _add_variable_relation_constraints(self, objective: str, mode: int):
+    def _add_variable_relation_constraints(self, objective: str, mode: int) -> None:
         """Restricciones lógicas entre x, y, yp y z (diagonales)."""
         # Diagonales
         if objective == "Diagonals":
@@ -295,7 +295,7 @@ class OAPBuilderMixin:
                         1 - self.x[i, j] >= gp.quicksum(self.yp[t] for t in self.triangles_adj_list[i][j])
                     )
 
-    def _add_strengthening_constraints(self):
+    def _add_strengthening_constraints(self) -> None:
         """
         LP-strengthening constraints (Sec. 5.4 of Hernández-Pérez et al., 2025).
 

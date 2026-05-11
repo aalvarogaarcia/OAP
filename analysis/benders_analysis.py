@@ -13,7 +13,7 @@ arcs_right = [(3, 2), (9, 2), (3, 4)]
 all_arcs = arcs_left + arcs_right
 
 
-def get_var_name(arc):
+def get_var_name(arc):  # type: ignore[no-untyped-def]
     return f"x_{arc[0]}_{arc[1]}"
 
 
@@ -23,7 +23,7 @@ all_vars = vars_left + vars_right
 
 
 # --- 2. LECTURA DE INSTANCIA ---
-def load_instance(filename):
+def load_instance(filename):  # type: ignore[no-untyped-def]
     pos = {}
     try:
         with open(filename, "r") as f:
@@ -48,7 +48,7 @@ def load_instance(filename):
 
 
 # --- 4. LÓGICA CON FILTROS ---
-def get_valid_cases(a_left, a_right, posiciones, constant: int = 0):
+def get_valid_cases(a_left, a_right, posiciones, constant: int = 0):  # type: ignore[no-untyped-def]
     anti_pairs = []
     for a in a_left:
         reverse = (a[1], a[0])
@@ -114,7 +114,7 @@ def get_valid_cases(a_left, a_right, posiciones, constant: int = 0):
 
 
 # --- 5. VISUALIZACIÓN ---
-def mostrar_casos_secuencialmente(casos, posiciones):
+def mostrar_casos_secuencialmente(casos, posiciones):  # type: ignore[no-untyped-def]
     print(f"Se encontraron {len(casos)} casos válidos (sin cruces ni triviales).")
     print("MIRA LA VENTANA EMERGENTE. Cierra la ventana del gráfico (X) para ver el siguiente caso.")
     print("-" * 50)

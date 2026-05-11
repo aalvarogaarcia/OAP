@@ -28,7 +28,7 @@ except FileNotFoundError:
 # 2. Inyectar los datos en la función de prueba
 # 'ids' hace que en la consola veamos el nombre de la instancia en lugar de "test_1", "test_2"
 @pytest.mark.parametrize("ref_data", instancias_test, ids=[str(r["instance"]) for r in instancias_test])
-def test_oap_compact_model_maximize(ref_data, caplog):
+def test_oap_compact_model_maximize(ref_data, caplog):  # type: ignore[no-untyped-def]
     """
     Test que comprueba si el modelo compacto genera la estructura y
     los resultados óptimos correctos para el caso de Maximización.

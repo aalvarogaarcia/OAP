@@ -329,7 +329,16 @@ class BendersPiMixin:
         self._log_and_print_pi(v_comps_p, cut_yp_val, "Y'", TOL, x_sol, cut_yp_expr, sense)
         return cut_yp_expr, cut_yp_val
 
-    def _log_and_print_pi(self, v_components, cut_val, sub_name, TOL, x_sol, cut_expr, sense=None):
+    def _log_and_print_pi(
+        self,
+        v_components: dict[str, Any],
+        cut_val: float,
+        sub_name: str,
+        TOL: float,
+        x_sol: dict[Arc, float],
+        cut_expr: gp.LinExpr,
+        sense: str | None = None,
+    ) -> None:
         """Método auxiliar interno para registrar el log de variables duales (.Pi).
         Diferencia automáticamente entre cortes de Optimalidad y Factibilidad.
         """

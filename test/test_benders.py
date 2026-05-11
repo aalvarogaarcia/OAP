@@ -15,7 +15,7 @@ INSTANCE_PATH = "instance/us-night-0000010.instance"
 
 
 @pytest.fixture(scope="module")
-def instancia_prueba():
+def instancia_prueba():  # type: ignore[no-untyped-def]
     """Carga los datos una sola vez para todos los tests de este módulo."""
     path = Path(INSTANCE_PATH)
     if not path.exists():
@@ -30,7 +30,7 @@ def instancia_prueba():
 # TEST 1: Equivalencia del Modelo Entero (MIP)
 # =======================================================================
 @pytest.mark.parametrize("benders_method", ["farkas", "pi"])
-def test_benders_mip_equivalence(instancia_prueba, benders_method):
+def test_benders_mip_equivalence(instancia_prueba, benders_method):  # type: ignore[no-untyped-def]
     """Verifica que el valor objetivo MIP de Benders sea idéntico al del Compacto."""
     points, triangles = instancia_prueba
 
@@ -60,7 +60,7 @@ def test_benders_mip_equivalence(instancia_prueba, benders_method):
 # TEST 2: Equivalencia de la Relajación Lineal (LP)
 # =======================================================================
 @pytest.mark.parametrize("benders_method", ["farkas", "pi"])
-def test_benders_lp_equivalence(instancia_prueba, benders_method):
+def test_benders_lp_equivalence(instancia_prueba, benders_method):  # type: ignore[no-untyped-def]
     """Verifica que el límite inferior (Root Node Bound LP) sea idéntico."""
     points, triangles = instancia_prueba
 

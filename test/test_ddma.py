@@ -62,7 +62,7 @@ def _eval_cut(cut_expr: gp.LinExpr, x_sol: dict[str, Any]) -> float:
     return val
 
 
-def _build_ddma_model(points, triangles, name, benders_method="farkas"):
+def _build_ddma_model(points, triangles, name, benders_method="farkas"):  # type: ignore[no-untyped-def]
     m = OAPBendersModel(points, triangles, name=name)
     m.build(
         objective="Fekete",
@@ -73,7 +73,7 @@ def _build_ddma_model(points, triangles, name, benders_method="farkas"):
     return m
 
 
-def _build_farkas_model(points, triangles, name):
+def _build_farkas_model(points, triangles, name):  # type: ignore[no-untyped-def]
     m = OAPBendersModel(points, triangles, name=name)
     m.build(
         objective="Fekete",
@@ -90,7 +90,7 @@ def _build_farkas_model(points, triangles, name):
 
 
 @pytest.fixture(params=INSTANCE_FILES, ids=[p.stem for p in INSTANCE_FILES])
-def instance(request):
+def instance(request):  # type: ignore[no-untyped-def]
     path: Path = request.param
     points = read_indexed_instance(str(path))
     triangles = compute_triangles(points)
@@ -104,7 +104,7 @@ def instance(request):
 # ---------------------------------------------------------------------------
 
 
-def test_ddma_cut_validity(instance):
+def test_ddma_cut_validity(instance):  # type: ignore[no-untyped-def]
     """
     A cut produced by get_ddma_cut_yp / get_ddma_cut_y must satisfy:
         cut_expr(x̄) > cut_rhs + TOL
@@ -147,7 +147,7 @@ def test_ddma_cut_validity(instance):
 
 
 @pytest.mark.parametrize("maximize", [True, False], ids=["max", "min"])
-def test_ddma_ip_equals_farkas(instance, maximize: bool):
+def test_ddma_ip_equals_farkas(instance, maximize: bool) -> None:  # type: ignore[no-untyped-def]
     """
     DDMA and plain Farkas must reach the same IP optimal value.
 
@@ -200,7 +200,7 @@ def test_ddma_ip_equals_farkas(instance, maximize: bool):
 # ---------------------------------------------------------------------------
 
 
-def test_ddma_lp_equals_farkas(instance):
+def test_ddma_lp_equals_farkas(instance):  # type: ignore[no-untyped-def]
     """
     DDMA LP relaxation must converge to the same bound as Farkas LP.
 
@@ -237,7 +237,7 @@ def test_ddma_lp_equals_farkas(instance):
 # ---------------------------------------------------------------------------
 
 
-def test_ddma_early_termination_valid(instance):
+def test_ddma_early_termination_valid(instance):  # type: ignore[no-untyped-def]
     """
     DDMA with max_iter=1 (single Benders solve) must still return a
     cut that is violated at x̄ (Remark 6 in Hosseini & Turner 2025).
@@ -270,7 +270,7 @@ def test_ddma_early_termination_valid(instance):
 # ---------------------------------------------------------------------------
 
 
-def test_ddma_no_cut_on_feasible(instance):
+def test_ddma_no_cut_on_feasible(instance):  # type: ignore[no-untyped-def]
     """
     When both subproblems are feasible for the given x̄, DDMA must not
     emit a cut (no violation → correct convergence signal).

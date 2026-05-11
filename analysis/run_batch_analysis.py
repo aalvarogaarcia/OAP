@@ -19,7 +19,7 @@ def run_batch(
     benders_method: Literal["farkas", "pi"],
     maximize: bool,
     lp: bool,
-):
+) -> None:
     """
     Busca instancias que coincidan con 'filter_texts', las resuelve con Benders
     y genera un reporte en PDF de su comportamiento dual.

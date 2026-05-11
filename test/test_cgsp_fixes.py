@@ -26,7 +26,7 @@ INSTANCE_PATH = "instance/us-night-0000008.instance"
 
 
 @pytest.fixture(scope="module")
-def small_instance():
+def small_instance():  # type: ignore[no-untyped-def]
     """Load fixture instance for CGSP fix validation."""
     path = Path(INSTANCE_PATH)
     if not path.exists():
@@ -42,7 +42,7 @@ def small_instance():
 class TestCGSPFix2ObjectiveCorrectness:
     """Fix 2: π₀ objective computes f^T x̄ - η correctly, not sub_y.ObjVal - η."""
 
-    def test_internal_objective_pi0_uses_cost_dot_x(self, small_instance):
+    def test_internal_objective_pi0_uses_cost_dot_x(self, small_instance):  # type: ignore[no-untyped-def]
         """For Internal objective, π₀ term should use f^T x̄ - η̄, not sub_y.ObjVal - η."""
         from models import OAPBendersModel
 
@@ -73,7 +73,7 @@ class TestCGSPFix2ObjectiveCorrectness:
 class TestCGSPFix3NegativePi0Handling:
     """Fix 3: When π₀ < 0, return (None, None, dict) not negative optimality cut."""
 
-    def test_no_negative_pi0_returned(self, small_instance):
+    def test_no_negative_pi0_returned(self, small_instance):  # type: ignore[no-untyped-def]
         """Ensure get_cgsp_cut_y never emits a cut with π₀ < 0."""
         from models import OAPBendersModel
 
@@ -98,7 +98,7 @@ class TestCGSPFix3NegativePi0Handling:
 class TestCGSPFix5CallbackGate:
     """Fix 5: Callback only fires CGSP-Y when sub_y.ObjVal > η + tol."""
 
-    def test_no_redundant_cuts_emitted(self, small_instance):
+    def test_no_redundant_cuts_emitted(self, small_instance):  # type: ignore[no-untyped-def]
         """Verify callback gate prevents redundant cuts."""
         from models import OAPBendersModel
 
@@ -134,7 +134,7 @@ class TestCGSPFix5CallbackGate:
 class TestCGSPFix6ObjValGuard:
     """Fix 6: Cut emission guarded by cgsp.ObjVal > TOL."""
 
-    def test_cut_quality_guard(self, small_instance):
+    def test_cut_quality_guard(self, small_instance):  # type: ignore[no-untyped-def]
         """Verify weak cuts (objVal ≤ tol) are not emitted."""
         from models import OAPBendersModel
 
@@ -159,7 +159,7 @@ class TestCGSPFix6ObjValGuard:
 class TestCGSPFix1PersistCostX:
     """Fix 1: self._cost_x persisted in master mixin."""
 
-    def test_cost_x_set_in_benders_master(self, small_instance):
+    def test_cost_x_set_in_benders_master(self, small_instance):  # type: ignore[no-untyped-def]
         """Verify _cost_x is attached to model during build."""
         from models import OAPBendersModel
 
@@ -182,7 +182,7 @@ class TestCGSPFix1PersistCostX:
 class TestCGSPIPEqualityConstraint:
     """Cross-check: IP = LP when using all-ones constraints (no feasibility gap)."""
 
-    def test_ip_matches_lp_on_small_instance(self, small_instance):
+    def test_ip_matches_lp_on_small_instance(self, small_instance):  # type: ignore[no-untyped-def]
         """For a small instance, IP should equal LP when model is tight."""
         from models import OAPBendersModel
 

@@ -62,7 +62,7 @@ def _eval_cut(cut_expr: gp.LinExpr, x_sol: dict[str, Any]) -> float:
     return val
 
 
-def _build_benders(points, triangles, instance_name, objective="Fekete", maximize=False):
+def _build_benders(points, triangles, instance_name, objective="Fekete", maximize=False):  # type: ignore[no-untyped-def]
     model = OAPBendersModel(points, triangles, name=f"CGSP_validity_{instance_name}")
     model.build(objective=objective, maximize=maximize, benders_method="farkas")
     return model
@@ -74,7 +74,7 @@ def _build_benders(points, triangles, instance_name, objective="Fekete", maximiz
 
 
 @pytest.fixture(params=INSTANCE_FILES, ids=[f.stem for f in INSTANCE_FILES])
-def loaded_instance(request):
+def loaded_instance(request):  # type: ignore[no-untyped-def]
     fp = request.param
     points = read_indexed_instance(str(fp))
     triangles = compute_triangles(points)
@@ -86,7 +86,7 @@ def loaded_instance(request):
 # ---------------------------------------------------------------------------
 
 
-def test_cgsp_cut_yp_violated_at_x_bar(loaded_instance):
+def test_cgsp_cut_yp_violated_at_x_bar(loaded_instance):  # type: ignore[no-untyped-def]
     """Cut produced by get_cgsp_cut_yp must be strictly violated at x_bar."""
     instance_name, points, triangles = loaded_instance
     model = _build_benders(points, triangles, instance_name)
@@ -122,7 +122,7 @@ def test_cgsp_cut_yp_violated_at_x_bar(loaded_instance):
     )
 
 
-def test_cgsp_cut_y_violated_at_x_bar(loaded_instance):
+def test_cgsp_cut_y_violated_at_x_bar(loaded_instance):  # type: ignore[no-untyped-def]
     """Cut produced by get_cgsp_cut_y must be strictly violated at x_bar."""
     instance_name, points, triangles = loaded_instance
     model = _build_benders(points, triangles, instance_name)
@@ -154,7 +154,7 @@ def test_cgsp_cut_y_violated_at_x_bar(loaded_instance):
     )
 
 
-def test_cgsp_cut_yp_none_when_feasible(loaded_instance):
+def test_cgsp_cut_yp_none_when_feasible(loaded_instance):  # type: ignore[no-untyped-def]
     """get_cgsp_cut_yp returns None when Y' is feasible at x_bar = 0."""
     instance_name, points, triangles = loaded_instance
     model = _build_benders(points, triangles, instance_name)

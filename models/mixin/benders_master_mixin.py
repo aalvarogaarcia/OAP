@@ -91,7 +91,7 @@ class BendersMasterMixin:
 
         self.model.update()
 
-    def _add_variables_master(self, objective: Literal["Fekete", "Internal"]):
+    def _add_variables_master(self, objective: Literal["Fekete", "Internal"]) -> None:
         """Método auxiliar para añadir variables al maestro (si es necesario)."""
         self.x = {
             (i, j): self.model.addVar(vtype=GRB.BINARY, name=f"x_{i}_{j}")
@@ -135,7 +135,7 @@ class BendersMasterMixin:
                     self.model.remove(var_dict[self.CH[j], self.CH[i]])
                     var_dict.pop((self.CH[j], self.CH[i]), None)
 
-    def _add_function_objective_master(self, objective: Literal["Fekete", "Internal"], mode: int, maximize: bool):
+    def _add_function_objective_master(self, objective: Literal["Fekete", "Internal"], mode: int, maximize: bool) -> None:
         """Método auxiliar para configurar la función objetivo del maestro."""
         opt_sense = GRB.MAXIMIZE if maximize else GRB.MINIMIZE
         # Always compute and cache the per-arc area coefficient even for
@@ -150,7 +150,7 @@ class BendersMasterMixin:
         elif objective == "Internal":
             self.model.setObjective(self.eta, opt_sense)
 
-    def _add_degree_constraints_master(self):
+    def _add_degree_constraints_master(self) -> None:
         """Método auxiliar para añadir restricciones de grado al maestro."""
         for i in self.N_list:
             self.model.addConstr(
@@ -162,7 +162,7 @@ class BendersMasterMixin:
                 name=f"grado_entrada_{i}",
             )
 
-    def _add_subtour_constraints_master(self):
+    def _add_subtour_constraints_master(self) -> None:
         """Método auxiliar para añadir restricciones de subtour (SCF) al maestro."""
         for i in self.N_list:
             if i != 0:
@@ -190,7 +190,7 @@ class BendersMasterMixin:
             self._crossing_arc_pairs = pairs
         return self._crossing_arc_pairs
 
-    def _add_crossing_constraints_master(self):
+    def _add_crossing_constraints_master(self) -> None:
         """Método auxiliar para añadir restricciones de cruce al maestro."""
         crossing = compute_crossing_edges(self.triangles, self.points)
         for cross in crossing:

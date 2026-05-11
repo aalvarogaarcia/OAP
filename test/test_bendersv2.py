@@ -30,7 +30,7 @@ if not INSTANCE_FILES:
 
 
 @pytest.fixture(params=INSTANCE_FILES, ids=[f.stem for f in INSTANCE_FILES])
-def instancia_cargada(request):
+def instancia_cargada(request):  # type: ignore[no-untyped-def]
     """
     Fixture parametrizada: Se ejecuta una vez por cada archivo .instance encontrado.
     Carga los puntos y calcula la triangulación para inyectarla en los tests.
@@ -60,7 +60,7 @@ def instancia_cargada(request):
 
 @pytest.mark.parametrize("objective", ["Fekete", "Internal"])
 @pytest.mark.parametrize("benders_method", ["farkas", "pi"])
-def test_benders_mip_equivalence_min(instancia_cargada, objective, benders_method):
+def test_benders_mip_equivalence_min(instancia_cargada, objective, benders_method):  # type: ignore[no-untyped-def]
     """
     Comprueba que el valor objetivo entero (MIP) de Benders sea idéntico
     al del modelo Compacto para diferentes funciones objetivo y métodos.
@@ -106,7 +106,7 @@ def test_benders_mip_equivalence_min(instancia_cargada, objective, benders_metho
 
 @pytest.mark.parametrize("objective", ["Fekete", "Internal"])
 @pytest.mark.parametrize("benders_method", ["farkas", "pi"])
-def test_benders_lp_equivalence_min(instancia_cargada, objective, benders_method):
+def test_benders_lp_equivalence_min(instancia_cargada, objective, benders_method):  # type: ignore[no-untyped-def]
     """
     Comprueba que la relajación lineal (LP) del Maestro con Benders
     converge al mismo límite inferior que la relajación del Compacto.
@@ -150,7 +150,7 @@ def test_benders_lp_equivalence_min(instancia_cargada, objective, benders_method
 
 @pytest.mark.parametrize("objective", ["Fekete", "Internal"])
 @pytest.mark.parametrize("benders_method", ["farkas", "pi"])
-def test_benders_mip_equivalence_max(instancia_cargada, objective, benders_method):
+def test_benders_mip_equivalence_max(instancia_cargada, objective, benders_method):  # type: ignore[no-untyped-def]
     """
     Comprueba que el valor objetivo entero (MIP) de Benders sea idéntico
     al del modelo Compacto para diferentes funciones objetivo y métodos.
@@ -196,7 +196,7 @@ def test_benders_mip_equivalence_max(instancia_cargada, objective, benders_metho
 
 @pytest.mark.parametrize("objective", ["Fekete", "Internal"])
 @pytest.mark.parametrize("benders_method", ["farkas", "pi"])
-def test_benders_lp_equivalence_max(instancia_cargada, objective, benders_method):
+def test_benders_lp_equivalence_max(instancia_cargada, objective, benders_method):  # type: ignore[no-untyped-def]
     """
     Comprueba que la relajación lineal (LP) del Maestro con Benders
     converge al mismo límite inferior que la relajación del Compacto.

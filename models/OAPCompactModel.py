@@ -239,7 +239,7 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
 
         return "\n".join(lineas)
 
-    def add_restricciones_semiplano(self, version: int = 1):
+    def add_restricciones_semiplano(self, version: int = 1) -> None:
         """Agrega restricciones de semiplano (V1 o V2) al modelo."""
         # Filtrar índices que no están en la envolvente convexa
         A_pp = [i for i in range(self.N) if i not in self.CH]
@@ -445,7 +445,7 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
 
             print(f"Añadidas {len(constrains)} restricciones de semiplano V3.")
 
-    def inyectar_cortes_knapsack_locales(self):
+    def inyectar_cortes_knapsack_locales(self) -> None:
         """Inyecta restricciones de mochila que limitan la contribución fraccionaria."""
         cortes_añadidos = 0
         for i in range(self.N):
@@ -483,7 +483,7 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
 
         print(f"Inyectados {cortes_añadidos} Cortes Knapsack Locales.")
 
-    def inyectar_cliques_de_cruce(self):
+    def inyectar_cliques_de_cruce(self) -> None:
         """Busca grupos de arcos que se cruzan TODOS entre sí (Cliques)."""
         print("Construyendo grafo de intersecciones para Cliques...")
         aristas = [(i, j) for (i, j) in self.x.keys() if i < j]
