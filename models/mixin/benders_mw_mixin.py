@@ -1,19 +1,38 @@
 """Magnanti-Wong Pareto-optimal Benders cut mixin.
 
-Provides `get_mw_cut_y` and `get_mw_cut_yp` — entry points that solve a
-secondary LP to find the deepest cut among all Pareto-optimal (non-dominated)
-Benders cuts for the current master solution.
+Provides `get_mw_cut_y` and `get_mw_cut_yp` — entry points that select the
+deepest Pareto-optimal Benders cut for the current master solution.
+
+Algorithm (Magnanti & Wong 1981, Papadakos 2008, Hosseini & Turner 2025 §3.3.3):
+    1. Solve the primary CGSP to obtain q* = max normalised violation at x̄.
+    2. If q* ≤ TOL → no cut exists, return None.
+    3. Extract the CGSP cut as a fallback (always valid since q* > 0).
+    4. Build the MW secondary LP by modifying the CGSP in-place:
+           Pareto constraint : cgsp_obj_expr == q*   (uses cgsp.getObjective()
+                                                       — complete, includes all groups)
+           New objective     : max π^T b(x^0)         (via _recompute_obj_at_x)
+    5. Re-solve.  If the secondary LP fails or gives no improvement → return
+       the CGSP fallback cut (always valid).
+    6. Otherwise reconstruct cut from MW's π★ and return.
+
+This replaces the previous `_build_mw_secondary_lp` helper which had two bugs:
+    Bug 1: used `sub_y.ObjVal` (primal, unnormalised) as q_opt instead of the
+           normalised CGSP optimal value — making the Pareto constraint
+           dimensionally inconsistent and the secondary LP typically infeasible.
+    Bug 2: for infeasible subproblems, omitted the Pareto constraint entirely
+           (add_pareto=False), allowing the secondary LP to return π with
+           π^T b(x̄) ≤ 0 — a cut that does NOT cut off x̄, causing infinite LP
+           loops and incorrect IP incumbents.
 
 Reference: Magnanti & Wong (1981), "Accelerating Benders Decomposition:
 Algorithmic Enhancement and Model Selection Criteria."
 
 Design spec: .claude/context/designs/2026-05-04-pi-cgsp-mw-implementation.md
-Packages C-1 and C-5.
 """
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 import gurobipy as gp
 from gurobipy import GRB
@@ -44,14 +63,14 @@ class BendersMagnantiWongMixin:
     """
 
     use_magnanti_wong: bool
-    _core_point: "dict[Arc, float] | None"
+    _core_point: dict[Arc, float] | None
     _core_point_strategy: str
 
     # ------------------------------------------------------------------
     # C-5: Core point computation
     # ------------------------------------------------------------------
 
-    def _compute_core_point(self, strategy: str) -> "dict[Arc, float]":
+    def _compute_core_point(self, strategy: str) -> dict[Arc, float]:
         """Return a point in relint(conv(X_M)).
 
         Strategies
@@ -93,121 +112,83 @@ class BendersMagnantiWongMixin:
             return self._compute_core_point("uniform")
 
     # ------------------------------------------------------------------
-    # C-1: Secondary LP construction
-    # ------------------------------------------------------------------
-
-    def _build_mw_secondary_lp(
-        self,
-        x_sol: "dict[Arc, float]",
-        q_opt: float,
-        which: str,  # "y" or "yp"
-        TOL: float = _MW_TOL,
-        add_pareto: bool = True,
-    ) -> "tuple[gp.Model, dict, gp.LinExpr, gp.LinExpr] | tuple[None, None, None, None]":
-        """Build the Magnanti-Wong secondary LP for subproblem Y or Y'.
-
-        Secondary LP
-        ------------
-            max  π^T b(x^0)              [maximise at core point]
-            s.t. A^T π ≤ 0               [dual feasibility — from CGSP B-1]
-                 π^T b(x_bar) = q_opt    [Pareto constraint — omitted when
-                                          add_pareto=False, i.e. subproblem
-                                          was infeasible (Papadakos §3.3.3)]
-                 Σ w|π| = 1              [L₁ normalisation]
-
-        Returns
-        -------
-        (mw_model, pi_vars, obj_expr_x0, obj_expr_xbar)
-            or (None, None, None, None) on error.
-        """
-        core_point = getattr(self, "_core_point", None)
-        if not core_point:
-            logger.warning("MW: core point not set; cannot build secondary LP.")
-            return None, None, None, None
-
-        # Build the base CGSP model (variable structure + dual feasibility constrs)
-        try:
-            if which == "yp":
-                mw, pi_vars = self._build_cgsp_yp(x_sol)  # type: ignore[attr-defined]
-                x_bar_expr = _recompute_obj_at_x(pi_vars, x_sol, which, self)  # type: ignore[arg-type]
-                if x_bar_expr is None:
-                    return None, None, None, None
-                if add_pareto:
-                    mw.addConstr(x_bar_expr == q_opt, name="mw_pareto")
-                x0_expr = _recompute_obj_at_x(pi_vars, core_point, which, self)  # type: ignore[arg-type]
-                if x0_expr is None:
-                    return None, None, None, None
-                mw.setObjective(x0_expr, GRB.MAXIMIZE)
-                mw.update()
-                return mw, pi_vars, x0_expr, x_bar_expr
-            else:
-                mw, pi_vars, _pi0_var = self._build_cgsp_y(x_sol)  # type: ignore[attr-defined]
-                x_bar_expr = _recompute_obj_at_x(pi_vars, x_sol, which, self)  # type: ignore[arg-type]
-                if x_bar_expr is None:
-                    return None, None, None, None
-                if add_pareto:
-                    mw.addConstr(x_bar_expr == q_opt, name="mw_pareto")
-                x0_expr = _recompute_obj_at_x(pi_vars, core_point, which, self)  # type: ignore[arg-type]
-                if x0_expr is None:
-                    return None, None, None, None
-                mw.setObjective(x0_expr, GRB.MAXIMIZE)
-                mw.update()
-                return mw, pi_vars, x0_expr, x_bar_expr
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("MW secondary LP build failed (%s).", exc)
-            return None, None, None, None
-
-    # ------------------------------------------------------------------
-    # C-1: Public entry points
+    # Public entry points
     # ------------------------------------------------------------------
 
     def get_mw_cut_yp(
         self,
-        x_sol: "dict[Arc, float]",
+        x_sol: dict[Arc, float],
         TOL: float = _MW_TOL,
-    ) -> "tuple[gp.LinExpr, float, dict] | tuple[None, None, dict]":
+    ) -> tuple[gp.LinExpr, float, dict] | tuple[None, None, dict]:
         """Pareto-optimal cut for Y' subproblem.
 
         Returns (None, None, {'aborted': reason}) when:
-        - secondary LP infeasible or no violation
-        - core point not set
+        - no core point set
+        - CGSP finds no violation (q* <= TOL)
+        - secondary LP and CGSP fallback both fail
         """
-        if not getattr(self, "_core_point", None):
+        core_point = getattr(self, "_core_point", None)
+        if not core_point:
             return None, None, {"aborted": "no_core_point"}
 
-        sub_yp = getattr(self, "sub_yp", None)
-        if sub_yp is None:
-            return None, None, {"aborted": "sub_yp_none"}
+        # Step 1: build and solve the primary CGSP to get q* (max violation at x̄)
+        try:
+            cgsp, pi_vars = self._build_cgsp_yp(x_sol)  # type: ignore[attr-defined]
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("MW (Y'): CGSP build failed (%s).", exc)
+            return None, None, {"aborted": "cgsp_build_failed"}
 
-        yp_status = sub_yp.Status
-        if yp_status == GRB.OPTIMAL:
-            q_opt = sub_yp.ObjVal
-            add_pareto = True
-        elif yp_status == GRB.INFEASIBLE:
-            q_opt = 0.0
-            add_pareto = False  # Papadakos §3.3.3: skip Pareto constraint for infeasibility cuts
-        else:
-            return None, None, {"aborted": f"sub_yp_status_{yp_status}"}
+        cgsp.setParam("OutputFlag", 0)
+        cgsp.optimize()
 
-        mw, pi_vars, _x0_expr, _xbar_expr = self._build_mw_secondary_lp(
-            x_sol, q_opt, which="yp", TOL=TOL, add_pareto=add_pareto
-        )
-        if mw is None:
-            return None, None, {"aborted": "build_failed"}
+        if cgsp.Status not in (GRB.OPTIMAL, GRB.SUBOPTIMAL):
+            logger.debug("MW (Y'): primary CGSP status=%d.", cgsp.Status)
+            return None, None, {"aborted": "cgsp_failed", "status": cgsp.Status}
 
-        mw.setParam("OutputFlag", 0)
-        mw.optimize()
-
-        if mw.Status not in (GRB.OPTIMAL, GRB.SUBOPTIMAL):
-            logger.debug("MW (Y') secondary LP status=%d.", mw.Status)
-            return None, None, {"aborted": "secondary_lp_failed", "status": mw.Status}
-
-        if mw.ObjVal <= TOL:
+        q_opt = cgsp.ObjVal
+        if q_opt <= TOL:
             return None, None, {"aborted": "no_violation"}
 
-        # Reconstruct cut from the optimal pi_vars of the MW secondary LP.
-        # This is correct Magnanti-Wong: we use the π★ that maximises at x^0
-        # subject to the Pareto constraint, NOT a fresh CGSP solve.
+        # Step 2: extract CGSP cut as fallback (always valid since q* > 0)
+        try:
+            cgsp_cut_expr, cgsp_cut_rhs, cgsp_witness = (
+                self._reconstruct_cut_from_pi(pi_vars, which="yp", TOL=TOL)  # type: ignore[attr-defined]
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("MW (Y'): CGSP fallback reconstruction failed (%s).", exc)
+            return None, None, {"aborted": "cgsp_recon_failed"}
+
+        # Step 3: capture the complete Pareto expression from the CGSP objective
+        # (cgsp.getObjective() is COMPLETE — includes r1, r2, r3 groups too)
+        x_bar_expr = cgsp.getObjective()
+
+        # Step 4: build the MW objective at x^0
+        x0_expr = _recompute_obj_at_x(pi_vars, core_point, "yp", self)  # type: ignore[arg-type]
+        if x0_expr is None:
+            logger.debug("MW (Y'): x0_expr is None; using CGSP fallback.")
+            return cgsp_cut_expr, cgsp_cut_rhs, cgsp_witness
+
+        # Step 5: modify CGSP in-place → MW secondary LP
+        try:
+            cgsp.addConstr(x_bar_expr == q_opt, name="mw_pareto")
+            cgsp.setObjective(x0_expr, GRB.MAXIMIZE)
+            cgsp.update()
+            cgsp.optimize()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("MW (Y'): secondary LP solve failed (%s); using CGSP fallback.", exc)
+            return cgsp_cut_expr, cgsp_cut_rhs, cgsp_witness
+
+        if cgsp.Status not in (GRB.OPTIMAL, GRB.SUBOPTIMAL):
+            logger.debug(
+                "MW (Y'): secondary LP status=%d; using CGSP fallback.", cgsp.Status
+            )
+            return cgsp_cut_expr, cgsp_cut_rhs, cgsp_witness
+
+        if cgsp.ObjVal <= TOL:
+            # MW found no improvement at core point; the CGSP cut is equally good
+            return cgsp_cut_expr, cgsp_cut_rhs, cgsp_witness
+
+        # Step 6: reconstruct cut from MW's π★
         try:
             cut_expr, cut_rhs, witness = self._reconstruct_cut_from_pi(  # type: ignore[attr-defined]
                 pi_vars, which="yp", TOL=TOL
@@ -215,48 +196,75 @@ class BendersMagnantiWongMixin:
             witness["mw"] = True
             return cut_expr, cut_rhs, witness
         except Exception as exc:  # noqa: BLE001
-            logger.warning("MW (Y') cut reconstruction failed (%s).", exc)
-            return None, None, {"aborted": "cut_recon_failed"}
+            logger.warning("MW (Y'): MW cut reconstruction failed (%s); using CGSP fallback.", exc)
+            return cgsp_cut_expr, cgsp_cut_rhs, cgsp_witness
 
     def get_mw_cut_y(
         self,
-        x_sol: "dict[Arc, float]",
+        x_sol: dict[Arc, float],
         TOL: float = _MW_TOL,
-    ) -> "tuple[gp.LinExpr, float, dict] | tuple[None, None, dict]":
+    ) -> tuple[gp.LinExpr, float, dict] | tuple[None, None, dict]:
         """Pareto-optimal cut for Y subproblem. Symmetric to get_mw_cut_yp."""
-        if not getattr(self, "_core_point", None):
+        core_point = getattr(self, "_core_point", None)
+        if not core_point:
             return None, None, {"aborted": "no_core_point"}
 
-        sub_y = getattr(self, "sub_y", None)
-        if sub_y is None:
-            return None, None, {"aborted": "sub_y_none"}
+        # Step 1: build and solve the primary CGSP to get q* (max violation at x̄)
+        try:
+            cgsp, pi_vars, _pi0_var = self._build_cgsp_y(x_sol)  # type: ignore[attr-defined]
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("MW (Y): CGSP build failed (%s).", exc)
+            return None, None, {"aborted": "cgsp_build_failed"}
 
-        y_status = sub_y.Status
-        if y_status == GRB.OPTIMAL:
-            q_opt = sub_y.ObjVal
-            add_pareto = True
-        elif y_status == GRB.INFEASIBLE:
-            q_opt = 0.0
-            add_pareto = False  # Papadakos §3.3.3: skip Pareto constraint for infeasibility cuts
-        else:
-            return None, None, {"aborted": f"sub_y_status_{y_status}"}
+        cgsp.setParam("OutputFlag", 0)
+        cgsp.optimize()
 
-        mw, pi_vars, _x0_expr, _xbar_expr = self._build_mw_secondary_lp(
-            x_sol, q_opt, which="y", TOL=TOL, add_pareto=add_pareto
-        )
-        if mw is None:
-            return None, None, {"aborted": "build_failed"}
+        if cgsp.Status not in (GRB.OPTIMAL, GRB.SUBOPTIMAL):
+            logger.debug("MW (Y): primary CGSP status=%d.", cgsp.Status)
+            return None, None, {"aborted": "cgsp_failed", "status": cgsp.Status}
 
-        mw.setParam("OutputFlag", 0)
-        mw.optimize()
-
-        if mw.Status not in (GRB.OPTIMAL, GRB.SUBOPTIMAL):
-            logger.debug("MW (Y) secondary LP status=%d.", mw.Status)
-            return None, None, {"aborted": "secondary_lp_failed", "status": mw.Status}
-
-        if mw.ObjVal <= TOL:
+        q_opt = cgsp.ObjVal
+        if q_opt <= TOL:
             return None, None, {"aborted": "no_violation"}
 
+        # Step 2: extract CGSP cut as fallback (always valid since q* > 0)
+        try:
+            cgsp_cut_expr, cgsp_cut_rhs, cgsp_witness = (
+                self._reconstruct_cut_from_pi(pi_vars, which="y", TOL=TOL)  # type: ignore[attr-defined]
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("MW (Y): CGSP fallback reconstruction failed (%s).", exc)
+            return None, None, {"aborted": "cgsp_recon_failed"}
+
+        # Step 3: capture the complete Pareto expression from the CGSP objective
+        x_bar_expr = cgsp.getObjective()
+
+        # Step 4: build the MW objective at x^0
+        x0_expr = _recompute_obj_at_x(pi_vars, core_point, "y", self)  # type: ignore[arg-type]
+        if x0_expr is None:
+            logger.debug("MW (Y): x0_expr is None; using CGSP fallback.")
+            return cgsp_cut_expr, cgsp_cut_rhs, cgsp_witness
+
+        # Step 5: modify CGSP in-place → MW secondary LP
+        try:
+            cgsp.addConstr(x_bar_expr == q_opt, name="mw_pareto")
+            cgsp.setObjective(x0_expr, GRB.MAXIMIZE)
+            cgsp.update()
+            cgsp.optimize()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("MW (Y): secondary LP solve failed (%s); using CGSP fallback.", exc)
+            return cgsp_cut_expr, cgsp_cut_rhs, cgsp_witness
+
+        if cgsp.Status not in (GRB.OPTIMAL, GRB.SUBOPTIMAL):
+            logger.debug(
+                "MW (Y): secondary LP status=%d; using CGSP fallback.", cgsp.Status
+            )
+            return cgsp_cut_expr, cgsp_cut_rhs, cgsp_witness
+
+        if cgsp.ObjVal <= TOL:
+            return cgsp_cut_expr, cgsp_cut_rhs, cgsp_witness
+
+        # Step 6: reconstruct cut from MW's π★
         try:
             cut_expr, cut_rhs, witness = self._reconstruct_cut_from_pi(  # type: ignore[attr-defined]
                 pi_vars, which="y", TOL=TOL
@@ -264,8 +272,8 @@ class BendersMagnantiWongMixin:
             witness["mw"] = True
             return cut_expr, cut_rhs, witness
         except Exception as exc:  # noqa: BLE001
-            logger.warning("MW (Y) cut reconstruction failed (%s).", exc)
-            return None, None, {"aborted": "cut_recon_failed"}
+            logger.warning("MW (Y): MW cut reconstruction failed (%s); using CGSP fallback.", exc)
+            return cgsp_cut_expr, cgsp_cut_rhs, cgsp_witness
 
 
 # ------------------------------------------------------------------
@@ -274,14 +282,17 @@ class BendersMagnantiWongMixin:
 
 def _recompute_obj_at_x(
     pi_vars: dict,
-    x_sol: "dict[Arc, float]",
+    x_sol: dict[Arc, float],
     which: str,
     model: object,
-) -> "gp.LinExpr | None":
+) -> gp.LinExpr | None:
     """Rebuild π^T b(x) as a LinExpr from pi_vars evaluated at x_sol.
 
-    This mirrors the CGSP objective construction but uses a different x.
-    Used to build both the Pareto constraint and the M-W objective.
+    Used to build the MW objective at the core point x^0 (NOT the Pareto
+    constraint — for that we use cgsp.getObjective() directly, which is
+    complete and includes all constraint groups including r1/r2/r3).
+
+    Covers: alpha, beta, gamma, delta, global, r1, r2, r3 (and _p variants).
 
     Returns None if pi_vars is empty or x_sol is empty.
     """
@@ -361,5 +372,31 @@ def _recompute_obj_at_x(
             expr.addTerms([rhs_val], [u_gl])
         if isinstance(v_gl, gp.Var):
             expr.addTerms([-rhs_val], [v_gl])
+
+    # r1[_p]: constant RHS = convex_hull_area  (≤ constraint, π_r1 = -v_r1)
+    v_r1 = pi_vars.get(f"v_r1{suffix}")
+    if isinstance(v_r1, gp.Var) and hasattr(model, "convex_hull_area"):
+        ch_area = model.convex_hull_area
+        if abs(ch_area) > 1e-15:
+            expr.addTerms([-ch_area], [v_r1])
+
+    # r2[_p]: constant RHS = 1 per arc  (≤ constraint, π_r2 = -v_r2)
+    v_r2 = pi_vars.get(f"v_r2{suffix}")
+    if v_r2 is not None and not isinstance(v_r2, gp.Var):
+        for k in v_r2.keys():  # type: ignore[union-attr]
+            expr.addTerms([-1.0], [v_r2[k]])  # type: ignore[index]
+
+    # r3[_p]: RHS = 1 - x[i,j] - x[k,s]  (≤ constraint, π_r3 = -v_r3)
+    v_r3 = pi_vars.get(f"v_r3{suffix}")
+    if v_r3 is not None and not isinstance(v_r3, gp.Var):
+        for k in v_r3.keys():  # type: ignore[union-attr]
+            if which == "yp":
+                i, j, ks, s = k
+                rhs_k = 1.0 - x_sol.get((i, j), 0.0) - x_sol.get((s, ks), 0.0)
+            else:
+                i, j, k2, s = k
+                rhs_k = 1.0 - x_sol.get((j, i), 0.0) - x_sol.get((k2, s), 0.0)
+            if abs(rhs_k) > 1e-15:
+                expr.addTerms([-rhs_k], [v_r3[k]])  # type: ignore[index]
 
     return expr
