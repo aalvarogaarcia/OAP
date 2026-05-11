@@ -16,6 +16,9 @@ class OAPStatsMixin:
     points: np.ndarray
     convex_hull_area: float
     x_results: list[tuple[int, int]]
+    x: dict[tuple[int, int], gp.Var]
+
+    def solve_lp_relaxation(self, time_limit: int = ..., verbose: bool = ...) -> None: ...
 
     def get_tour(self) -> list[int]:
         if not hasattr(self, "x_results") or not self.x_results:

@@ -36,6 +36,16 @@ class BendersPiMixin:
     constrs_y: dict[str, Any]
     constrs_yp: dict[str, Any]
     iteration: int
+    convex_hull_area: float
+    triangles: IndexArray
+    _abs_areas: list[float]
+    y: gp.tupledict[int, gp.Var]
+    yp: gp.tupledict[int, gp.Var]
+    art_y: dict[str, dict[Any, gp.Var]]
+    art_yp: dict[str, dict[Any, gp.Var]]
+    objective: str
+
+    def _compute_crossing_arc_pairs(self) -> set[tuple[Arc, Arc]]: ...  # type: ignore[empty-body]
 
     def build_pi_subproblems(
         self, sum_constrain: bool = True, strengthen: bool = False, plot_strengthen: bool = False

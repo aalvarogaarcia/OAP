@@ -39,6 +39,13 @@ class InvBendersOptimizeMixin:
     yp: dict[int, gp.Var]
     y_results: list[int]
     yp_results: list[int]
+    # Provided by InvBendersSubMixin
+    sub_x: gp.Model
+
+    def update_sub_rhs(self, y_sol: dict[int, float], yp_sol: dict[int, float]) -> None: ...
+    def get_farkas_cut(  # type: ignore[empty-body]
+        self, y_sol: dict[int, float], yp_sol: dict[int, float], TOL: float = ...
+    ) -> tuple[gp.LinExpr, float]: ...
 
     # ------------------------------------------------------------------
     # Callback

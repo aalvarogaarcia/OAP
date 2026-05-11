@@ -28,6 +28,7 @@ class BendersMasterMixin:
     f: dict[str, Any]
     eta: gp.Var
     _cost_x: dict[tuple[int, int], float]  # per-arc Fekete area coefficients
+    convex_hull_area: float
 
     def build_master(
         self,

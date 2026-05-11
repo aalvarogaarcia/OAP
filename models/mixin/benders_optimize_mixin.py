@@ -17,6 +17,9 @@ class BendersOptimizeMixin:
     el Callback de Gurobi y la resolución general del modelo.
     """
 
+    # --- Attributes provided by sibling mixins / OAPBaseModel ---
+    model: gp.Model
+    N: int
     constrs_y: dict[str, dict[Arc, gp.Constr]]
     constrs_yp: dict[str, dict[Arc, gp.Constr]]
     iteration: int
@@ -26,6 +29,30 @@ class BendersOptimizeMixin:
     sub_yp: gp.Model
     benders_method: str
     objective: Literal["Fekete", "Internal"]
+    eta: gp.Var
+    log_path: str
+    poly_log_path: str
+    _log_buffer: list[str]
+    _cut_buffer: list[dict[str, Any]]
+    x_results: list[Arc]
+    polihedral: bool
+    verbose: bool
+    save_cuts: bool
+
+    # --- Methods provided by sibling mixins (Farkas / Pi / CGSP / MW / DDMA / Analysis) ---
+    def _detect_subtour_components(self, x_sol: dict[Arc, float]) -> list[set[int]]: ...  # type: ignore[empty-body]
+    def get_farkas_cut_y(self, x_sol: dict[Arc, float], TOL: float = ...) -> tuple[gp.LinExpr, float]: ...  # type: ignore[empty-body]
+    def get_farkas_cut_yp(self, x_sol: dict[Arc, float], TOL: float = ...) -> tuple[gp.LinExpr, float]: ...  # type: ignore[empty-body]
+    def get_pi_cut_y(self, x_sol: dict[Arc, float], TOL: float = ...) -> tuple[gp.LinExpr, float]: ...  # type: ignore[empty-body]
+    def get_pi_cut_yp(self, x_sol: dict[Arc, float], TOL: float = ...) -> tuple[gp.LinExpr, float]: ...  # type: ignore[empty-body]
+    def get_optimality_cut_y(self, x_sol: dict[Arc, float], TOL: float = ...) -> tuple[gp.LinExpr, float]: ...  # type: ignore[empty-body]
+    def get_cgsp_cut_y(self, x_sol: dict[Arc, float], eta_sol: float = ..., TOL: float = ...) -> tuple[gp.LinExpr | None, float | None, dict[str, Any]]: ...  # type: ignore[empty-body]
+    def get_cgsp_cut_yp(self, x_sol: dict[Arc, float], TOL: float = ...) -> tuple[gp.LinExpr | None, float | None, dict[str, Any]]: ...  # type: ignore[empty-body]
+    def get_mw_cut_y(self, x_sol: dict[Arc, float], TOL: float = ...) -> tuple[gp.LinExpr | None, float | None, dict[str, Any]]: ...  # type: ignore[empty-body]
+    def get_mw_cut_yp(self, x_sol: dict[Arc, float], TOL: float = ...) -> tuple[gp.LinExpr | None, float | None, dict[str, Any]]: ...  # type: ignore[empty-body]
+    def get_ddma_cut_y(self, x_sol: dict[Arc, float], eta_sol: float = ..., TOL: float = ...) -> tuple[gp.LinExpr | None, float | None, dict[str, Any]]: ...  # type: ignore[empty-body]
+    def get_ddma_cut_yp(self, x_sol: dict[Arc, float], TOL: float = ...) -> tuple[gp.LinExpr | None, float | None, dict[str, Any]]: ...  # type: ignore[empty-body]
+    def log_facets(self, filepath: str, var_prefixes: list[str] | str = ..., verbose: bool = ...) -> None: ...
 
     def _update_subproblem_rhs(self, x_sol: dict[Arc, float]) -> None:
         """
