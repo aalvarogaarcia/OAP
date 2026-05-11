@@ -97,7 +97,7 @@ def test_cgsp_cut_yp_violated_at_x_bar(loaded_instance):
 
     # Extract x_sol from the master LP solution
     x_sol: dict = {}
-    for (i, j), var in model.x.items():  # type: ignore[attr-defined]
+    for (i, j), var in model.x.items():
         try:
             x_sol[(i, j)] = var.X
         except gp.GurobiError:
@@ -133,7 +133,7 @@ def test_cgsp_cut_y_violated_at_x_bar(loaded_instance):
         pytest.skip(f"sub_y not initialised for {instance_name}")
 
     x_sol: dict = {}
-    for (i, j), var in model.x.items():  # type: ignore[attr-defined]
+    for (i, j), var in model.x.items():
         try:
             x_sol[(i, j)] = var.X
         except gp.GurobiError:
@@ -163,7 +163,7 @@ def test_cgsp_cut_yp_none_when_feasible(loaded_instance):
     model = _build_benders(points, triangles, instance_name)
 
     # x_sol = all zeros: sub_yp is trivially feasible (RHS ≥ 0 for all constrs)
-    x_sol_zero: dict = {arc: 0.0 for arc in model.x}  # type: ignore[attr-defined]
+    x_sol_zero: dict = {arc: 0.0 for arc in model.x}
 
     # Force the sub_yp to be solved at x=0 by calling its internal update
     # (The public entry point calls _build_cgsp_yp internally, so just call it)

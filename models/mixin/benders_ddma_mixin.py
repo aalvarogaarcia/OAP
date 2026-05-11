@@ -541,5 +541,5 @@ class BendersDDMAMixin:
             best_pi, x_sol, which, TOL=TOL
         )
         witness["ddma_depth"] = best_depth
-        witness["ddma_iters"] = it + 1  # type: ignore[possibly-undefined]
+        witness["ddma_iters"] = it + 1
         return cut_expr, cut_rhs, witness

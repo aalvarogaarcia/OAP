@@ -88,7 +88,7 @@ def read_indexed_instance(filepath: str) -> NDArray[np.int64]:
 def compute_convex_hull(points: NDArray[np.int64]) -> NDArray[np.int64]:
     """Return the indices of convex-hull vertices (scipy ordering)."""
     hull = ConvexHull(points)
-    return hull.vertices  # type: ignore[return-value]
+    return hull.vertices
 
 
 def compute_convex_hull_area(points: NDArray[np.int64]) -> float:
@@ -193,7 +193,7 @@ def segments_intersect(
         B: NDArray[np.int64],
         C: NDArray[np.int64],
     ) -> np.bool_:
-        return (C[1] - A[1]) * (B[0] - A[0]) > (B[1] - A[1]) * (C[0] - A[0])  # type: ignore[return-value]
+        return (C[1] - A[1]) * (B[0] - A[0]) > (B[1] - A[1]) * (C[0] - A[0])
 
     if (
         np.array_equal(p1, p3) or np.array_equal(p1, p4)
@@ -330,8 +330,8 @@ def incompatible_triangles(
     for i in range(n):
         for j in range(i + 1, n):
             if are_triangles_incompatible(
-                tri_tuples[i],  # type: ignore[arg-type]
-                tri_tuples[j],  # type: ignore[arg-type]
+                tri_tuples[i],
+                tri_tuples[j],
                 points,
             ):
                 incompatible_pairs.append([i, j])

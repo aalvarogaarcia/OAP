@@ -39,8 +39,8 @@ def _ensure_dir(path: str) -> None:
 
 def plot_solution(model: gp.Model, title: str = "Solution") -> None:
     """Draw the tour stored in *model._x_results* over *model._points_*."""
-    x = model._x_results  # type: ignore[attr-defined]
-    points: NDArray[np.int64] = model._points_  # type: ignore[attr-defined]
+    x = model._x_results
+    points: NDArray[np.int64] = model._points_
 
     G: nx.DiGraph = nx.DiGraph()
     G.add_edges_from(x)

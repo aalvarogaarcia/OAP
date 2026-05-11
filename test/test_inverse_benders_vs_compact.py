@@ -51,7 +51,7 @@ Path("outputs/Others/Testing").mkdir(parents=True, exist_ok=True)
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _load(instance_name: str):  # type: ignore[return]
+def _load(instance_name: str):
     """Load points and triangles, skip if the instance file is absent."""
     path = BASE_DIR / "instance" / f"{instance_name}.instance"
     if not path.exists():

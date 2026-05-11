@@ -418,7 +418,7 @@ class BendersCGSPMixin:
             # r1[_p]: ≤ → -v_r1 * area[t]
             v_r1 = pi_vars.get(f"v_r1{suffix}")
             if isinstance(v_r1, gp.Var) and hasattr(self, "_abs_areas"):
-                expr -= self._abs_areas[t] * v_r1  # type: ignore[index]
+                expr -= self._abs_areas[t] * v_r1
 
             # r2[_p]: ≤ → -v_r2[arc]
             for (i, j) in constrs.get(f"r2{suffix}", {}):
@@ -856,16 +856,16 @@ class BendersCGSPMixin:
             if u_vars is None and v_vars is None:
                 return out
             if isinstance(u_vars, gp.Var) or isinstance(v_vars, gp.Var):
-                u_val = u_vars.X if isinstance(u_vars, gp.Var) else 0.0  # type: ignore[union-attr]
-                v_val = v_vars.X if isinstance(v_vars, gp.Var) else 0.0  # type: ignore[union-attr]
+                u_val = u_vars.X if isinstance(u_vars, gp.Var) else 0.0
+                v_val = v_vars.X if isinstance(v_vars, gp.Var) else 0.0
                 val = u_val - v_val
                 if abs(val) > TOL:
                     out["scalar"] = val
             else:
                 keys = u_vars.keys() if u_vars is not None else v_vars.keys()  # type: ignore[union-attr]
                 for k in keys:
-                    u_val = u_vars[k].X if u_vars is not None else 0.0  # type: ignore[index]
-                    v_val = v_vars[k].X if v_vars is not None else 0.0  # type: ignore[index]
+                    u_val = u_vars[k].X if u_vars is not None else 0.0
+                    v_val = v_vars[k].X if v_vars is not None else 0.0
                     val = u_val - v_val
                     if abs(val) > TOL:
                         out[k] = val
@@ -876,31 +876,31 @@ class BendersCGSPMixin:
         witness: dict = {}
 
         if which == "yp":
-            constrs = self.constrs_yp  # type: ignore[attr-defined]
+            constrs = self.constrs_yp
 
             ap_net = _net("u_alpha_p", "v_alpha_p")
             if ap_net:
                 witness["alpha_p"] = ap_net
                 for (i, j), pi_val in ap_net.items():
-                    cut_expr += pi_val * (1.0 - self.x[i, j])  # type: ignore[attr-defined]
+                    cut_expr += pi_val * (1.0 - self.x[i, j])
 
             bp_net = _net("u_beta_p", "v_beta_p")
             if bp_net:
                 witness["beta_p"] = bp_net
                 for (i, j), pi_val in bp_net.items():
-                    cut_expr += pi_val * (self.x[j, i] - self.x[i, j])  # type: ignore[attr-defined]
+                    cut_expr += pi_val * (self.x[j, i] - self.x[i, j])
 
             gp_net = _net("u_gamma_p", "v_gamma_p")
             if gp_net:
                 witness["gamma_p"] = gp_net
                 for (i, j), pi_val in gp_net.items():
-                    cut_expr += pi_val * self.x[j, i]  # type: ignore[attr-defined]
+                    cut_expr += pi_val * self.x[j, i]
 
             dp_net = _net("u_delta_p", "v_delta_p")
             if dp_net:
                 witness["delta_p"] = dp_net
                 for (i, j), pi_val in dp_net.items():
-                    cut_expr += pi_val * (1.0 - self.x[i, j])  # type: ignore[attr-defined]
+                    cut_expr += pi_val * (1.0 - self.x[i, j])
 
             gl_net = _net("u_global_p", "v_global_p")
             if gl_net and "scalar" in gl_net:
@@ -912,7 +912,7 @@ class BendersCGSPMixin:
             r1_net = _net("u_r1_p", "v_r1_p")
             if r1_net and "scalar" in r1_net:
                 pi_val = r1_net["scalar"]
-                cut_rhs -= pi_val * self.convex_hull_area  # type: ignore[attr-defined]
+                cut_rhs -= pi_val * self.convex_hull_area
                 witness["r1_p"] = pi_val
 
             r2_net = _net("u_r2_p", "v_r2_p")
@@ -925,34 +925,34 @@ class BendersCGSPMixin:
             if r3_net:
                 witness["r3_p"] = r3_net
                 for (i, j, k, s), pi_val in r3_net.items():
-                    cut_expr += pi_val * (1.0 - self.x[i, j] - self.x[s, k])  # type: ignore[attr-defined]
+                    cut_expr += pi_val * (1.0 - self.x[i, j] - self.x[s, k])
 
         else:  # "y"
-            constrs = self.constrs_y  # type: ignore[attr-defined]
+            constrs = self.constrs_y
 
             a_net = _net("u_alpha", "v_alpha")
             if a_net:
                 witness["alpha"] = a_net
                 for (i, j), pi_val in a_net.items():
-                    cut_expr += pi_val * self.x[i, j]  # type: ignore[attr-defined]
+                    cut_expr += pi_val * self.x[i, j]
 
             b_net = _net("u_beta", "v_beta")
             if b_net:
                 witness["beta"] = b_net
                 for (i, j), pi_val in b_net.items():
-                    cut_expr += pi_val * (self.x[i, j] - self.x[j, i])  # type: ignore[attr-defined]
+                    cut_expr += pi_val * (self.x[i, j] - self.x[j, i])
 
             g_net = _net("u_gamma", "v_gamma")
             if g_net:
                 witness["gamma"] = g_net
                 for (i, j), pi_val in g_net.items():
-                    cut_expr += pi_val * self.x[i, j]  # type: ignore[attr-defined]
+                    cut_expr += pi_val * self.x[i, j]
 
             d_net = _net("u_delta", "v_delta")
             if d_net:
                 witness["delta"] = d_net
                 for (i, j), pi_val in d_net.items():
-                    cut_expr += pi_val * (1.0 - self.x[j, i])  # type: ignore[attr-defined]
+                    cut_expr += pi_val * (1.0 - self.x[j, i])
 
             gl_net = _net("u_global", "v_global")
             if gl_net and "scalar" in gl_net:
@@ -964,7 +964,7 @@ class BendersCGSPMixin:
             r1_net = _net("u_r1", "v_r1")
             if r1_net and "scalar" in r1_net:
                 pi_val = r1_net["scalar"]
-                cut_rhs -= pi_val * self.convex_hull_area  # type: ignore[attr-defined]
+                cut_rhs -= pi_val * self.convex_hull_area
                 witness["r1"] = pi_val
 
             r2_net = _net("u_r2", "v_r2")
@@ -977,7 +977,7 @@ class BendersCGSPMixin:
             if r3_net:
                 witness["r3"] = r3_net
                 for (i, j, k, s), pi_val in r3_net.items():
-                    cut_expr += pi_val * (1.0 - self.x[j, i] - self.x[k, s])  # type: ignore[attr-defined]
+                    cut_expr += pi_val * (1.0 - self.x[j, i] - self.x[k, s])
 
         return cut_expr, cut_rhs, witness
 
@@ -1033,14 +1033,14 @@ class BendersCGSPMixin:
         u_g = pi_vars.get("u_global_p")
         v_g = pi_vars.get("v_global_p")
         if u_g is not None and v_g is not None:
-            rhs = self.constrs_yp["global_p"].RHS  # type: ignore[attr-defined]
+            rhs = self.constrs_yp["global_p"].RHS
             obj.addTerms([rhs, -rhs], [u_g, v_g])
 
         # r1_p: fixed RHS = convex_hull_area
         u_r1 = pi_vars.get("u_r1_p")
         v_r1 = pi_vars.get("v_r1_p")
         if u_r1 is not None and v_r1 is not None:
-            rhs = self.convex_hull_area  # type: ignore[attr-defined]
+            rhs = self.convex_hull_area
             obj.addTerms([rhs, -rhs], [u_r1, v_r1])
 
         # r2_p: fixed RHS = 1
