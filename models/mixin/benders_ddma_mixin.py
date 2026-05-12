@@ -491,22 +491,27 @@ class BendersDDMAMixin:
         # Ensure FarkasDual is available after INFEASIBLE solves
         sub.setParam("InfUnbdInfo", 1)
 
-        z = 0.0
+        z_abs = 0.0
         best_pi: dict[str, Any] | None = None
-        best_depth = -float("inf")
-        best_numerator = -float("inf")
+        best_depth = 0.0  # signed depth of the selected π
+        best_numerator = 0.0  # signed numerator of the selected π
+        best_abs_numerator = -float("inf")  # selection criterion (handles both Farkas signs)
 
         for it in range(max_iter):
-            # Step 1 — perturb RHS
-            if abs(z) > TOL:
-                self._apply_ddma_perturbation(z, which, weights)
+            # Step 1 — perturb RHS using |z| in the direction implied by sign(numerator).
+            # When numerator > 0 (Farkas inequality cut_expr ≤ 0) we subtract z·w; when
+            # numerator < 0 we add z·w (equivalent to using −π as the certificate).
+            sign = 1.0 if best_numerator >= 0 else -1.0
+            z_signed = sign * z_abs
+            if abs(z_signed) > TOL:
+                self._apply_ddma_perturbation(z_signed, which, weights)
             sub_to_solve = sub
             sub_to_solve.update()
             sub_to_solve.optimize()
 
             # Restore RHS to the standard b(x̄) (undo perturbation)
-            if abs(z) > TOL:
-                self._apply_ddma_perturbation(-z, which, weights)  # reverse
+            if abs(z_signed) > TOL:
+                self._apply_ddma_perturbation(-z_signed, which, weights)  # reverse
 
             status = sub_to_solve.Status
 
@@ -520,44 +525,64 @@ class BendersDDMAMixin:
                 logger.debug("DDMA(%s) iter %d: empty π — stopping", which, it)
                 break
 
-            # depth = normalised violation (for convergence / π-selection)
-            # numerator = π^T (b − B x̄), the raw (unnormalised) violation
+            # depth = normalised violation (signed; for convergence / π-selection)
+            # numerator = π^T (b − B x̄), the raw (unnormalised) violation (signed)
             depth, numerator = self._compute_ddma_depth(pi_dict, x_sol, which, weights, TOL=TOL)
 
-            # Track best π seen so far (in case budget expires).
-            # Selection uses normalised depth; validity uses unnormalised numerator.
-            if depth > best_depth:
+            # Track best π by *absolute* numerator: Farkas certificates can have either
+            # sign convention (cf. BendersFarkasMixin handles both `cut_val > TOL` and
+            # `cut_val < -TOL`). Selecting by signed depth would discard valid cuts
+            # whose certificate has negative orientation.
+            if abs(numerator) > best_abs_numerator:
+                best_abs_numerator = abs(numerator)
                 best_depth = depth
                 best_numerator = numerator
                 best_pi = pi_dict
 
-            # Check for convergence
-            if depth - z < eps:
+            # Check for convergence on absolute depth increment
+            if abs(depth) - z_abs < eps:
                 logger.debug(
-                    "DDMA(%s) converged at iter %d: z=%.4e, depth=%.4e, numerator=%.4e",
+                    "DDMA(%s) converged at iter %d: z_abs=%.4e, |depth|=%.4e, numerator=%.4e",
                     which,
                     it,
-                    z,
-                    depth,
+                    z_abs,
+                    abs(depth),
                     numerator,
                 )
                 break
 
-            z = depth
+            z_abs = abs(depth)
 
         if best_pi is None:
             return None, None, {"aborted": "no_pi"}
 
-        # Validity check: use the *unnormalised* violation π^T (b − B x̄) > TOL.
-        # Using the normalised depth here would be incorrect: Gurobi's FarkasDuals are
-        # not scaled to unit L₁ norm (unlike CGSP which enforces ‖π‖₁ = 1 explicitly),
-        # so depth = numerator / denominator can be ≪ TOL even when the actual violation
-        # (numerator) is significant.  Farkas uses the same unnormalised threshold.
-        if best_numerator <= TOL:
-            return None, None, {"aborted": "no_violation", "depth": best_depth, "numerator": best_numerator}
+        # Validity check: |π^T (b − B x̄)| > TOL.  The unnormalised quantity is what the
+        # Farkas-mixin uses (TOL = 1e-6 from the callback).  Using the normalised depth
+        # would be incorrect because Gurobi's FarkasDuals are not scaled to ‖π‖₁ = 1
+        # (CGSP normalises explicitly via its LP).
+        if best_abs_numerator <= TOL:
+            return (
+                None,
+                None,
+                {
+                    "aborted": "no_violation",
+                    "depth": best_depth,
+                    "numerator": best_numerator,
+                },
+            )
 
         cut_expr, cut_rhs, witness = self._reconstruct_cut_from_pi_values(best_pi, x_sol, which, TOL=TOL)
         witness["ddma_depth"] = best_depth
         witness["ddma_numerator"] = best_numerator
         witness["ddma_iters"] = it + 1
+
+        # If numerator < 0, the Farkas certificate is −π and the cut to inject is
+        # cut_expr ≥ cut_rhs (equivalent to BendersFarkasMixin's `cut_val < -TOL` branch).
+        # The callback always injects `cut_expr ≤ cut_rhs`, so we negate both sides:
+        # `−cut_expr ≤ −cut_rhs` ≡ `cut_expr ≥ cut_rhs`.
+        if best_numerator < 0:
+            cut_expr = -cut_expr
+            cut_rhs = -cut_rhs
+            witness["ddma_flipped"] = True
+
         return cut_expr, cut_rhs, witness
