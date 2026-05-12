@@ -315,7 +315,13 @@ class BendersDDMAMixin:
                 denominator += w * abs(pi_val)
 
         if abs(denominator) < TOL:
-            return 0.0
+            # All non-zero π components sit on weight-0 groups (e.g. global constraint).
+            # Return the raw numerator as a proxy depth so the caller can still build
+            # a valid cut if numerator > 0, rather than silently returning 0.
+            # The denominator-zero case means DDMA cannot improve the cut via depth
+            # maximisation, so we signal this by returning the numerator directly.
+            # Callers that only need a validity check (numerator > 0) can use this.
+            return numerator  # may be positive (valid Farkas certificate exists)
         return numerator / denominator
 
     # ------------------------------------------------------------------
