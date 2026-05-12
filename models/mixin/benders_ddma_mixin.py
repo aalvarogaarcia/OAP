@@ -495,14 +495,17 @@ class BendersDDMAMixin:
         best_pi: dict[str, Any] | None = None
         best_depth = 0.0  # signed depth of the selected π
         best_numerator = 0.0  # signed numerator of the selected π
-        best_abs_numerator = -float("inf")  # selection criterion (handles both Farkas signs)
+        best_abs_numerator = -float("inf")  # selection criterion (|numerator|)
+        best_status: int | None = None  # GRB.INFEASIBLE or GRB.OPTIMAL of best π
 
         for it in range(max_iter):
-            # Step 1 — perturb RHS using |z| in the direction implied by sign(numerator).
-            # When numerator > 0 (Farkas inequality cut_expr ≤ 0) we subtract z·w; when
-            # numerator < 0 we add z·w (equivalent to using −π as the certificate).
-            sign = 1.0 if best_numerator >= 0 else -1.0
-            z_signed = sign * z_abs
+            # Step 1 — perturb RHS by −z_abs·w (always subtract = always tighten).
+            # Tightening Dy ≤ b(x̄) to Dy ≤ b(x̄) − z_abs·w preserves infeasibility
+            # and guarantees that any Farkas dual from the tightened system is also
+            # valid for the original: since π ≤ 0 and w ≥ 0,  π^T w ≤ 0,  so
+            # π^T(b − z·w) < 0  →  π^T b < z·π^T w ≤ 0  →  π^T b < 0.
+            # This is GPA §5 (Algorithm 3), Hosseini & Turner 2025.
+            z_signed = z_abs
             if abs(z_signed) > TOL:
                 self._apply_ddma_perturbation(z_signed, which, weights)
             sub_to_solve = sub
@@ -529,15 +532,23 @@ class BendersDDMAMixin:
             # numerator = π^T (b − B x̄), the raw (unnormalised) violation (signed)
             depth, numerator = self._compute_ddma_depth(pi_dict, x_sol, which, weights, TOL=TOL)
 
-            # Track best π by *absolute* numerator: Farkas certificates can have either
-            # sign convention (cf. BendersFarkasMixin handles both `cut_val > TOL` and
-            # `cut_val < -TOL`). Selecting by signed depth would discard valid cuts
-            # whose certificate has negative orientation.
-            if abs(numerator) > best_abs_numerator:
+            # Selection criterion is status-aware:
+            # - INFEASIBLE (FarkasDual): Gurobi can return either sign convention;
+            #   select by |numerator|.  A negative-numerator ray is handled by the
+            #   flip block at the end (−π is also a valid Farkas certificate).
+            # - OPTIMAL (.Pi): only accept numerator > TOL.  Negating a dual basis
+            #   solution is NOT valid — .Pi values do not form a cone, so −π is not
+            #   dual feasible and would produce an invalid cut.
+            if status == GRB.INFEASIBLE:
+                accept = abs(numerator) > TOL and abs(numerator) > best_abs_numerator
+            else:  # OPTIMAL
+                accept = numerator > TOL and numerator > best_abs_numerator
+            if accept:
                 best_abs_numerator = abs(numerator)
                 best_depth = depth
                 best_numerator = numerator
                 best_pi = pi_dict
+                best_status = status
 
             # Check for convergence on absolute depth increment
             if abs(depth) - z_abs < eps:
@@ -576,11 +587,16 @@ class BendersDDMAMixin:
         witness["ddma_numerator"] = best_numerator
         witness["ddma_iters"] = it + 1
 
-        # If numerator < 0, the Farkas certificate is −π and the cut to inject is
-        # cut_expr ≥ cut_rhs (equivalent to BendersFarkasMixin's `cut_val < -TOL` branch).
-        # The callback always injects `cut_expr ≤ cut_rhs`, so we negate both sides:
-        # `−cut_expr ≤ −cut_rhs` ≡ `cut_expr ≥ cut_rhs`.
-        if best_numerator < 0:
+        # If the best π came from an INFEASIBLE subproblem and numerator < 0, the
+        # Farkas certificate has the negative Gurobi sign convention (−π is the ray).
+        # The callback injects `cut_expr ≤ cut_rhs`, so we negate both sides to flip
+        # the inequality: `−cut_expr ≤ −cut_rhs` ≡ `cut_expr ≥ cut_rhs`.
+        #
+        # This flip is valid ONLY for Farkas rays (INFEASIBLE status): rays form a
+        # cone so −λ is also a valid Farkas certificate.  For OPTIMAL (.Pi) duals,
+        # −π is not dual feasible in general, so we must NEVER flip when best came
+        # from an OPTIMAL solve.
+        if best_numerator < 0 and best_status == GRB.INFEASIBLE:
             cut_expr = -cut_expr
             cut_rhs = -cut_rhs
             witness["ddma_flipped"] = True
