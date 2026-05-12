@@ -188,8 +188,9 @@ def test_ddma_ip_equals_farkas(instance, maximize: bool) -> None:  # type: ignor
     actual = m_ddma2.get_objval_int()
     assert actual is not None
 
-    # Allow MIPGapAbs tolerance
-    ABS_TOL = 1.99
+    # DDMA and Farkas solve the same MILP; optimal IP value must be identical.
+    # Tolerance 0.01 accounts for floating-point differences in objective reporting only.
+    ABS_TOL = 0.01
     assert actual == pytest.approx(expected, abs=ABS_TOL, rel=1e-4), (
         f"IP divergence [{name} {direction}]: Farkas={expected:.4f}  DDMA={actual:.4f}"
     )

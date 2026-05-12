@@ -234,8 +234,14 @@ class BendersDDMAMixin:
         which: str,
         weights: dict[str, float],
         TOL: float = _DDMA_TOL,
-    ) -> float:
-        """Compute depth ẑ = (π^T (b − B x̄)) / (w^T π).
+    ) -> tuple[float, float]:
+        """Compute depth ẑ = (π^T (b − B x̄)) / (w^T π) and the raw numerator.
+
+        Returns
+        -------
+        (depth, numerator)
+            depth     : float — normalised depth ẑ (used for convergence / π selection)
+            numerator : float — unnormalised violation π^T (b − B x̄) (used for cut validity)
 
         The numerator π^T (b − B x̄) is the *unperturbed* RHS dot product
         (i.e. with z=0 in b − B x̄ − z w).  The denominator w^T π uses
@@ -316,13 +322,10 @@ class BendersDDMAMixin:
 
         if abs(denominator) < TOL:
             # All non-zero π components sit on weight-0 groups (e.g. global constraint).
-            # Return the raw numerator as a proxy depth so the caller can still build
-            # a valid cut if numerator > 0, rather than silently returning 0.
-            # The denominator-zero case means DDMA cannot improve the cut via depth
-            # maximisation, so we signal this by returning the numerator directly.
-            # Callers that only need a validity check (numerator > 0) can use this.
-            return numerator  # may be positive (valid Farkas certificate exists)
-        return numerator / denominator
+            # Use the numerator as a proxy depth; DDMA cannot improve the cut further via
+            # depth maximisation (w^T|π| = 0 for all active duals).
+            return numerator, numerator
+        return numerator / denominator, numerator
 
     # ------------------------------------------------------------------
     # Cut reconstruction from flat π dict
@@ -491,6 +494,7 @@ class BendersDDMAMixin:
         z = 0.0
         best_pi: dict[str, Any] | None = None
         best_depth = -float("inf")
+        best_numerator = -float("inf")
 
         for it in range(max_iter):
             # Step 1 — perturb RHS
@@ -516,23 +520,26 @@ class BendersDDMAMixin:
                 logger.debug("DDMA(%s) iter %d: empty π — stopping", which, it)
                 break
 
-            # Gate: check that the current x̄ actually violates
-            # (π^T (b − B x̄) > 0 means the cut is active)
-            depth = self._compute_ddma_depth(pi_dict, x_sol, which, weights, TOL=TOL)
+            # depth = normalised violation (for convergence / π-selection)
+            # numerator = π^T (b − B x̄), the raw (unnormalised) violation
+            depth, numerator = self._compute_ddma_depth(pi_dict, x_sol, which, weights, TOL=TOL)
 
-            # Track best π seen so far (in case budget expires)
+            # Track best π seen so far (in case budget expires).
+            # Selection uses normalised depth; validity uses unnormalised numerator.
             if depth > best_depth:
                 best_depth = depth
+                best_numerator = numerator
                 best_pi = pi_dict
 
             # Check for convergence
             if depth - z < eps:
                 logger.debug(
-                    "DDMA(%s) converged at iter %d: z=%.4e, depth=%.4e",
+                    "DDMA(%s) converged at iter %d: z=%.4e, depth=%.4e, numerator=%.4e",
                     which,
                     it,
                     z,
                     depth,
+                    numerator,
                 )
                 break
 
@@ -541,11 +548,16 @@ class BendersDDMAMixin:
         if best_pi is None:
             return None, None, {"aborted": "no_pi"}
 
-        # Check that the best π actually violates the current x̄
-        if best_depth <= TOL:
-            return None, None, {"aborted": "no_violation", "depth": best_depth}
+        # Validity check: use the *unnormalised* violation π^T (b − B x̄) > TOL.
+        # Using the normalised depth here would be incorrect: Gurobi's FarkasDuals are
+        # not scaled to unit L₁ norm (unlike CGSP which enforces ‖π‖₁ = 1 explicitly),
+        # so depth = numerator / denominator can be ≪ TOL even when the actual violation
+        # (numerator) is significant.  Farkas uses the same unnormalised threshold.
+        if best_numerator <= TOL:
+            return None, None, {"aborted": "no_violation", "depth": best_depth, "numerator": best_numerator}
 
         cut_expr, cut_rhs, witness = self._reconstruct_cut_from_pi_values(best_pi, x_sol, which, TOL=TOL)
         witness["ddma_depth"] = best_depth
+        witness["ddma_numerator"] = best_numerator
         witness["ddma_iters"] = it + 1
         return cut_expr, cut_rhs, witness
