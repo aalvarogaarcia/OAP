@@ -1,7 +1,8 @@
+from collections.abc import Mapping
 from typing import Any, TypeAlias
+
 import numpy as np
 import numpy.typing as npt
-from collections.abc import Mapping
 
 # Arrays
 NumericArray: TypeAlias = npt.NDArray[np.number[Any]]

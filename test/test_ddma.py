@@ -16,7 +16,9 @@ Verifies for BendersDDMAMixin (Algorithm 3, Hosseini & Turner 2025):
 
 All tests skip gracefully when instance files are absent.
 """
+
 from pathlib import Path
+from typing import Any
 
 import gurobipy as gp
 import pytest
@@ -31,9 +33,7 @@ gp.setParam("OutputFlag", 0)
 # ---------------------------------------------------------------------------
 
 INSTANCE_DIR = Path("instance/little-instances")
-INSTANCE_FILES = (
-    list(INSTANCE_DIR.glob("*.instance")) if INSTANCE_DIR.exists() else []
-)
+INSTANCE_FILES = list(INSTANCE_DIR.glob("*.instance")) if INSTANCE_DIR.exists() else []
 
 if not INSTANCE_FILES:
     pytest.skip(
@@ -46,7 +46,8 @@ if not INSTANCE_FILES:
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _eval_cut(cut_expr: gp.LinExpr, x_sol: dict) -> float:
+
+def _eval_cut(cut_expr: gp.LinExpr, x_sol: dict[str, Any]) -> float:
     """Evaluate a Gurobi LinExpr at a given x_sol dict."""
     val = cut_expr.getConstant()
     for i in range(cut_expr.size()):
@@ -57,11 +58,11 @@ def _eval_cut(cut_expr: gp.LinExpr, x_sol: dict) -> float:
         if name.startswith("x_"):
             parts = name.split("_")
             arc = (int(parts[1]), int(parts[2]))
-            val += coef * x_sol.get(arc, 0.0)
+            val += coef * x_sol.get(arc, 0.0)  # type: ignore[call-overload]
     return val
 
 
-def _build_ddma_model(points, triangles, name, benders_method="farkas"):
+def _build_ddma_model(points, triangles, name, benders_method="farkas"):  # type: ignore[no-untyped-def]
     m = OAPBendersModel(points, triangles, name=name)
     m.build(
         objective="Fekete",
@@ -72,7 +73,7 @@ def _build_ddma_model(points, triangles, name, benders_method="farkas"):
     return m
 
 
-def _build_farkas_model(points, triangles, name):
+def _build_farkas_model(points, triangles, name):  # type: ignore[no-untyped-def]
     m = OAPBendersModel(points, triangles, name=name)
     m.build(
         objective="Fekete",
@@ -87,8 +88,9 @@ def _build_farkas_model(points, triangles, name):
 # Fixture
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(params=INSTANCE_FILES, ids=[p.stem for p in INSTANCE_FILES])
-def instance(request):
+def instance(request):  # type: ignore[no-untyped-def]
     path: Path = request.param
     points = read_indexed_instance(str(path))
     triangles = compute_triangles(points)
@@ -101,14 +103,15 @@ def instance(request):
 # Test 1 — Cut validity: every DDMA cut violates x̄
 # ---------------------------------------------------------------------------
 
-def test_ddma_cut_validity(instance):
+
+def test_ddma_cut_validity(instance):  # type: ignore[no-untyped-def]
     """
     A cut produced by get_ddma_cut_yp / get_ddma_cut_y must satisfy:
         cut_expr(x̄) > cut_rhs + TOL
     i.e. the current master solution actually violates the cut.
     """
     name, points, triangles = instance
-    m = _build_ddma_model(points, triangles, f"DDMA_valid_{name}")
+    m = _build_ddma_model(points, triangles, f"DDMA_valid_{name}")  # type: ignore[no-untyped-call]
 
     # Use the LP relaxation solution as a synthetic x̄
     # (it may violate the subproblem feasibility)
@@ -125,8 +128,7 @@ def test_ddma_cut_validity(instance):
         if cut_expr is not None:
             lhs = _eval_cut(cut_expr, x_sol)
             assert lhs > cut_rhs + TOL, (
-                f"DDMA Y' cut NOT violated at x̄ for {name}: "
-                f"cut_expr(x̄)={lhs:.6f} ≤ cut_rhs={cut_rhs:.6f}"
+                f"DDMA Y' cut NOT violated at x̄ for {name}: cut_expr(x̄)={lhs:.6f} ≤ cut_rhs={cut_rhs:.6f}"
             )
 
     # Y
@@ -135,8 +137,7 @@ def test_ddma_cut_validity(instance):
         if cut_expr is not None:
             lhs = _eval_cut(cut_expr, x_sol)
             assert lhs > cut_rhs + TOL, (
-                f"DDMA Y cut NOT violated at x̄ for {name}: "
-                f"cut_expr(x̄)={lhs:.6f} ≤ cut_rhs={cut_rhs:.6f}"
+                f"DDMA Y cut NOT violated at x̄ for {name}: cut_expr(x̄)={lhs:.6f} ≤ cut_rhs={cut_rhs:.6f}"
             )
 
 
@@ -144,8 +145,9 @@ def test_ddma_cut_validity(instance):
 # Test 2 — IP equivalence: DDMA ≡ Farkas on optimal value
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize("maximize", [True, False], ids=["max", "min"])
-def test_ddma_ip_equals_farkas(instance, maximize: bool):
+def test_ddma_ip_equals_farkas(instance, maximize: bool) -> None:  # type: ignore[no-untyped-def]
     """
     DDMA and plain Farkas must reach the same IP optimal value.
 
@@ -168,9 +170,7 @@ def test_ddma_ip_equals_farkas(instance, maximize: bool):
     assert expected is not None
 
     # DDMA
-    m_ddma = _build_ddma_model(
-        points, triangles, f"DDMA_IP_{name}_{direction}"
-    )
+    m_ddma = _build_ddma_model(points, triangles, f"DDMA_IP_{name}_{direction}")  # type: ignore[no-untyped-call]
     m_ddma.build.__func__  # silence; model was already built above
     # Rebuild with maximize setting:
     m_ddma2 = OAPBendersModel(points, triangles, name=f"DDMA2_IP_{name}_{direction}")
@@ -183,8 +183,7 @@ def test_ddma_ip_equals_farkas(instance, maximize: bool):
     m_ddma2.solve(time_limit=120, verbose=False)
 
     assert m_ddma2.model.Status == gp.GRB.OPTIMAL, (
-        f"DDMA did not reach OPTIMAL for {name} {direction} "
-        f"(status={m_ddma2.model.Status})"
+        f"DDMA did not reach OPTIMAL for {name} {direction} (status={m_ddma2.model.Status})"
     )
     actual = m_ddma2.get_objval_int()
     assert actual is not None
@@ -192,8 +191,7 @@ def test_ddma_ip_equals_farkas(instance, maximize: bool):
     # Allow MIPGapAbs tolerance
     ABS_TOL = 1.99
     assert actual == pytest.approx(expected, abs=ABS_TOL, rel=1e-4), (
-        f"IP divergence [{name} {direction}]: "
-        f"Farkas={expected:.4f}  DDMA={actual:.4f}"
+        f"IP divergence [{name} {direction}]: Farkas={expected:.4f}  DDMA={actual:.4f}"
     )
 
 
@@ -201,7 +199,8 @@ def test_ddma_ip_equals_farkas(instance, maximize: bool):
 # Test 3 — LP equivalence: DDMA LP ≡ Farkas LP
 # ---------------------------------------------------------------------------
 
-def test_ddma_lp_equals_farkas(instance):
+
+def test_ddma_lp_equals_farkas(instance):  # type: ignore[no-untyped-def]
     """
     DDMA LP relaxation must converge to the same bound as Farkas LP.
 
@@ -237,13 +236,14 @@ def test_ddma_lp_equals_farkas(instance):
 # Test 4 — Early termination: DDMA with max_iter=1 still gives valid cut
 # ---------------------------------------------------------------------------
 
-def test_ddma_early_termination_valid(instance):
+
+def test_ddma_early_termination_valid(instance):  # type: ignore[no-untyped-def]
     """
     DDMA with max_iter=1 (single Benders solve) must still return a
     cut that is violated at x̄ (Remark 6 in Hosseini & Turner 2025).
     """
     name, points, triangles = instance
-    m = _build_ddma_model(points, triangles, f"DDMA_early_{name}")
+    m = _build_ddma_model(points, triangles, f"DDMA_early_{name}")  # type: ignore[no-untyped-call]
 
     x_sol = {arc: 1.0 / m.N for arc in m.x.keys()}
     m._update_subproblem_rhs(x_sol)
@@ -256,13 +256,10 @@ def test_ddma_early_termination_valid(instance):
 
     # max_iter=1 must still return a valid cut
     cut_expr, cut_rhs, witness = m.get_ddma_cut_yp(x_sol, max_iter=1)
-    assert cut_expr is not None, (
-        f"DDMA (max_iter=1) returned None for {name} when Y' is infeasible."
-    )
+    assert cut_expr is not None, f"DDMA (max_iter=1) returned None for {name} when Y' is infeasible."
     lhs = _eval_cut(cut_expr, x_sol)
     assert lhs > cut_rhs + TOL, (
-        f"DDMA (max_iter=1) cut NOT violated at x̄ for {name}: "
-        f"cut_expr(x̄)={lhs:.6f} ≤ cut_rhs={cut_rhs:.6f}"
+        f"DDMA (max_iter=1) cut NOT violated at x̄ for {name}: cut_expr(x̄)={lhs:.6f} ≤ cut_rhs={cut_rhs:.6f}"
     )
     assert "ddma_iters" in witness
     assert witness["ddma_iters"] == 1
@@ -272,13 +269,14 @@ def test_ddma_early_termination_valid(instance):
 # Test 5 — No spurious cut when subproblem is feasible at x_sol
 # ---------------------------------------------------------------------------
 
-def test_ddma_no_cut_on_feasible(instance):
+
+def test_ddma_no_cut_on_feasible(instance):  # type: ignore[no-untyped-def]
     """
     When both subproblems are feasible for the given x̄, DDMA must not
     emit a cut (no violation → correct convergence signal).
     """
     name, points, triangles = instance
-    m = _build_ddma_model(points, triangles, f"DDMA_nofeas_{name}")
+    m = _build_ddma_model(points, triangles, f"DDMA_nofeas_{name}")  # type: ignore[no-untyped-call]
 
     # Use actual optimal integer solution (if model reaches OPTIMAL)
     m_ref = OAPBendersModel(points, triangles, name=f"Ref_{name}")
@@ -295,13 +293,7 @@ def test_ddma_no_cut_on_feasible(instance):
     m.sub_yp.optimize()
 
     if m.sub_yp.Status != gp.GRB.OPTIMAL:
-        pytest.skip(
-            f"Y' not OPTIMAL at optimal x for {name} "
-            f"(status={m.sub_yp.Status}) — skip no-cut test."
-        )
+        pytest.skip(f"Y' not OPTIMAL at optimal x for {name} (status={m.sub_yp.Status}) — skip no-cut test.")
 
     cut_expr, cut_rhs, witness = m.get_ddma_cut_yp(x_sol)
-    assert cut_expr is None, (
-        f"DDMA emitted a spurious Y' cut at a feasible x̄ for {name}. "
-        f"Witness: {witness}"
-    )
+    assert cut_expr is None, f"DDMA emitted a spurious Y' cut at a feasible x̄ for {name}. Witness: {witness}"

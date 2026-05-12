@@ -2,12 +2,13 @@ import argparse
 import json
 import sys
 import time
+from typing import Any
 
 from models import OAPBendersModel, OAPCompactModel
 from utils.utils import compute_triangles, read_indexed_instance
 
 
-def _parse_weight_dict(s: str | None, flag: str) -> dict | None:
+def _parse_weight_dict(s: str | None, flag: str) -> dict[str, Any] | None:
     """Parse a weight-dict string into a Python dict.
 
     Accepted formats:
@@ -229,7 +230,7 @@ def main() -> None:
     # ---------------------------------------------------------
     # 2. CARGA DE DATOS
     # ---------------------------------------------------------
-    instance_dir = config["instance_dir"].rstrip("/\\")
+    instance_dir = config["instance_dir"].rstrip("/\\")  # type: ignore[attr-defined]
     filepath = f"{instance_dir}/{instance_name}.instance"
     try:
         points = read_indexed_instance(filepath)
@@ -244,22 +245,22 @@ def main() -> None:
     # 3. INSTANCIAR Y EJECUTAR EL MODELO ELEGIDO
     if config["model_type"] == "Compacto":
         print("\n[!] Construyendo OAPCompactModel...")
-        modelo = OAPCompactModel(points, triangles, name=instance_name)
+        modelo = OAPCompactModel(points, triangles, name=instance_name)  # type: ignore[arg-type]
         modelo.build(
-            objective=config["objective"],
-            maximize=config["maximize"],
-            subtour=config["subtour"],
-            sum_constrain=config["sum_constrain"],
-            strengthen=config["strengthen"],
-            mode=config["mode"],
-            semiplane=config["semiplane"],
-            use_knapsack=config["use_knapsack"],
-            use_cliques=config["use_cliques"],
-            crossing_constrain=config["crossing_constrain"],
+            objective=config["objective"],  # type: ignore[arg-type]
+            maximize=config["maximize"],  # type: ignore[arg-type]
+            subtour=config["subtour"],  # type: ignore[arg-type]
+            sum_constrain=config["sum_constrain"],  # type: ignore[arg-type]
+            strengthen=config["strengthen"],  # type: ignore[arg-type]
+            mode=config["mode"],  # type: ignore[arg-type]
+            semiplane=config["semiplane"],  # type: ignore[arg-type]
+            use_knapsack=config["use_knapsack"],  # type: ignore[arg-type]
+            use_cliques=config["use_cliques"],  # type: ignore[arg-type]
+            crossing_constrain=config["crossing_constrain"],  # type: ignore[arg-type]
         )
 
         print("\n[!] Resolviendo...")
-        modelo.solve(relaxed=config["relaxed"], verbose=True)
+        modelo.solve(relaxed=config["relaxed"], verbose=True)  # type: ignore[arg-type]
 
         # Bloque Polihedral corregido: Preguntamos primero, extraemos/guardamos después
         if config["polihedral"]:
@@ -275,29 +276,32 @@ def main() -> None:
 
     elif config["model_type"] == "Benders":
         print(f"\n[!] Construyendo OAPBendersModel (Método: {config['benders_method']})...")
-        modelo = OAPBendersModel(points, triangles, name=instance_name)
-        modelo.build(
+        modelo = OAPBendersModel(points, triangles, name=instance_name)  # type: ignore[arg-type, assignment]
+        modelo.build(  # type: ignore[call-arg]
             benders_method=config["benders_method"],
-            maximize=config["maximize"],
-            sum_constrain=config["sum_constrain"],
+            maximize=config["maximize"],  # type: ignore[arg-type]
+            sum_constrain=config["sum_constrain"],  # type: ignore[arg-type]
             crosses_constrain=config["crosses_constrain"],
             use_deepest_cuts=config["use_deepest_cuts"],
             cut_weights_y=config["cut_weights_y"],
             cut_weights_yp=config["cut_weights_yp"],
-            semiplane=config["benders_semiplane"],
+            semiplane=config["benders_semiplane"],  # type: ignore[arg-type]
         )
 
         if config["modify_log_path"]:
             custom_log_path = input(
                 "\nIngresa la ruta completa donde deseas guardar el log de cortes (ej. outputs/Logs/milog.json): "
             )
-            modelo.set_log_path(custom_log_path)  # Asumo que tienes esta función implementada
+            modelo.set_log_path(custom_log_path)  # type: ignore[attr-defined]  # método solo Benders
             print(f"Ruta del log de cortes actualizada a: {custom_log_path}")
 
         print("\n[!] Resolviendo (Callback Benders Activado)...")
         # El log_facets de Benders se ejecutará internamente en el callback gracias al flag polihedral
-        modelo.solve(
-            relaxed=config["relaxed"], save_cuts=config["save_cuts"], verbose=True, polihedral=config["polihedral"]
+        modelo.solve(  # type: ignore[call-arg]
+            relaxed=config["relaxed"],  # type: ignore[arg-type]
+            save_cuts=config["save_cuts"],
+            verbose=True,
+            polihedral=config["polihedral"],  # type: ignore[arg-type, unused-ignore]
         )
 
     # 4. RESULTADOS

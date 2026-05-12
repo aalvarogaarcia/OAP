@@ -5,6 +5,7 @@ geometric or combinatorial constraints directly into it.  They depend on
 ``utils.geometry`` for predicates but have no dependency on the logging or
 visualisation submodules.
 """
+
 from __future__ import annotations
 
 import gurobipy as gp
@@ -24,6 +25,7 @@ ArcConstraintMap = dict[Arc, gp.Constr]
 # ---------------------------------------------------------------------------
 # Half-plane constraints
 # ---------------------------------------------------------------------------
+
 
 def restricciones_semiplano(
     model: gp.Model,
@@ -121,10 +123,7 @@ def restricciones_semiplanoV2(
                             constraints.append(
                                 model.addConstr(
                                     model._x[i, j] <= model._x[nodo_actual, nodo_sig],
-                                    name=(
-                                        f"semiplano_cadena_{i}_{j}"
-                                        f"_fuerza_{nodo_actual}_{nodo_sig}"
-                                    ),
+                                    name=(f"semiplano_cadena_{i}_{j}_fuerza_{nodo_actual}_{nodo_sig}"),
                                 )
                             )
                         nodo_actual = nodo_sig
@@ -193,10 +192,7 @@ def restricciones_semiplano_chain(
                             constraints.append(
                                 model.addConstr(
                                     model._x[i, j] <= model._x[nodo_actual, nodo_sig],
-                                    name=(
-                                        f"semiplano_cadena_{i}_{j}"
-                                        f"_fuerza_{nodo_actual}_{nodo_sig}"
-                                    ),
+                                    name=(f"semiplano_cadena_{i}_{j}_fuerza_{nodo_actual}_{nodo_sig}"),
                                 )
                             )
                         nodo_actual = nodo_sig
@@ -209,6 +205,7 @@ def restricciones_semiplano_chain(
 # ---------------------------------------------------------------------------
 # Cutting-plane injectors
 # ---------------------------------------------------------------------------
+
 
 def inyectar_cortes_knapsack_locales(
     model: gp.Model,
@@ -259,16 +256,13 @@ def inyectar_cliques_de_cruce(
     print("Construyendo grafo de intersecciones para Cliques...")
 
     aristas: list[tuple[int, int]] = [
-        (i, j)
-        for i in range(len(points))
-        for j in range(len(points))
-        if (i, j) in model._x and i < j
+        (i, j) for i in range(len(points)) for j in range(len(points)) if (i, j) in model._x and i < j
     ]
 
     G_cruces: nx.Graph = nx.Graph()
     G_cruces.add_nodes_from(aristas)
     for idx, e1 in enumerate(aristas):
-        for e2 in aristas[idx + 1:]:
+        for e2 in aristas[idx + 1 :]:
             if e1[0] in e2 or e1[1] in e2:
                 continue
             p1, p2 = points[e1[0]], points[e1[1]]
@@ -345,10 +339,7 @@ def aplicar_semiplanos_por_capas(
                                 constraints.append(
                                     model.addConstr(
                                         model._x[i, j] <= model._x[nodo_actual, nodo_sig],
-                                        name=(
-                                            f"semiplano_L{k}_L{k+1}_{i}_{j}"
-                                            f"_fuerza_{nodo_actual}_{nodo_sig}"
-                                        ),
+                                        name=(f"semiplano_L{k}_L{k + 1}_{i}_{j}_fuerza_{nodo_actual}_{nodo_sig}"),
                                     )
                                 )
                             nodo_actual = nodo_sig

@@ -6,7 +6,7 @@ import pandas as pd
 from gurobipy import GRB
 
 
-def get_ObjVal_int(model: gp.Model) -> float | None:
+def get_ObjVal_int(model: gp.Model) -> float | None:  # type: ignore[return]
     """
     Retorna el valor objetivo entero del modelo si existe solución.
     Si no hay solución, retorna None.
@@ -18,8 +18,8 @@ def get_ObjVal_int(model: gp.Model) -> float | None:
             i = model._points_[i]
             j = model._points_[j]
 
-            obj_val += (i[0]*j[1] - j[0]*i[1])/2
-        
+            obj_val += (i[0] * j[1] - j[0] * i[1]) / 2
+
         return obj_val
 
 
@@ -35,15 +35,16 @@ def get_tour(model: gp.Model) -> list[int]:
         start = x[0][0]  # Tomamos el primer punto como inicio
         tour = [start]
         actual = next_i[start]
-        
+
         while actual != start:
             tour.append(actual)
             actual = next_i[actual]
 
         return tour
-    
+
     else:
         return []
+
 
 def get_Objval_lp(model: gp.Model) -> float:
     if model._benders_:
@@ -54,8 +55,7 @@ def get_Objval_lp(model: gp.Model) -> float:
             "Use OAPBendersModel.get_objval_lp() (via OAPStatsMixin) instead."
         )
 
-
-    else: 
+    else:
         # 1. Crear la relajación lineal
         lp = model.relax()
         lp.Params.OutputFlag = 0  # Desactivar salida de Gurobi para la relajación
@@ -64,13 +64,14 @@ def get_Objval_lp(model: gp.Model) -> float:
         lp.optimize()
 
         os.makedirs("outputs/Others", exist_ok=True)
-    
+
         lp.write("outputs/Others/LP_Relaxation_Converged_Compact.sol")
         lp.write("outputs/Others/LP_Relaxation_Converged_Compact.lp")
-        
+
     obj_val = lp.ObjVal if lp.SolCount > 0 else 0
-    
+
     return obj_val
+
 
 def get_x_values(model: gp.Model) -> dict[str, float]:
     """
@@ -80,11 +81,10 @@ def get_x_values(model: gp.Model) -> dict[str, float]:
     # Verificar si el modelo tiene solución (Optimal o Suboptimal)
     if model and model.SolCount > 0:
         x_values: dict[str, float] = {}
-        
+
         # model.getVars() devuelve TODAS las variables
         for var in model.getVars():
-            
-            if var.VarName.startswith('x_'):  
+            if var.VarName.startswith("x_"):
                 x_values[var.VarName] = var.X
 
         return x_values
@@ -92,10 +92,12 @@ def get_x_values(model: gp.Model) -> dict[str, float]:
         return {}
 
 
-
 def get_model_stats(
     model: gp.Model,
-) -> tuple[float, float, float | None, float, float] | tuple[Literal['-'], Literal['-'], Literal['-'], Literal['-'], Literal['-']]:
+) -> (
+    tuple[float, float, float | None, float, float]
+    | tuple[Literal["-"], Literal["-"], Literal["-"], Literal["-"], Literal["-"]]
+):
     """
     Extrae estadísticas clave del modelo y su relajación.
     Retorna: (LP_Val, Gap, IP_Val, Time, Nodes)
@@ -111,24 +113,24 @@ def get_model_stats(
     else:
         return "-", "-", "-", "-", "-"
 
-
     # Calcular Gap: (IP - LP )/ IP * 100 if MinArea (evitando división por cero)
     # Si MaxArea, el gap es (LP - IP) / (Area(CH)-IP) * 100
     gap = 0.0
     if ip_val != 0 and model.ModelSense == GRB.MINIMIZE:
         gap = (ip_val - lp_val) / ip_val * 100
-    
+
     elif ip_val != 0 and model.ModelSense == GRB.MAXIMIZE:
         # Asumimos que el área del casco convexo es accesible como atributo
-        area_ch = model._convex_hull_area if hasattr(model, '_convex_hull_area') else None
-        #print(f"Convex Hull Area for gap calculation: {area_ch}")
+        area_ch = model._convex_hull_area if hasattr(model, "_convex_hull_area") else None
+        # print(f"Convex Hull Area for gap calculation: {area_ch}")
         if area_ch is not None and (area_ch - ip_val) != 0:
             gap = ((lp_val - ip_val) / (area_ch - ip_val)) * 100
-    
+
     return lp_val, gap, ip_val, time_s, nodes
 
+
 #
-#def get_model_stats_cplex(model: Model, relaxed_model: Model):
+# def get_model_stats_cplex(model: Model, relaxed_model: Model):
 #    """
 #    Extrae estadísticas clave del modelo CPLEX y su relajación.
 #    Retorna: (LP_Val, Gap, IP_Val, Time, Nodes)
@@ -138,7 +140,7 @@ def get_model_stats(
 #    # En docplex, 'model.solution' es None si no se encontró solución.
 #    if model and model.solution:
 #        ip_val = model.objective_value
-#        
+#
 #        # El tiempo y los nodos se extraen de los detalles de la resolución
 #        solve_details = model.get_solve_details()
 #        time_s = solve_details.time  # Tiempo en segundos
@@ -156,30 +158,31 @@ def get_model_stats(
 #    # (IP - LP )/ IP * 100 if MinArea (evitando división por cero)
 #    # Si MaxArea, el gap es (LP - IP) / (Area(CH)-IP) * 100
 #    gap = 0.0
-#    
+#
 #    # Detectar sentido de optimización (Minimizar vs Maximizar)
-#    is_minimization = model.objective_sense.is_minimize() 
-#    
+#    is_minimization = model.objective_sense.is_minimize()
+#
 #    if ip_val != 0 and is_minimization:
 #        # Gap estándar para minimización
 #        gap = (ip_val - lp_val) / ip_val * 100
-#    
+#
 #    elif ip_val != 0 and not is_minimization: # Maximización
 #        # Asumimos que el área del casco convexo fue guardada en el atributo _convex_hull_area
 #        area_ch = model._convex_hull_area if hasattr(model, '_convex_hull_area') else None
-#        
+#
 #        # print(f"Convex Hull Area for gap calculation: {area_ch}")
-#        
+#
 #        if area_ch is not None and (area_ch - ip_val) != 0:
 #            # Fórmula específica para OAP (Area Poligonización)
 #            gap = (lp_val - ip_val) / (area_ch - ip_val) * 100
 #        else:
 #            # Fallback a cálculo estándar si no hay Convex Hull info
 #            gap = (lp_val - ip_val) / abs(ip_val) * 100
-#    
+#
 #    return lp_val, gap, ip_val, time_s, nodes
 #
 #
+
 
 def save_results_excel(model: gp.Model, outputfile: str) -> None:
     """
@@ -194,28 +197,30 @@ def save_results_excel(model: gp.Model, outputfile: str) -> None:
 
     # 2) Obtener metadatos de configuración del modelo, con valores por defecto si no existen
     sense = (
-        'Minimize' if getattr(model, 'ModelSense', None) == GRB.MINIMIZE else
-        'Maximize' if getattr(model, 'ModelSense', None) == GRB.MAXIMIZE else
-        'Unknown'
+        "Minimize"
+        if getattr(model, "ModelSense", None) == GRB.MINIMIZE
+        else "Maximize"
+        if getattr(model, "ModelSense", None) == GRB.MAXIMIZE
+        else "Unknown"
     )
-    objective_desc = getattr(model, '_objective_desc', 'Unknown')
-    sum_constrain = getattr(model, '_sum_constrain', None)
-    instance_name = getattr(model, '_instance_name', None)
+    objective_desc = getattr(model, "_objective_desc", "Unknown")
+    sum_constrain = getattr(model, "_sum_constrain", None)
+    instance_name = getattr(model, "_instance_name", None)
 
     # Determinar el nombre de la hoja: preferimos el nombre de la instancia; si no, usamos el nombre del archivo
     sheet_name = instance_name if instance_name else os.path.splitext(os.path.basename(outputfile))[0]
 
     # 3) Construir fila de datos a insertar
     new_row = {
-        'Instance': instance_name if instance_name else '-',
-        'Sense': sense,
-        'Objective': objective_desc,
-        'SumConstrain': sum_constrain if sum_constrain is not None else '-',
-        'LP Value': lp_val,
-        'Gap (%)': gap,
-        'IP Value': ip_val,
-        'Time (s)': time_s,
-        'Nodes': nodes
+        "Instance": instance_name if instance_name else "-",
+        "Sense": sense,
+        "Objective": objective_desc,
+        "SumConstrain": sum_constrain if sum_constrain is not None else "-",
+        "LP Value": lp_val,
+        "Gap (%)": gap,
+        "IP Value": ip_val,
+        "Time (s)": time_s,
+        "Nodes": nodes,
     }
     new_df = pd.DataFrame([new_row])
 
@@ -240,12 +245,12 @@ def save_results_excel(model: gp.Model, outputfile: str) -> None:
     # 5) Escribir al Excel (reemplazar hoja si existe, o crear nueva; preservar otras hojas)
     if file_exists:
         if sheet_exists:
-            with pd.ExcelWriter(outputfile, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
+            with pd.ExcelWriter(outputfile, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
                 combined_df.to_excel(writer, sheet_name=sheet_name, index=False)
         else:
-            with pd.ExcelWriter(outputfile, engine='openpyxl', mode='a') as writer:
+            with pd.ExcelWriter(outputfile, engine="openpyxl", mode="a") as writer:
                 combined_df.to_excel(writer, sheet_name=sheet_name, index=False)
     else:
         # Crear nuevo libro
-        with pd.ExcelWriter(outputfile, engine='openpyxl') as writer:
+        with pd.ExcelWriter(outputfile, engine="openpyxl") as writer:
             combined_df.to_excel(writer, sheet_name=sheet_name, index=False)

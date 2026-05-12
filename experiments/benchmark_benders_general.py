@@ -30,6 +30,7 @@ Outputs (all timestamped with run_id = YYYYMMDD_HHMMSS):
   outputs/CSV/benchmark_general_{run_id}_config.json
   outputs/reports/benchmark_general_{run_id}.md
 """
+
 from __future__ import annotations
 
 import argparse
@@ -42,6 +43,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -63,7 +65,7 @@ sys.path.insert(0, str(REPO_ROOT))
 # ---------------------------------------------------------------------------
 # Each entry maps a short label to the kwargs forwarded to model.build().
 # Keys deliberately match OAPBendersModel.build() parameter names.
-METHOD_CONFIG: dict[str, dict] = {
+METHOD_CONFIG: dict[str, dict[str, Any]] = {
     "farkas": dict(
         benders_method="farkas",
         use_deepest_cuts=False,
@@ -124,7 +126,8 @@ CSV_FIELDNAMES = [
 # System info
 # ---------------------------------------------------------------------------
 
-def get_system_info() -> dict:
+
+def get_system_info() -> dict[str, Any]:
     """Capture hardware and environment info per FR-9."""
     try:
         cpu_info = subprocess.check_output("wmic cpu get name", shell=True).decode()
@@ -134,9 +137,7 @@ def get_system_info() -> dict:
 
     try:
         ram_info = subprocess.check_output("wmic MemoryChip get Capacity", shell=True)
-        total_ram_bytes = sum(
-            int(x) for x in ram_info.decode().split("\n")[1:] if x.strip()
-        )
+        total_ram_bytes = sum(int(x) for x in ram_info.decode().split("\n")[1:] if x.strip())
         ram_gb = total_ram_bytes / (1024**3)
     except Exception:
         ram_gb = 0.0
@@ -145,9 +146,7 @@ def get_system_info() -> dict:
         "platform": platform.platform(),
         "cpu_model": cpu_model,
         "ram_gb": round(ram_gb, 1),
-        "python_version": (
-            f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
-        ),
+        "python_version": (f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"),
         "timestamp": datetime.now().isoformat(),
     }
 
@@ -156,7 +155,8 @@ def get_system_info() -> dict:
 # Solver
 # ---------------------------------------------------------------------------
 
-def _safe_round(value, ndigits: int):
+
+def _safe_round(value, ndigits: int):  # type: ignore[no-untyped-def]
     """Round numeric values; pass through anything else (None, "-", strings) as None.
 
     F1.2 (audit ref. .claude/context/reviews/2026-05-04-cgsp-paper-dissonance.md §2.4):
@@ -178,14 +178,14 @@ def run_single_solve(
     objective: str = "Fekete",
     maximize: bool = True,
     time_limit: int = 60000,
-) -> dict:
+) -> dict[str, Any]:
     """
     Build and solve one OAPBendersModel instance with the given method.
 
     Returns a dict with CSV_FIELDNAMES keys.
     """
     stem = Path(instance_path).stem
-    row: dict = {
+    row: dict[str, Any] = {
         "instance": stem,
         "n_nodes": None,
         "method": method,
@@ -223,7 +223,7 @@ def run_single_solve(
 
         build_kwargs = dict(METHOD_CONFIG[method])  # shallow copy
         model.build(
-            objective=objective,
+            objective=objective,  # type: ignore[arg-type]
             maximize=maximize,
             **build_kwargs,
         )
@@ -249,6 +249,7 @@ def run_single_solve(
         # ``FAILED: <type>: <first 80 chars>``, which is what hid the real
         # ``round("-")`` origin of the previous run.
         import traceback
+
         logger.error(
             "  FAILED [%s] %s\n%s",
             method,
@@ -264,7 +265,8 @@ def run_single_solve(
 # Interactive configuration
 # ---------------------------------------------------------------------------
 
-def prompt_config() -> dict:
+
+def prompt_config() -> dict[str, Any]:
     """Collect benchmark configuration via inquirer prompts."""
     try:
         import inquirer
@@ -295,9 +297,7 @@ def prompt_config() -> dict:
 
     found = sorted(instance_dir.glob(glob_pattern))
     if not found:
-        logger.error(
-            "No files matching '%s' in '%s'", glob_pattern, instance_dir
-        )
+        logger.error("No files matching '%s' in '%s'", glob_pattern, instance_dir)
         sys.exit(1)
 
     # --- Step 2: instance selection ---
@@ -315,21 +315,19 @@ def prompt_config() -> dict:
         logger.error("No instances selected.")
         sys.exit(1)
 
-    selected_instances = [
-        str(instance_dir / name) for name in inst_answers["instances"]
-    ]
+    selected_instances = [str(instance_dir / name) for name in inst_answers["instances"]]
 
     # --- Step 3: method selection ---
     # Use (label, value) tuples so the user sees a human-readable description
     # in the checkbox while the stored value is the METHOD_CONFIG key.
     _METHOD_LABELS: dict[str, str] = {
-        "farkas":       "farkas          — Benders Farkas (baseline)",
-        "cgsp_farkas":  "cgsp_farkas     — Deepest cuts via CGSP, Farkas-mode  (Hosseini & Turner §3)",
-        "cgsp_pi":      "cgsp_pi         — Deepest cuts via CGSP, Pi-mode",
-        "mw_lp":        "mw_lp           — Magnanti-Wong Pareto-optimal, core point = LP relax",
-        "mw_uniform":   "mw_uniform      — Magnanti-Wong Pareto-optimal, core point = uniform",
-        "ddma_farkas":  "ddma_farkas     — DDMA Algorithm 3, Farkas-mode  [Hosseini & Turner §4.1]",
-        "ddma_pi":      "ddma_pi         — DDMA Algorithm 3, Pi-mode      [Hosseini & Turner §4.1]",
+        "farkas": "farkas          — Benders Farkas (baseline)",
+        "cgsp_farkas": "cgsp_farkas     — Deepest cuts via CGSP, Farkas-mode  (Hosseini & Turner §3)",
+        "cgsp_pi": "cgsp_pi         — Deepest cuts via CGSP, Pi-mode",
+        "mw_lp": "mw_lp           — Magnanti-Wong Pareto-optimal, core point = LP relax",
+        "mw_uniform": "mw_uniform      — Magnanti-Wong Pareto-optimal, core point = uniform",
+        "ddma_farkas": "ddma_farkas     — DDMA Algorithm 3, Farkas-mode  [Hosseini & Turner §4.1]",
+        "ddma_pi": "ddma_pi         — DDMA Algorithm 3, Pi-mode      [Hosseini & Turner §4.1]",
     }
     method_choices = [(_METHOD_LABELS.get(m, m), m) for m in ALL_METHODS]
     method_answers = inquirer.prompt(
@@ -382,7 +380,7 @@ def prompt_config() -> dict:
     }
 
 
-def smoke_test_config() -> dict:
+def smoke_test_config() -> dict[str, Any]:
     """Return hardcoded config for --smoke-test mode."""
     smoke_dir = REPO_ROOT / "little-instances"
     if not smoke_dir.exists():
@@ -404,7 +402,7 @@ def smoke_test_config() -> dict:
     }
 
 
-def load_json_config(path: str) -> dict:
+def load_json_config(path: str) -> dict[str, Any]:
     """Load benchmark configuration from a JSON file."""
     with open(path) as f:
         cfg = json.load(f)
@@ -420,14 +418,15 @@ def load_json_config(path: str) -> dict:
         logger.error("Unknown methods in config: %s", unknown_methods)
         sys.exit(1)
 
-    return cfg
+    return cfg  # type: ignore[no-any-return]
 
 
 # ---------------------------------------------------------------------------
 # Output writers
 # ---------------------------------------------------------------------------
 
-def write_csv(results: list[dict], path: Path) -> None:
+
+def write_csv(results: list[dict[str, Any]], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=CSV_FIELDNAMES)
@@ -436,7 +435,7 @@ def write_csv(results: list[dict], path: Path) -> None:
     logger.info("CSV: %s", path)
 
 
-def write_config_snapshot(cfg: dict, sys_info: dict, path: Path) -> None:
+def write_config_snapshot(cfg: dict[str, Any], sys_info: dict[str, Any], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     snapshot = {"config": cfg, "system": sys_info}
     with open(path, "w") as f:
@@ -445,10 +444,10 @@ def write_config_snapshot(cfg: dict, sys_info: dict, path: Path) -> None:
 
 
 def write_report(
-    results: list[dict],
+    results: list[dict[str, Any]],
     path: Path,
-    sys_info: dict,
-    cfg: dict,
+    sys_info: dict[str, Any],
+    cfg: dict[str, Any],
     run_id: str,
 ) -> None:
     """Write a markdown report with raw tables, time/gap analysis, and conclusions."""
@@ -457,19 +456,15 @@ def write_report(
     methods: list[str] = cfg["methods"]
     instances_order = list(dict.fromkeys(r["instance"] for r in results))
 
-    def _fmt(v) -> str:
+    def _fmt(v) -> str:  # type: ignore[no-untyped-def]
         return str(v) if v is not None else "—"
 
     with open(path, "w", encoding="utf-8") as f:
-
         # --- Header ---
         f.write("# Benders Variants General Benchmark\n\n")
         f.write(f"**Run ID:** `{run_id}`  \n")
         f.write(f"**Date:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  \n")
-        f.write(
-            f"**Hardware:** {sys_info['cpu_model']} / "
-            f"{sys_info['ram_gb']} GB / {sys_info['platform']}  \n"
-        )
+        f.write(f"**Hardware:** {sys_info['cpu_model']} / {sys_info['ram_gb']} GB / {sys_info['platform']}  \n")
         f.write("**Solver:** Gurobi 13.0.1 (deterministic: Seed=0, Threads=1)  \n")
         f.write(
             f"**Protocol:** FR-9 — time limit {cfg['time_limit']} s, "
@@ -498,12 +493,8 @@ def write_report(
         f.write("## Raw Results\n\n")
         for inst in instances_order:
             f.write(f"### {inst}\n\n")
-            f.write(
-                "| Method | n_nodes | Root LP | Final IP | Gap (%) | Time (s) | Nodes | Status |\n"
-            )
-            f.write(
-                "|--------|---------|---------|----------|---------|----------|-------|--------|\n"
-            )
+            f.write("| Method | n_nodes | Root LP | Final IP | Gap (%) | Time (s) | Nodes | Status |\n")
+            f.write("|--------|---------|---------|----------|---------|----------|-------|--------|\n")
             for r in results:
                 if r["instance"] != inst:
                     continue
@@ -518,13 +509,9 @@ def write_report(
         f.write("## Time Analysis\n\n")
         f.write("| Method | Total (s) | Avg (s) | Max (s) | Solved |\n")
         f.write("|--------|----------|---------|---------|--------|\n")
-        time_by_method: dict[str, dict] = {}
+        time_by_method: dict[str, dict[str, Any]] = {}
         for method in methods:
-            times = [
-                r["time_s"]
-                for r in results
-                if r["method"] == method and r["time_s"] is not None
-            ]
+            times = [r["time_s"] for r in results if r["method"] == method and r["time_s"] is not None]
             solved = len(times)
             if times:
                 stats = {
@@ -537,8 +524,7 @@ def write_report(
                 stats = {"total": 0.0, "avg": 0.0, "max": 0.0, "solved": 0}
             time_by_method[method] = stats
             f.write(
-                f"| `{method}` | {stats['total']:.2f} | {stats['avg']:.2f} | "
-                f"{stats['max']:.2f} | {stats['solved']} |\n"
+                f"| `{method}` | {stats['total']:.2f} | {stats['avg']:.2f} | {stats['max']:.2f} | {stats['solved']} |\n"
             )
         f.write("\n")
 
@@ -547,17 +533,11 @@ def write_report(
         f.write("| Method | Median Gap (%) | Max Gap (%) | Solved |\n")
         f.write("|--------|---------------|------------|--------|\n")
         for method in methods:
-            gaps = [
-                r["gap_pct"]
-                for r in results
-                if r["method"] == method and r["gap_pct"] is not None
-            ]
+            gaps = [r["gap_pct"] for r in results if r["method"] == method and r["gap_pct"] is not None]
             if gaps:
                 sorted_gaps = sorted(gaps)
                 median = sorted_gaps[len(sorted_gaps) // 2]
-                f.write(
-                    f"| `{method}` | {median:.4f} | {max(gaps):.4f} | {len(gaps)} |\n"
-                )
+                f.write(f"| `{method}` | {median:.4f} | {max(gaps):.4f} | {len(gaps)} |\n")
             else:
                 f.write(f"| `{method}` | — | — | 0 |\n")
         f.write("\n")
@@ -572,14 +552,10 @@ def write_report(
             ratio = label_time / baseline
             pct = (ratio - 1.0) * 100
             if ratio > 1.2:
-                return (
-                    f"- `{label}` is **{pct:.0f}% slower** than `farkas` "
-                    f"({label_time:.1f}s vs {baseline:.1f}s).\n"
-                )
+                return f"- `{label}` is **{pct:.0f}% slower** than `farkas` ({label_time:.1f}s vs {baseline:.1f}s).\n"
             elif ratio < 0.8:
                 return (
-                    f"- `{label}` is **{abs(pct):.0f}% faster** than `farkas` "
-                    f"({label_time:.1f}s vs {baseline:.1f}s).\n"
+                    f"- `{label}` is **{abs(pct):.0f}% faster** than `farkas` ({label_time:.1f}s vs {baseline:.1f}s).\n"
                 )
             else:
                 return (
@@ -593,10 +569,7 @@ def write_report(
             t = time_by_method.get(method, {}).get("total", 0.0)
             f.write(_overhead_line(method, t, baseline_time))
 
-        f.write(
-            "\n> Refer to the CSV for per-instance detail and the config JSON "
-            "for full reproducibility metadata.\n"
-        )
+        f.write("\n> Refer to the CSV for per-instance detail and the config JSON for full reproducibility metadata.\n")
 
     logger.info("Report: %s", path)
 
@@ -604,6 +577,7 @@ def write_report(
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(
@@ -654,11 +628,13 @@ def main() -> int:
     total_runs = len(instances) * len(methods)
     logger.info(
         "Starting: %d instance(s) × %d method(s) = %d solves",
-        len(instances), len(methods), total_runs,
+        len(instances),
+        len(methods),
+        total_runs,
     )
 
     # ---- Run all combinations ----
-    results: list[dict] = []
+    results: list[dict[str, Any]] = []
     completed = 0
 
     for instance_path in instances:

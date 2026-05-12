@@ -8,7 +8,7 @@ from utils.geometry import iter_directed_crossing_pairs
 class TestIterDirectedCrossingPairs:
     """Test the iter_directed_crossing_pairs helper function."""
 
-    def test_iter_directed_crossing_pairs_basic(self):
+    def test_iter_directed_crossing_pairs_basic(self) -> None:
         """Test basic expansion of a single crossing pair."""
         # Create a (1, 4) array: one crossing pair (a=2, b=1, c=4, d=3)
         crossing = np.array([[2, 1, 4, 3]], dtype=np.int64)
@@ -23,13 +23,13 @@ class TestIterDirectedCrossingPairs:
         ]
         assert result == expected, f"Expected {expected}, got {result}"
 
-    def test_iter_directed_crossing_pairs_empty(self):
+    def test_iter_directed_crossing_pairs_empty(self) -> None:
         """Test with an empty crossing array."""
         crossing = np.empty((0, 4), dtype=np.int64)
         result = list(iter_directed_crossing_pairs(crossing))
         assert result == [], f"Expected empty list, got {result}"
 
-    def test_iter_directed_crossing_pairs_multiple(self):
+    def test_iter_directed_crossing_pairs_multiple(self) -> None:
         """Test with multiple crossing pairs."""
         # Two crossing pairs
         crossing = np.array(
@@ -56,7 +56,7 @@ class TestIterDirectedCrossingPairs:
         assert result[6] == ((5, 0), (6, 7)), f"Row 1, combo 2: got {result[6]}"
         assert result[7] == ((0, 5), (7, 6)), f"Row 1, combo 3: got {result[7]}"
 
-    def test_iter_directed_crossing_pairs_order(self):
+    def test_iter_directed_crossing_pairs_order(self) -> None:
         """Test that yield order is deterministic and correct."""
         crossing = np.array([[10, 5, 8, 3]], dtype=np.int64)
         result = list(iter_directed_crossing_pairs(crossing))
@@ -67,7 +67,7 @@ class TestIterDirectedCrossingPairs:
         assert result[2] == ((10, 5), (3, 8)), "Third should be F/R"
         assert result[3] == ((5, 10), (8, 3)), "Fourth should be R/F"
 
-    def test_iter_directed_crossing_pairs_is_generator(self):
+    def test_iter_directed_crossing_pairs_is_generator(self) -> None:
         """Test that the function returns a generator, not a list."""
         crossing = np.array([[2, 1, 4, 3]], dtype=np.int64)
         result = iter_directed_crossing_pairs(crossing)

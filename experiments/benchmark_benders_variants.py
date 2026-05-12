@@ -15,6 +15,7 @@ Protocol (FR-9):
 Invocation:
   .venv/bin/python experiments/benchmark_benders_variants.py
 """
+
 from __future__ import annotations
 
 import csv
@@ -39,10 +40,12 @@ logger = logging.getLogger(__name__)
 REPO_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
+from typing import Any
+
 from utils.utils import compute_triangles, read_indexed_instance
 
 
-def get_system_info() -> dict:
+def get_system_info() -> dict[str, Any]:
     """Capture hardware and environment info per FR-9."""
     try:
         cpu_info = subprocess.check_output("wmic cpu get name", shell=True).decode()
@@ -52,9 +55,7 @@ def get_system_info() -> dict:
 
     try:
         ram_info = subprocess.check_output("wmic MemoryChip get Capacity", shell=True)
-        total_ram_bytes = sum(
-            int(x) for x in ram_info.decode().split("\n")[1:] if x.strip()
-        )
+        total_ram_bytes = sum(int(x) for x in ram_info.decode().split("\n")[1:] if x.strip())
         ram_gb = total_ram_bytes / (1024**3)
     except Exception:
         ram_gb = 0.0
@@ -72,7 +73,7 @@ def run_single_solve(
     instance_path: str,
     method: str,
     time_limit: int = 60000,
-) -> dict:
+) -> dict[str, Any]:
     """
     Run a single solve with one Benders method.
 
@@ -87,16 +88,12 @@ def run_single_solve(
     try:
         from models import OAPBendersModel
 
-        logger.info(
-            f"Running {method.upper()} on {Path(instance_path).name} (limit={time_limit}s)"
-        )
+        logger.info(f"Running {method.upper()} on {Path(instance_path).name} (limit={time_limit}s)")
 
         points = read_indexed_instance(instance_path)
         triangles = compute_triangles(points)
 
-        model = OAPBendersModel(
-            points, triangles, name=f"bench-{Path(instance_path).stem}-{method}"
-        )
+        model = OAPBendersModel(points, triangles, name=f"bench-{Path(instance_path).stem}-{method}")
 
         # Configure based on method
         use_deepest = method == "deepest"
@@ -105,7 +102,7 @@ def run_single_solve(
         model.build(
             objective="Fekete",
             maximize=True,
-            benders_method=benders_method,
+            benders_method=benders_method,  # type: ignore[arg-type]
             use_deepest_cuts=use_deepest,
         )
 
@@ -141,7 +138,7 @@ def run_single_solve(
         }
 
 
-def main():
+def main():  # type: ignore[no-untyped-def]
     """Run benchmark suite and generate reports."""
     # Validate instance files exist
     instances = [
@@ -201,17 +198,13 @@ def main():
     logger.info(f"CSV output: {csv_path}")
 
     # Generate markdown report
-    report_path = (
-        REPO_ROOT / "context" / "notes" / "2026-04-30-cgsp-benchmark-results.md"
-    )
+    report_path = REPO_ROOT / "context" / "notes" / "2026-04-30-cgsp-benchmark-results.md"
     report_path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(report_path, "w") as f:
         f.write("# CGSP Benchmark Results\n\n")
         f.write(f"**Date:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write(
-            f"**Hardware:** {sys_info['cpu_model']} / {sys_info['ram_gb']}GB / {sys_info['platform']}\n"
-        )
+        f.write(f"**Hardware:** {sys_info['cpu_model']} / {sys_info['ram_gb']}GB / {sys_info['platform']}\n")
         f.write(f"**Solver:** Gurobi 13.0.1 (deterministic: Seed=0, Threads=1)\n")
         f.write(f"**Time Limit:** 60,000 s (FR-9 / HP25 protocol)\n\n")
 
@@ -238,11 +231,7 @@ def main():
         # Time per method
         time_by_method = {}
         for method in methods:
-            times = [
-                r["time_s"]
-                for r in results
-                if r["method"] == method.upper() and r["time_s"] is not None
-            ]
+            times = [r["time_s"] for r in results if r["method"] == method.upper() and r["time_s"] is not None]
             if times:
                 time_by_method[method] = {
                     "total": sum(times),
@@ -260,14 +249,10 @@ def main():
         # Gap analysis
         f.write("### Gap Analysis\n\n")
         for method in methods:
-            gaps = [
-                r["gap_pct"]
-                for r in results
-                if r["method"] == method.upper() and r["gap_pct"] is not None
-            ]
+            gaps = [r["gap_pct"] for r in results if r["method"] == method.upper() and r["gap_pct"] is not None]
             if gaps:
                 f.write(
-                    f"- **{method.upper()}**: median gap = {sorted(gaps)[len(gaps)//2]:.2f}%, "
+                    f"- **{method.upper()}**: median gap = {sorted(gaps)[len(gaps) // 2]:.2f}%, "
                     f"max gap = {max(gaps):.2f}%\n"
                 )
         f.write("\n")
@@ -281,16 +266,12 @@ def main():
 
         if deepest_time > farkas_time * 1.2:
             f.write(
-                f"- **CGSP overhead detected**: Deepest-Cuts {deepest_time:.0f}s > Farkas {farkas_time:.0f}s (+{((deepest_time/farkas_time)-1)*100:.0f}%)\n"
+                f"- **CGSP overhead detected**: Deepest-Cuts {deepest_time:.0f}s > Farkas {farkas_time:.0f}s (+{((deepest_time / farkas_time) - 1) * 100:.0f}%)\n"
             )
         else:
-            f.write(
-                f"- **CGSP overhead minimal**: Deepest-Cuts {deepest_time:.0f}s ≈ Farkas {farkas_time:.0f}s\n"
-            )
+            f.write(f"- **CGSP overhead minimal**: Deepest-Cuts {deepest_time:.0f}s ≈ Farkas {farkas_time:.0f}s\n")
 
-        f.write(
-            "- Refer to CSV output for detailed metrics per instance and method.\n"
-        )
+        f.write("- Refer to CSV output for detailed metrics per instance and method.\n")
 
     logger.info(f"Report: {report_path}")
 
@@ -298,4 +279,4 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main())  # type: ignore[no-untyped-call]

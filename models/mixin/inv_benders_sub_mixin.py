@@ -7,6 +7,7 @@ checks whether a consistent Hamiltonian tour x exists.  Infeasibility yields
 a Farkas ray whose coefficients are translated back into a linear cut on
 (y, yp) and injected into the master as a lazy constraint.
 """
+
 from __future__ import annotations
 
 import logging
@@ -15,9 +16,8 @@ from typing import Any
 import gurobipy as gp
 from gurobipy import GRB
 
-from utils.benders_log import log_inv_benders_cut
-
 from models.typing_oap import IndexArray, NumericArray, TrianglesAdjList
+from utils.benders_log import log_inv_benders_cut
 
 logger = logging.getLogger(__name__)
 
@@ -51,15 +51,15 @@ class InvBendersSubMixin:
     triangles_adj_list: TrianglesAdjList
 
     # provided by InvBendersMasterMixin
-    y:  dict[int, gp.Var]
+    y: dict[int, gp.Var]
     yp: dict[int, gp.Var]
 
     # provided by OAPInverseBendersModel.__init__
-    sub_x:      gp.Model
+    sub_x: gp.Model
     constrs_sub: dict[str, dict[Arc, gp.Constr]]
-    iteration:  int
-    log_path:   str
-    save_cuts:  bool
+    iteration: int
+    log_path: str
+    save_cuts: bool
 
     # sub_x internal variable dicts (not master vars)
     _sub_x_vars: dict[Arc, gp.Var]
@@ -76,18 +76,19 @@ class InvBendersSubMixin:
         # 1. Gurobi params for Farkas extraction.
         #    Presolve MUST be 0: presolve transformations can suppress or
         #    alter the Farkas ray, producing zero-duals and silent infinite loops.
-        self.sub_x.Params.InfUnbdInfo    = 1
+        self.sub_x.Params.InfUnbdInfo = 1
         self.sub_x.Params.DualReductions = 0
-        self.sub_x.Params.Presolve       = 0
+        self.sub_x.Params.Presolve = 0
 
         # 2. Create x and f variables (continuous, bounded [0,1] and [0,∞))
         self._sub_x_vars = {
             (i, j): self.sub_x.addVar(lb=0.0, ub=1.0, name=f"x_{i}_{j}")
-            for i in self.N_list for j in self.N_list if i != j
+            for i in self.N_list
+            for j in self.N_list
+            if i != j
         }
         self._sub_f_vars = {
-            (i, j): self.sub_x.addVar(lb=0.0, name=f"f_{i}_{j}")
-            for i in self.N_list for j in self.N_list if i != j
+            (i, j): self.sub_x.addVar(lb=0.0, name=f"f_{i}_{j}") for i in self.N_list for j in self.N_list if i != j
         }
 
         # 3. CH arc pruning — exact same logic as OAPBuilderMixin._create_variables
@@ -96,8 +97,7 @@ class InvBendersSubMixin:
                 if i == 0 and j == len(self.CH) - 1:
                     continue
                 for var_dict in [self._sub_x_vars, self._sub_f_vars]:
-                    for key in [(self.CH[i], self.CH[j]),
-                                (self.CH[j], self.CH[i])]:
+                    for key in [(self.CH[i], self.CH[j]), (self.CH[j], self.CH[i])]:
                         if key in var_dict:
                             self.sub_x.remove(var_dict[key])
                             var_dict.pop(key)
@@ -105,53 +105,44 @@ class InvBendersSubMixin:
         for i in range(len(self.CH)):
             j = (i + 1) % len(self.CH)
             for var_dict in [self._sub_x_vars, self._sub_f_vars]:
-                key = (self.CH[j], self.CH[i])   # CW arc — forbidden
+                key = (self.CH[j], self.CH[i])  # CW arc — forbidden
                 if key in var_dict:
                     self.sub_x.remove(var_dict[key])
                     var_dict.pop(key)
 
         # 4. Initialise constraint storage
         self.constrs_sub = {
-            'alpha':   {},
-            'alpha_p': {},
-            'beta':    {},
-            'beta_p':  {},
-            'gamma':   {},
-            'delta':   {},
-            'gamma_p': {},
-            'delta_p': {},
+            "alpha": {},
+            "alpha_p": {},
+            "beta": {},
+            "beta_p": {},
+            "gamma": {},
+            "delta": {},
+            "gamma_p": {},
+            "delta_p": {},
         }
 
         # 5. Degree constraints (no y/yp dependency — RHS never changes)
         for i in self.N_list:
-            out_arcs = [self._sub_x_vars[i, j]
-                        for j in self.N_list if j != i and (i, j) in self._sub_x_vars]
-            in_arcs  = [self._sub_x_vars[j, i]
-                        for j in self.N_list if j != i and (j, i) in self._sub_x_vars]
+            out_arcs = [self._sub_x_vars[i, j] for j in self.N_list if j != i and (i, j) in self._sub_x_vars]
+            in_arcs = [self._sub_x_vars[j, i] for j in self.N_list if j != i and (j, i) in self._sub_x_vars]
             if out_arcs:
-                self.sub_x.addConstr(gp.quicksum(out_arcs) == 1,
-                                     name=f"sub_deg_out_{i}")
+                self.sub_x.addConstr(gp.quicksum(out_arcs) == 1, name=f"sub_deg_out_{i}")
             if in_arcs:
-                self.sub_x.addConstr(gp.quicksum(in_arcs) == 1,
-                                     name=f"sub_deg_in_{i}")
+                self.sub_x.addConstr(gp.quicksum(in_arcs) == 1, name=f"sub_deg_in_{i}")
 
         # 6. SCF subtour constraints (no y/yp dependency)
         M = self.N - 1
         for i in self.N_list:
             if i != 0:
-                in_flow  = gp.quicksum(
-                    self._sub_f_vars[j, i]
-                    for j in self.N_list
-                    if j != i and (j, i) in self._sub_f_vars
+                in_flow = gp.quicksum(
+                    self._sub_f_vars[j, i] for j in self.N_list if j != i and (j, i) in self._sub_f_vars
                 )
                 out_flow = gp.quicksum(
-                    self._sub_f_vars[i, j]
-                    for j in self.N_list
-                    if j != i and (i, j) in self._sub_f_vars
+                    self._sub_f_vars[i, j] for j in self.N_list if j != i and (i, j) in self._sub_f_vars
                 )
-                self.sub_x.addConstr(in_flow - out_flow == 1,
-                                     name=f"sub_flow_{i}")
-        for (i, j) in self._sub_x_vars:
+                self.sub_x.addConstr(in_flow - out_flow == 1, name=f"sub_flow_{i}")
+        for i, j in self._sub_x_vars:
             self.sub_x.addConstr(
                 self._sub_f_vars[i, j] <= M * self._sub_x_vars[i, j],
                 name=f"sub_flow_cap_{i}_{j}",
@@ -163,8 +154,7 @@ class InvBendersSubMixin:
         self._add_bound_constrs()
 
         self.sub_x.update()
-        print(f"  sub_x LP: {self.sub_x.NumVars} vars, "
-              f"{self.sub_x.NumConstrs} constraints.")
+        print(f"  sub_x LP: {self.sub_x.NumVars} vars, {self.sub_x.NumConstrs} constraints.")
 
     # ------------------------------------------------------------------
     # Constraint builders (called once from build_inv_sub)
@@ -179,13 +169,9 @@ class InvBendersSubMixin:
                 continue
             x_ab = self._sub_x_vars[a, b]
             # α : x_{ab} = c_{ab}       (RHS updated from y*)
-            self.constrs_sub['alpha'][a, b] = self.sub_x.addConstr(
-                x_ab == 0.0, name=f"sub_alpha_{a}_{b}"
-            )
+            self.constrs_sub["alpha"][a, b] = self.sub_x.addConstr(x_ab == 0.0, name=f"sub_alpha_{a}_{b}")
             # α': x_{ab} = 1 − cp_{ab}  (RHS updated from yp*)
-            self.constrs_sub['alpha_p'][a, b] = self.sub_x.addConstr(
-                x_ab == 1.0, name=f"sub_alpha_p_{a}_{b}"
-            )
+            self.constrs_sub["alpha_p"][a, b] = self.sub_x.addConstr(x_ab == 1.0, name=f"sub_alpha_p_{a}_{b}")
 
     def _add_beta_constrs(self) -> None:
         """β and β' balance constraints for non-CH arcs (i<j)."""
@@ -200,13 +186,9 @@ class InvBendersSubMixin:
                     continue
                 diff = self._sub_x_vars[i, j] - self._sub_x_vars[j, i]
                 # β : x_{ij}−x_{ji} = c_{ij}−c_{ji}   (from y*)
-                self.constrs_sub['beta'][i, j] = self.sub_x.addConstr(
-                    diff == 0.0, name=f"sub_beta_{i}_{j}"
-                )
+                self.constrs_sub["beta"][i, j] = self.sub_x.addConstr(diff == 0.0, name=f"sub_beta_{i}_{j}")
                 # β': x_{ij}−x_{ji} = cp_{ji}−cp_{ij} (from yp*)
-                self.constrs_sub['beta_p'][i, j] = self.sub_x.addConstr(
-                    diff == 0.0, name=f"sub_beta_p_{i}_{j}"
-                )
+                self.constrs_sub["beta_p"][i, j] = self.sub_x.addConstr(diff == 0.0, name=f"sub_beta_p_{i}_{j}")
 
     def _add_bound_constrs(self) -> None:
         """γ, δ, γ', δ' upper-bound constraints for non-CH arcs (i≠j)."""
@@ -221,23 +203,19 @@ class InvBendersSubMixin:
                     continue
                 x_ij = self._sub_x_vars[i, j]
                 # γ : x_{ij} ≤ c_{ij}
-                self.constrs_sub['gamma'][i, j] = self.sub_x.addConstr(
-                    x_ij <= 0.0, name=f"sub_gamma_{i}_{j}"
-                )
+                self.constrs_sub["gamma"][i, j] = self.sub_x.addConstr(x_ij <= 0.0, name=f"sub_gamma_{i}_{j}")
                 # δ : x_{ji} ≤ 1 − c_{ij}   (bounds x_{ji} using y* for arc i→j)
                 if (j, i) in self._sub_x_vars:
-                    self.constrs_sub['delta'][i, j] = self.sub_x.addConstr(
+                    self.constrs_sub["delta"][i, j] = self.sub_x.addConstr(
                         self._sub_x_vars[j, i] <= 1.0, name=f"sub_delta_{i}_{j}"
                     )
                 # γ': x_{ji} ≤ cp_{ij}
                 if (j, i) in self._sub_x_vars:
-                    self.constrs_sub['gamma_p'][i, j] = self.sub_x.addConstr(
+                    self.constrs_sub["gamma_p"][i, j] = self.sub_x.addConstr(
                         self._sub_x_vars[j, i] <= 0.0, name=f"sub_gamma_p_{i}_{j}"
                     )
                 # δ': x_{ij} ≤ 1 − cp_{ij}
-                self.constrs_sub['delta_p'][i, j] = self.sub_x.addConstr(
-                    x_ij <= 1.0, name=f"sub_delta_p_{i}_{j}"
-                )
+                self.constrs_sub["delta_p"][i, j] = self.sub_x.addConstr(x_ij <= 1.0, name=f"sub_delta_p_{i}_{j}")
 
     # ------------------------------------------------------------------
     # RHS update
@@ -245,7 +223,7 @@ class InvBendersSubMixin:
 
     def update_sub_rhs(
         self,
-        y_sol:  dict[int, float],
+        y_sol: dict[int, float],
         yp_sol: dict[int, float],
     ) -> None:
         """Update every parameterised RHS using the current master solution.
@@ -267,35 +245,35 @@ class InvBendersSubMixin:
             return sum(yp_sol[t] for t in ta[i][j])
 
         # α
-        for (a, b), constr in self.constrs_sub['alpha'].items():
+        for (a, b), constr in self.constrs_sub["alpha"].items():
             constr.RHS = c(a, b)
 
         # α'
-        for (a, b), constr in self.constrs_sub['alpha_p'].items():
+        for (a, b), constr in self.constrs_sub["alpha_p"].items():
             constr.RHS = 1.0 - cp(a, b)
 
         # β
-        for (i, j), constr in self.constrs_sub['beta'].items():
+        for (i, j), constr in self.constrs_sub["beta"].items():
             constr.RHS = c(i, j) - c(j, i)
 
         # β'
-        for (i, j), constr in self.constrs_sub['beta_p'].items():
+        for (i, j), constr in self.constrs_sub["beta_p"].items():
             constr.RHS = cp(j, i) - cp(i, j)
 
         # γ
-        for (i, j), constr in self.constrs_sub['gamma'].items():
+        for (i, j), constr in self.constrs_sub["gamma"].items():
             constr.RHS = c(i, j)
 
         # δ
-        for (i, j), constr in self.constrs_sub['delta'].items():
+        for (i, j), constr in self.constrs_sub["delta"].items():
             constr.RHS = 1.0 - c(i, j)
 
         # γ'
-        for (i, j), constr in self.constrs_sub['gamma_p'].items():
+        for (i, j), constr in self.constrs_sub["gamma_p"].items():
             constr.RHS = cp(i, j)
 
         # δ'
-        for (i, j), constr in self.constrs_sub['delta_p'].items():
+        for (i, j), constr in self.constrs_sub["delta_p"].items():
             constr.RHS = 1.0 - cp(i, j)
 
     # ------------------------------------------------------------------
@@ -304,7 +282,7 @@ class InvBendersSubMixin:
 
     def get_farkas_cut(
         self,
-        y_sol:  dict[int, float],
+        y_sol: dict[int, float],
         yp_sol: dict[int, float],
         TOL: float = 1e-10,
     ) -> tuple[gp.LinExpr, float]:
@@ -331,97 +309,101 @@ class InvBendersSubMixin:
 
         ta = self.triangles_adj_list
         cut_expr = gp.LinExpr()
-        cut_val  = 0.0
+        cut_val = 0.0
 
         v_comps: RayComponents = {
-            'alpha':   {}, 'alpha_p': {},
-            'beta':    {}, 'beta_p':  {},
-            'gamma':   {}, 'delta':   {},
-            'gamma_p': {}, 'delta_p': {},
+            "alpha": {},
+            "alpha_p": {},
+            "beta": {},
+            "beta_p": {},
+            "gamma": {},
+            "delta": {},
+            "gamma_p": {},
+            "delta_p": {},
         }
 
         # --- α : RHS = c_{ab} = Σ_t ta[a][b] · y_t ---
-        for (a, b), constr in self.constrs_sub['alpha'].items():
+        for (a, b), constr in self.constrs_sub["alpha"].items():
             lam = constr.FarkasDual
             if abs(lam) > TOL:
-                v_comps['alpha'][a, b] = lam
+                v_comps["alpha"][a, b] = lam  # type: ignore[index]
                 for t in ta[a][b]:
                     cut_expr += lam * self.y[t]
-                    cut_val  += lam * y_sol[t]
+                    cut_val += lam * y_sol[t]
 
         # --- α': RHS = 1 − cp_{ab} = 1 − Σ_t ta[a][b] · yp_t ---
-        for (a, b), constr in self.constrs_sub['alpha_p'].items():
+        for (a, b), constr in self.constrs_sub["alpha_p"].items():
             lam = constr.FarkasDual
             if abs(lam) > TOL:
-                v_comps['alpha_p'][a, b] = lam
-                cut_expr += lam               # constant +λ·1
+                v_comps["alpha_p"][a, b] = lam  # type: ignore[index]
+                cut_expr += lam  # constant +λ·1
                 for t in ta[a][b]:
                     cut_expr -= lam * self.yp[t]
-                    cut_val  -= lam * yp_sol[t]
+                    cut_val -= lam * yp_sol[t]
                 cut_val += lam
 
         # --- β : RHS = c_{ij}−c_{ji} ---
-        for (i, j), constr in self.constrs_sub['beta'].items():
+        for (i, j), constr in self.constrs_sub["beta"].items():
             lam = constr.FarkasDual
             if abs(lam) > TOL:
-                v_comps['beta'][i, j] = lam
+                v_comps["beta"][i, j] = lam  # type: ignore[index]
                 for t in ta[i][j]:
                     cut_expr += lam * self.y[t]
-                    cut_val  += lam * y_sol[t]
+                    cut_val += lam * y_sol[t]
                 for t in ta[j][i]:
                     cut_expr -= lam * self.y[t]
-                    cut_val  -= lam * y_sol[t]
+                    cut_val -= lam * y_sol[t]
 
         # --- β': RHS = cp_{ji}−cp_{ij} ---
-        for (i, j), constr in self.constrs_sub['beta_p'].items():
+        for (i, j), constr in self.constrs_sub["beta_p"].items():
             lam = constr.FarkasDual
             if abs(lam) > TOL:
-                v_comps['beta_p'][i, j] = lam
+                v_comps["beta_p"][i, j] = lam  # type: ignore[index]
                 for t in ta[j][i]:
                     cut_expr += lam * self.yp[t]
-                    cut_val  += lam * yp_sol[t]
+                    cut_val += lam * yp_sol[t]
                 for t in ta[i][j]:
                     cut_expr -= lam * self.yp[t]
-                    cut_val  -= lam * yp_sol[t]
+                    cut_val -= lam * yp_sol[t]
 
         # --- γ : RHS = c_{ij} = Σ_t ta[i][j] · y_t ---
-        for (i, j), constr in self.constrs_sub['gamma'].items():
+        for (i, j), constr in self.constrs_sub["gamma"].items():
             lam = constr.FarkasDual
             if abs(lam) > TOL:
-                v_comps['gamma'][i, j] = lam
+                v_comps["gamma"][i, j] = lam  # type: ignore[index]
                 for t in ta[i][j]:
                     cut_expr += lam * self.y[t]
-                    cut_val  += lam * y_sol[t]
+                    cut_val += lam * y_sol[t]
 
         # --- δ : RHS = 1 − c_{ij} ---
-        for (i, j), constr in self.constrs_sub['delta'].items():
+        for (i, j), constr in self.constrs_sub["delta"].items():
             lam = constr.FarkasDual
             if abs(lam) > TOL:
-                v_comps['delta'][i, j] = lam
-                cut_expr += lam               # constant +λ·1
+                v_comps["delta"][i, j] = lam  # type: ignore[index]
+                cut_expr += lam  # constant +λ·1
                 for t in ta[i][j]:
                     cut_expr -= lam * self.y[t]
-                    cut_val  -= lam * y_sol[t]
+                    cut_val -= lam * y_sol[t]
                 cut_val += lam
 
         # --- γ': RHS = cp_{ij} = Σ_t ta[i][j] · yp_t ---
-        for (i, j), constr in self.constrs_sub['gamma_p'].items():
+        for (i, j), constr in self.constrs_sub["gamma_p"].items():
             lam = constr.FarkasDual
             if abs(lam) > TOL:
-                v_comps['gamma_p'][i, j] = lam
+                v_comps["gamma_p"][i, j] = lam  # type: ignore[index]
                 for t in ta[i][j]:
                     cut_expr += lam * self.yp[t]
-                    cut_val  += lam * yp_sol[t]
+                    cut_val += lam * yp_sol[t]
 
         # --- δ': RHS = 1 − cp_{ij} ---
-        for (i, j), constr in self.constrs_sub['delta_p'].items():
+        for (i, j), constr in self.constrs_sub["delta_p"].items():
             lam = constr.FarkasDual
             if abs(lam) > TOL:
-                v_comps['delta_p'][i, j] = lam
-                cut_expr += lam               # constant +λ·1
+                v_comps["delta_p"][i, j] = lam  # type: ignore[index]
+                cut_expr += lam  # constant +λ·1
                 for t in ta[i][j]:
                     cut_expr -= lam * self.yp[t]
-                    cut_val  -= lam * yp_sol[t]
+                    cut_val -= lam * yp_sol[t]
                 cut_val += lam
 
         # Determine cut sense for logging
@@ -431,9 +413,7 @@ class InvBendersSubMixin:
         elif cut_val < -TOL:
             sense = ">="
 
-        self._log_and_print_inv_farkas(
-            v_comps, cut_val, TOL, y_sol, yp_sol, cut_expr, sense
-        )
+        self._log_and_print_inv_farkas(v_comps, cut_val, TOL, y_sol, yp_sol, cut_expr, sense)
         return cut_expr, cut_val
 
     # ------------------------------------------------------------------
@@ -443,41 +423,41 @@ class InvBendersSubMixin:
     def _log_and_print_inv_farkas(
         self,
         v_components: RayComponents,
-        cut_val:  float,
-        TOL:      float,
-        y_sol:    dict[int, float],
-        yp_sol:   dict[int, float],
+        cut_val: float,
+        TOL: float,
+        y_sol: dict[int, float],
+        yp_sol: dict[int, float],
         cut_expr: gp.LinExpr,
-        sense:    str | None,
+        sense: str | None,
     ) -> None:
         """Log a Farkas cut to the Python logger and (if save_cuts) to JSONL."""
-        verbose   = getattr(self, 'verbose',   False)
-        save_cuts = getattr(self, 'save_cuts', False)
+        verbose = getattr(self, "verbose", False)
+        save_cuts = getattr(self, "save_cuts", False)
 
         if verbose:
             log_lines = [
-                f"\n{'='*55}",
+                f"\n{'=' * 55}",
                 f"INV-BENDERS FARKAS CUT  (iter {self.iteration})",
                 f"  cut_val = {cut_val:.6f}   sense = {sense}",
             ]
             for comp, vals in v_components.items():
                 if vals and isinstance(vals, dict):
                     log_lines.append(f"  {comp}: { {str(k): round(v, 4) for k, v in vals.items()} }")
-            log_lines.append('='*55)
+            log_lines.append("=" * 55)
             logger.info("\n".join(log_lines))
 
-        if save_cuts and hasattr(self, 'log_path') and self.log_path:
+        if save_cuts and hasattr(self, "log_path") and self.log_path:
             # Use 0.5 to filter active binary (y/yp) values, NOT the Farkas
             # dual tolerance — these are master solution values, not dual coefficients.
             log_inv_benders_cut(
-                filepath       = self.log_path,
-                iteration      = self.iteration,
-                node_depth     = 0,
-                y_sol          = y_sol,
-                yp_sol         = yp_sol,
-                v_components   = v_components,
-                cut_value      = cut_val,
-                tolerance      = 0.5,
-                cut_expr       = cut_expr,
-                sense          = sense,
+                filepath=self.log_path,
+                iteration=self.iteration,
+                node_depth=0,
+                y_sol=y_sol,
+                yp_sol=yp_sol,
+                v_components=v_components,
+                cut_value=cut_val,
+                tolerance=0.5,
+                cut_expr=cut_expr,
+                sense=sense,
             )

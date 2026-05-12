@@ -12,40 +12,6 @@ This file re-exports every public name so that the 22 existing import sites
 Do **not** add logic here.
 """
 
-from utils.geometry import (
-    Arc,
-    PointLookup,
-    are_triangles_incompatible,
-    compute_convex_hull,
-    compute_convex_hull_area,
-    compute_crossing_edges,
-    compute_triangles,
-    iter_directed_crossing_pairs,
-    contains_proper,
-    cost_function_area,
-    extract_metric_to_csv,
-    incompatible_triangles,
-    is_colineal,
-    minimal_triangle_adjency_list,
-    orientation_2d,
-    point_in_triangle,
-    read_data,
-    read_indexed_instance,
-    segments_intersect,
-    signed_area,
-    triangles_adjacency_list,
-    triangles_area,
-    write_prefile,
-)
-from utils.constraints import (
-    ArcConstraintMap,
-    aplicar_semiplanos_por_capas,
-    inyectar_cliques_de_cruce,
-    inyectar_cortes_knapsack_locales,
-    restricciones_semiplano,
-    restricciones_semiplano_chain,
-    restricciones_semiplanoV2,
-)
 from utils.benders_log import (
     SerializedCoeffMap,
     SerializedExpr,
@@ -56,6 +22,40 @@ from utils.benders_log import (
     log_inv_benders_cut,
     parse_edge,
     serialize_expr,
+)
+from utils.constraints import (
+    ArcConstraintMap,
+    aplicar_semiplanos_por_capas,
+    inyectar_cliques_de_cruce,
+    inyectar_cortes_knapsack_locales,
+    restricciones_semiplano,
+    restricciones_semiplano_chain,
+    restricciones_semiplanoV2,
+)
+from utils.geometry import (
+    Arc,
+    PointLookup,
+    are_triangles_incompatible,
+    compute_convex_hull,
+    compute_convex_hull_area,
+    compute_crossing_edges,
+    compute_triangles,
+    contains_proper,
+    cost_function_area,
+    extract_metric_to_csv,
+    incompatible_triangles,
+    is_colineal,
+    iter_directed_crossing_pairs,
+    minimal_triangle_adjency_list,
+    orientation_2d,
+    point_in_triangle,
+    read_data,
+    read_indexed_instance,
+    segments_intersect,
+    signed_area,
+    triangles_adjacency_list,
+    triangles_area,
+    write_prefile,
 )
 from utils.visualization import (
     plot_cut_heatmap,

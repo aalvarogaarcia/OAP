@@ -5,6 +5,7 @@ In the inverted decomposition the master holds the triangle-assignment
 variables (y, yp) and the subproblem checks whether a consistent tour x
 exists for a given assignment.
 """
+
 from typing import Literal
 
 import gurobipy as gp
@@ -42,7 +43,7 @@ class InvBendersMasterMixin:
     triangles: IndexArray
     triangles_adj_list: TrianglesAdjList
 
-    y:  dict[int, gp.Var]
+    y: dict[int, gp.Var]
     yp: dict[int, gp.Var]
 
     def build_inv_master(
@@ -64,20 +65,20 @@ class InvBendersMasterMixin:
 
     def _add_variables_inv_master(self) -> None:
         """Create binary y and yp variables for every triangle."""
-        self.y  = {t: self.model.addVar(vtype=GRB.BINARY, name=f"y_{t}")
-                   for t in self.V_list}
-        self.yp = {t: self.model.addVar(vtype=GRB.BINARY, name=f"yp_{t}")
-                   for t in self.V_list}
+        self.y = {t: self.model.addVar(vtype=GRB.BINARY, name=f"y_{t}") for t in self.V_list}
+        self.yp = {t: self.model.addVar(vtype=GRB.BINARY, name=f"yp_{t}") for t in self.V_list}
 
     def _add_objective_inv_master(self, maximize: bool) -> None:
         """Set the Internal-area objective on the master."""
         sense = GRB.MAXIMIZE if maximize else GRB.MINIMIZE
         at = [
-            abs(signed_area(
-                self.points[tri[0]],
-                self.points[tri[1]],
-                self.points[tri[2]],
-            ))
+            abs(
+                signed_area(
+                    self.points[tri[0]],
+                    self.points[tri[1]],
+                    self.points[tri[2]],
+                )
+            )
             for tri in self.triangles
         ]
         self.model.setObjective(
@@ -88,7 +89,7 @@ class InvBendersMasterMixin:
     def _add_sum_constraints_inv_master(self) -> None:
         """Add cardinality constraints on the total number of triangles."""
         self.model.addConstr(
-            gp.quicksum(self.y[t]  for t in self.V_list) == self.N - 2,
+            gp.quicksum(self.y[t] for t in self.V_list) == self.N - 2,
             name="inv_sum_y",
         )
         self.model.addConstr(

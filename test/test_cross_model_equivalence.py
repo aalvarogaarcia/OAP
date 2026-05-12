@@ -22,7 +22,7 @@ All tests skip gracefully when instance files are absent (e.g. in CI).
 """
 
 from pathlib import Path
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import gurobipy as gp
 import pytest
@@ -60,9 +60,7 @@ CANDIDATES = [
     "uniform-0000020-2",
 ]
 
-INSTANCE_FILES = [
-    p for name in CANDIDATES if (p := INSTANCE_DIR / f"{name}.instance").exists()
-]
+INSTANCE_FILES = [p for name in CANDIDATES if (p := INSTANCE_DIR / f"{name}.instance").exists()]
 
 if not INSTANCE_FILES:
     pytest.skip(
@@ -78,16 +76,19 @@ if not INSTANCE_FILES:
 class BendersVariant(NamedTuple):
     method: str
     label: str
-    extra_kwargs: dict
+    extra_kwargs: dict[str, Any]
 
 
 BENDERS_VARIANTS = [
-    pytest.param(BendersVariant("farkas", "farkas", {}),            id="farkas"),
-    pytest.param(BendersVariant("pi",     "pi",     {}),            id="pi"),
-    pytest.param(BendersVariant("farkas", "cgsp",   {"use_deepest_cuts":   True}), id="cgsp"),
-    pytest.param(BendersVariant("pi",     "cgsp_pi", {"use_deepest_cuts":  True}), id="cgsp_pi"),
-    pytest.param(BendersVariant("farkas", "mw",     {"use_magnanti_wong":  True}), id="mw"),
-    pytest.param(BendersVariant("farkas", "mw_uniform", {"use_magnanti_wong": True, "core_point_strategy": "uniform"}), id="mw_uniform"),
+    pytest.param(BendersVariant("farkas", "farkas", {}), id="farkas"),
+    pytest.param(BendersVariant("pi", "pi", {}), id="pi"),
+    pytest.param(BendersVariant("farkas", "cgsp", {"use_deepest_cuts": True}), id="cgsp"),
+    pytest.param(BendersVariant("pi", "cgsp_pi", {"use_deepest_cuts": True}), id="cgsp_pi"),
+    pytest.param(BendersVariant("farkas", "mw", {"use_magnanti_wong": True}), id="mw"),
+    pytest.param(
+        BendersVariant("farkas", "mw_uniform", {"use_magnanti_wong": True, "core_point_strategy": "uniform"}),
+        id="mw_uniform",
+    ),
 ]
 
 # ---------------------------------------------------------------------------
@@ -96,7 +97,7 @@ BENDERS_VARIANTS = [
 
 
 @pytest.fixture(params=INSTANCE_FILES, ids=[p.stem for p in INSTANCE_FILES])
-def instance(request):
+def instance(request):  # type: ignore[no-untyped-def]
     """Load an instance file and return (name, points, triangles)."""
     path: Path = request.param
     points = read_indexed_instance(str(path))
@@ -111,7 +112,7 @@ def instance(request):
 
 @pytest.mark.parametrize("maximize", [True, False], ids=["max", "min"])
 @pytest.mark.parametrize("variant", BENDERS_VARIANTS)
-def test_ip_equivalence(instance, variant: BendersVariant, maximize: bool):
+def test_ip_equivalence(instance, variant: BendersVariant, maximize: bool) -> None:  # type: ignore[no-untyped-def]
     """
     Compact MIP optimal value must equal Benders MIP optimal value
     for every instance, maximize flag and Benders variant.
@@ -122,42 +123,39 @@ def test_ip_equivalence(instance, variant: BendersVariant, maximize: bool):
 
     # --- Compact (ground truth) ---
     compact = OAPCompactModel(
-        points, triangles,
+        points,
+        triangles,
         name=f"Compact_IP_{instance_name}_{objective}_{direction}",
     )
-    compact.build(objective=objective, maximize=maximize)
+    compact.build(objective=objective, maximize=maximize)  # type: ignore[arg-type]
     compact.solve(time_limit=300, verbose=False)
 
     if compact.model.Status != gp.GRB.OPTIMAL:
-        pytest.skip(
-            f"Compact did not reach OPTIMAL for {instance_name} "
-            f"(status={compact.model.Status}). Skipping."
-        )
+        pytest.skip(f"Compact did not reach OPTIMAL for {instance_name} (status={compact.model.Status}). Skipping.")
     expected = compact.model.ObjVal
 
     # --- Benders ---
     benders = OAPBendersModel(
-        points, triangles,
+        points,
+        triangles,
         name=f"Benders_IP_{instance_name}_{objective}_{direction}_{variant.label}",
     )
     benders.build(
-        objective=objective,
+        objective=objective,  # type: ignore[arg-type]
         maximize=maximize,
-        benders_method=variant.method,
+        benders_method=variant.method,  # type: ignore[arg-type]
         **variant.extra_kwargs,
     )
     benders.solve(time_limit=300, verbose=False)
 
     assert benders.model.Status == gp.GRB.OPTIMAL, (
-        f"Benders ({variant.label}) did not reach OPTIMAL for {instance_name} "
-        f"(status={benders.model.Status})"
+        f"Benders ({variant.label}) did not reach OPTIMAL for {instance_name} (status={benders.model.Status})"
     )
     actual = benders.get_objval_int()
     assert actual is not None, f"get_objval_int() returned None for {instance_name} ({variant.label})"
 
     assert actual == pytest.approx(expected, rel=1e-4), (
-        f"IP divergence [{instance_name} {direction} {variant.label}]: "
-        f"Compact={expected:.6f}  Benders={actual:.6f}"
+        f"IP divergence [{instance_name} {direction} {variant.label}]: Compact={expected:.6f}  Benders={actual:.6f}"
     )
 
 
@@ -168,7 +166,7 @@ def test_ip_equivalence(instance, variant: BendersVariant, maximize: bool):
 
 @pytest.mark.parametrize("maximize", [True, False], ids=["max", "min"])
 @pytest.mark.parametrize("variant", BENDERS_VARIANTS)
-def test_lp_equivalence(instance, variant: BendersVariant, maximize: bool):
+def test_lp_equivalence(instance, variant: BendersVariant, maximize: bool) -> None:  # type: ignore[no-untyped-def]
     """
     Compact LP relaxation bound must equal Benders LP relaxation bound
     for every instance, maximize flag and Benders variant.
@@ -179,38 +177,34 @@ def test_lp_equivalence(instance, variant: BendersVariant, maximize: bool):
 
     # --- Compact LP ---
     compact = OAPCompactModel(
-        points, triangles,
+        points,
+        triangles,
         name=f"Compact_LP_{instance_name}_{objective}_{direction}",
     )
-    compact.build(objective=objective, maximize=maximize)
+    compact.build(objective=objective, maximize=maximize)  # type: ignore[arg-type]
     compact.solve(time_limit=120, verbose=False, relaxed=True)
     lp_compact = compact.get_objval_lp()
 
     if lp_compact == "-":
-        pytest.skip(
-            f"Compact LP not available for {instance_name} "
-            f"({objective} {direction})"
-        )
+        pytest.skip(f"Compact LP not available for {instance_name} ({objective} {direction})")
 
     # --- Benders LP ---
     benders = OAPBendersModel(
-        points, triangles,
+        points,
+        triangles,
         name=f"Benders_LP_{instance_name}_{objective}_{direction}_{variant.label}",
     )
     benders.build(
-        objective=objective,
+        objective=objective,  # type: ignore[arg-type]
         maximize=maximize,
-        benders_method=variant.method,
+        benders_method=variant.method,  # type: ignore[arg-type]
         **variant.extra_kwargs,
     )
     benders.solve(time_limit=120, verbose=False, relaxed=True)
     lp_benders = benders.get_objval_lp()
 
     if lp_benders == "-":
-        pytest.skip(
-            f"Benders ({variant.label}) LP not available for {instance_name} "
-            f"({objective} {direction})"
-        )
+        pytest.skip(f"Benders ({variant.label}) LP not available for {instance_name} ({objective} {direction})")
 
     assert lp_benders == pytest.approx(lp_compact, rel=1e-4), (
         f"LP divergence [{instance_name} {direction} {variant.label}]: "
@@ -224,7 +218,7 @@ def test_lp_equivalence(instance, variant: BendersVariant, maximize: bool):
 
 
 @pytest.mark.parametrize("maximize", [True, False], ids=["max", "min"])
-def test_benders_variant_parity(instance, maximize: bool):
+def test_benders_variant_parity(instance, maximize: bool) -> None:  # type: ignore[no-untyped-def]
     """
     All Benders variants must agree on the IP optimal value.
 
@@ -239,27 +233,28 @@ def test_benders_variant_parity(instance, maximize: bool):
     """
     instance_name, points, triangles = instance
     TIME_LIMIT = 120  # seconds
-    ABS_TOL = 1.99    # same as model.Params.MIPGapAbs in OAPBendersModel.__init__
+    ABS_TOL = 1.99  # same as model.Params.MIPGapAbs in OAPBendersModel.__init__
 
     results: dict[str, float | None] = {}
 
     # Collect IP values for all variants
     variants = [
         ("farkas", "farkas", {}),
-        ("farkas", "cgsp",   {"use_deepest_cuts": True}),
-        ("farkas", "mw",     {"use_magnanti_wong": True}),
+        ("farkas", "cgsp", {"use_deepest_cuts": True}),
+        ("farkas", "mw", {"use_magnanti_wong": True}),
     ]
 
     for benders_method, label, extra_kwargs in variants:
         m = OAPBendersModel(
-            points, triangles,
+            points,
+            triangles,
             name=f"Parity_{instance_name}_{label}_{maximize}",
         )
         m.build(
             objective="Fekete",
             maximize=maximize,
-            benders_method=benders_method,
-            **extra_kwargs,
+            benders_method=benders_method,  # type: ignore[arg-type]
+            **extra_kwargs,  # type: ignore[arg-type]
         )
         m.solve(time_limit=TIME_LIMIT, verbose=False)
         if m.model.Status == gp.GRB.OPTIMAL:
@@ -269,9 +264,7 @@ def test_benders_variant_parity(instance, maximize: bool):
 
     # At least farkas must solve (it's the most reliable)
     if results.get("farkas") is None:
-        pytest.skip(
-            f"Farkas did not solve {instance_name} in {TIME_LIMIT}s — skipping parity check"
-        )
+        pytest.skip(f"Farkas did not solve {instance_name} in {TIME_LIMIT}s — skipping parity check")
 
     baseline = results["farkas"]
     for label, val in results.items():

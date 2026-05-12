@@ -37,6 +37,31 @@
 
 CI runs lint + type-check only. The test job in `.github/workflows/ci.yml` is commented out — it requires a `GRB_LICENSE_FILE` secret.
 
+### Type-checking policy
+
+`mypy . --ignore-missing-imports` runs in `strict` mode and currently reports
+**0 errors**.  Do not introduce new errors.  Specific rules:
+
+- **Annotate new code.** Every new function, method, and class attribute must
+  carry full type annotations.  Bare `dict` / `list` / `tuple` parameters are
+  rejected by `disallow_any_generics`; use `dict[K, V]`, `list[T]`,
+  `tuple[A, B]` instead.
+- **`# type: ignore[<code>]` requires justification.** Any new ignore must
+  cite a specific code (e.g. `[arg-type]`, never bare `# type: ignore`) and
+  carry a same-line comment explaining why.
+- **Sibling-mixin contracts** are declared as type-only stubs near the top of
+  each mixin (see e.g. `BendersOptimizeMixin` in `benders_optimize_mixin.py`).
+  When adding a new method to one mixin that is called by another, also
+  declare it in the consumer's stub block.
+- **Existing `# type: ignore` are technical debt** documented in
+  `.claude/context/notes/2026-05-11-mypy-deuda-tecnica.md`.  Every PR that
+  touches a file with ignores should reduce that count where feasible
+  (convert ignore → real annotation).
+- **Encoding.** Save files as UTF-8 without BOM.  PowerShell 5.1's
+  `Set-Content -Encoding UTF8` writes UTF-8 *with* BOM and corrupts the
+  mathematical glyphs (π, x̄, ≤, →) used in docstrings.  Use Python explicit
+  `encoding='utf-8'` or the Edit tool instead.
+
 ---
 
 ## Batch Runner (`main.py`)

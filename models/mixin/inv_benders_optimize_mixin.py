@@ -1,5 +1,6 @@
 # models/mixin/inv_benders_optimize_mixin.py
 """Callback orchestration and solve() for the Inverted Benders model."""
+
 from __future__ import annotations
 
 import logging
@@ -27,17 +28,24 @@ class InvBendersOptimizeMixin:
     """
 
     # Provided by OAPBaseModel
-    model:     gp.Model
-    V_list:    range
+    model: gp.Model
+    V_list: range
     # Provided by InvBendersMasterMixin
-    iteration:  int
-    save_cuts:  bool
-    verbose:    bool
-    log_path:   str
-    y:   dict[int, gp.Var]
-    yp:  dict[int, gp.Var]
-    y_results:  list[int]
+    iteration: int
+    save_cuts: bool
+    verbose: bool
+    log_path: str
+    y: dict[int, gp.Var]
+    yp: dict[int, gp.Var]
+    y_results: list[int]
     yp_results: list[int]
+    # Provided by InvBendersSubMixin
+    sub_x: gp.Model
+
+    def update_sub_rhs(self, y_sol: dict[int, float], yp_sol: dict[int, float]) -> None: ...
+    def get_farkas_cut(  # type: ignore[empty-body]
+        self, y_sol: dict[int, float], yp_sol: dict[int, float], TOL: float = ...
+    ) -> tuple[gp.LinExpr, float]: ...
 
     # ------------------------------------------------------------------
     # Callback
@@ -50,7 +58,7 @@ class InvBendersOptimizeMixin:
             return
 
         # 1. Extract current master solution (y*, yp*)
-        y_sol  = {t: model.cbGetSolution(self.y[t])  for t in self.V_list}
+        y_sol = {t: model.cbGetSolution(self.y[t]) for t in self.V_list}
         yp_sol = {t: model.cbGetSolution(self.yp[t]) for t in self.V_list}
 
         # 2. Update subproblem RHS with the new y*/yp*
@@ -76,10 +84,10 @@ class InvBendersOptimizeMixin:
 
     def solve(
         self,
-        time_limit: int  = 7200,
-        verbose:    bool = False,
-        save_cuts:  bool = False,
-        relaxed:    bool = False,
+        time_limit: int = 7200,
+        verbose: bool = False,
+        save_cuts: bool = False,
+        relaxed: bool = False,
     ) -> None:
         """Configure the master and run optimisation with the Benders callback.
 
@@ -91,11 +99,8 @@ class InvBendersOptimizeMixin:
             relaxed:    If True, solve only the LP relaxation via the manual
                         Benders loop (useful for debugging).
         """
-        logger.info(
-            f"Starting InvBenders solve — limit={time_limit}s  "
-            f"verbose={verbose}  save_cuts={save_cuts}"
-        )
-        self.verbose   = verbose
+        logger.info(f"Starting InvBenders solve — limit={time_limit}s  verbose={verbose}  save_cuts={save_cuts}")
+        self.verbose = verbose
         self.save_cuts = save_cuts
 
         # Truncate log at the start of each fresh run
@@ -124,11 +129,10 @@ class InvBendersOptimizeMixin:
 
         # Extract results if any integer solution was found
         if self.model.SolCount > 0:
-            self.y_results  = [t for t, v in self.y.items()  if v.X > 0.5]
+            self.y_results = [t for t, v in self.y.items() if v.X > 0.5]
             self.yp_results = [t for t, v in self.yp.items() if v.X > 0.5]
             logger.info(
-                f"Solution found: {len(self.y_results)} internal triangles, "
-                f"{len(self.yp_results)} external triangles."
+                f"Solution found: {len(self.y_results)} internal triangles, {len(self.yp_results)} external triangles."
             )
 
         if self.model.Status == GRB.OPTIMAL:
@@ -138,9 +142,9 @@ class InvBendersOptimizeMixin:
 
     def solve_lp_relaxation(
         self,
-        time_limit: int  = 7200,
-        verbose:    bool = False,
-        save_cuts:  bool = False,
+        time_limit: int = 7200,
+        verbose: bool = False,
+        save_cuts: bool = False,
     ) -> None:
         """Solve the LP relaxation via a manual Benders cutting-plane loop.
 
@@ -149,7 +153,7 @@ class InvBendersOptimizeMixin:
         as normal constraints until the subproblem reports feasible.
         """
         logger.info("Starting LP relaxation (manual Benders loop)...")
-        self.verbose   = verbose
+        self.verbose = verbose
         self.save_cuts = save_cuts
 
         # Drop integrality
@@ -158,9 +162,9 @@ class InvBendersOptimizeMixin:
                 v.VType = GRB.CONTINUOUS
         self.model.update()
 
-        self.model.Params.Presolve        = 1
-        self.model.Params.LazyConstraints = 0   # no callbacks in LP mode
-        self.model.Params.TimeLimit       = time_limit
+        self.model.Params.Presolve = 1
+        self.model.Params.LazyConstraints = 0  # no callbacks in LP mode
+        self.model.Params.TimeLimit = time_limit
         if not verbose:
             self.model.Params.OutputFlag = 0
 
@@ -176,12 +180,10 @@ class InvBendersOptimizeMixin:
             self.model.optimize()
 
             if self.model.Status == GRB.INFEASIBLE:
-                logger.warning(
-                    f"Master LP became INFEASIBLE at iteration {self.iteration}."
-                )
+                logger.warning(f"Master LP became INFEASIBLE at iteration {self.iteration}.")
                 break
 
-            y_sol  = {t: v.X for t, v in self.y.items()}
+            y_sol = {t: v.X for t, v in self.y.items()}
             yp_sol = {t: v.X for t, v in self.yp.items()}
 
             self.update_sub_rhs(y_sol, yp_sol)
@@ -201,6 +203,4 @@ class InvBendersOptimizeMixin:
                     )
             else:
                 converged = True
-                logger.info(
-                    f"LP relaxation converged after {self.iteration} iterations."
-                )
+                logger.info(f"LP relaxation converged after {self.iteration} iterations.")

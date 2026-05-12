@@ -1,5 +1,6 @@
 # models/mixin/inv_benders_analysis_mixin.py
 """Post-mortem PDF report generator for the Inverted Benders model."""
+
 from __future__ import annotations
 
 import logging
@@ -24,9 +25,9 @@ class InvBendersAnalysisMixin:
     arc-keyed in both cases, so it is reused unchanged.
     """
 
-    points:   NumericArray
-    N:        int
-    name:     str
+    points: NumericArray
+    N: int
+    name: str
     log_path: str | None
 
     def generate_inv_benders_report(
@@ -44,16 +45,11 @@ class InvBendersAnalysisMixin:
                 ``outputs/Analysis/PostMortem_Inv_{name}.pdf``.
         """
         if not hasattr(self, "log_path") or not self.log_path:
-            logger.warning(
-                f"[{self.name}] Cannot generate report — "
-                "run solve(save_cuts=True) first."
-            )
+            logger.warning(f"[{self.name}] Cannot generate report — run solve(save_cuts=True) first.")
             return
 
         if not os.path.exists(self.log_path):
-            logger.warning(
-                f"[{self.name}] Log file not found at {self.log_path}."
-            )
+            logger.warning(f"[{self.name}] Log file not found at {self.log_path}.")
             return
 
         logs = load_farkas_logs(self.log_path)
@@ -75,17 +71,18 @@ class InvBendersAnalysisMixin:
                 plt.figure(figsize=(10, 8))
                 plot_farkas_ray_network(
                     log_entry,
-                    points=self.points,
+                    points=self.points,  # type: ignore[arg-type]
                     save_path=None,
                     show_plot=False,
                 )
 
                 cut_expr_data = log_entry.get("cut_expr")
-                cut_sense     = log_entry.get("sense")
+                cut_sense = log_entry.get("sense")
                 if cut_expr_data and cut_sense in ("<=", ">="):
                     text = format_cut_string(cut_expr_data, sense=cut_sense)
                     plt.text(
-                        0.5, -0.05,
+                        0.5,
+                        -0.05,
                         text,
                         transform=plt.gca().transAxes,
                         fontsize=9,

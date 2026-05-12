@@ -58,10 +58,11 @@ Must appear before BendersFarkasMixin / BendersPiMixin in the MRO so
     sub_y.Params.InfUnbdInfo = 1
 so that ``FarkasDual`` is available after INFEASIBLE solves.
 """
+
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import gurobipy as gp
 from gurobipy import GRB
@@ -93,9 +94,9 @@ class BendersDDMAMixin:
     model: gp.Model
     sub_y: gp.Model
     sub_yp: gp.Model
-    x: dict
-    constrs_y: dict
-    constrs_yp: dict
+    x: dict[str, Any]
+    constrs_y: dict[str, Any]
+    constrs_yp: dict[str, Any]
     N: int
     convex_hull_area: float
 
@@ -118,14 +119,14 @@ class BendersDDMAMixin:
 
         # group_name → Relaxed-ℓ₁ weight
         _template: dict[str, float] = {
-            f"alpha{suffix}":  1.0,  # RHS = ±x[arc]           → 1 x-var
-            f"beta{suffix}":   2.0,  # RHS = x[a] - x[b]       → 2 x-vars
-            f"gamma{suffix}":  1.0,  # RHS = x[arc]             → 1 x-var
-            f"delta{suffix}":  1.0,  # RHS = 1 - x[arc]         → 1 x-var
+            f"alpha{suffix}": 1.0,  # RHS = ±x[arc]           → 1 x-var
+            f"beta{suffix}": 2.0,  # RHS = x[a] - x[b]       → 2 x-vars
+            f"gamma{suffix}": 1.0,  # RHS = x[arc]             → 1 x-var
+            f"delta{suffix}": 1.0,  # RHS = 1 - x[arc]         → 1 x-var
             f"global{suffix}": 0.0,  # constant RHS              → 0
-            f"r1{suffix}":     0.0,  # constant RHS              → 0
-            f"r2{suffix}":     0.0,  # constant RHS = 1          → 0
-            f"r3{suffix}":     2.0,  # RHS = 1 - x[a] - x[b]   → 2 x-vars
+            f"r1{suffix}": 0.0,  # constant RHS              → 0
+            f"r2{suffix}": 0.0,  # constant RHS = 1          → 0
+            f"r3{suffix}": 2.0,  # RHS = 1 - x[a] - x[b]   → 2 x-vars
         }
         return {k: v for k, v in _template.items() if k in constrs}
 
@@ -179,7 +180,7 @@ class BendersDDMAMixin:
         self,
         which: str,
         TOL: float = _DDMA_TOL,
-    ) -> dict[str, dict | float]:
+    ) -> dict[str, dict[str, Any] | float]:
         """Extract dual multipliers π from the most recent subproblem solve.
 
         Returns a nested dict matching the structure of ``constrs_y`` /
@@ -197,12 +198,12 @@ class BendersDDMAMixin:
         if status not in (GRB.INFEASIBLE, GRB.OPTIMAL):
             return {}
 
-        use_farkas = (status == GRB.INFEASIBLE)
-        result: dict[str, dict | float] = {}
+        use_farkas = status == GRB.INFEASIBLE
+        result: dict[str, dict[str, Any] | float] = {}
 
         for group_name, group_val in constrs.items():
             if isinstance(group_val, dict):
-                pi_sub: dict = {}
+                pi_sub: dict[str, Any] = {}
                 for key, constr in group_val.items():
                     try:
                         val = constr.FarkasDual if use_farkas else constr.Pi
@@ -228,7 +229,7 @@ class BendersDDMAMixin:
 
     def _compute_ddma_depth(
         self,
-        pi_dict: dict[str, dict | float],
+        pi_dict: dict[str, dict[str, Any] | float],
         x_sol: dict[Arc, float],
         which: str,
         weights: dict[str, float],
@@ -251,7 +252,7 @@ class BendersDDMAMixin:
         denominator = 0.0
 
         # Helper: contribution of each group to π^T b(x̄)
-        def _rhs(group: str, key: tuple | None = None) -> float:
+        def _rhs(group: str, key: tuple[Any, ...] | None = None) -> float:
             """Compute b_i(x̄) for a given constraint group and key."""
             if which == "yp":
                 if group == f"alpha{suffix}":
@@ -305,7 +306,7 @@ class BendersDDMAMixin:
             w = weights.get(group, 0.0)
             if isinstance(pi_val, dict):
                 for key, piv in pi_val.items():
-                    rhs_k = _rhs(group, key)
+                    rhs_k = _rhs(group, key)  # type: ignore[arg-type]
                     numerator += piv * rhs_k
                     denominator += w * abs(piv)
             else:
@@ -329,11 +330,11 @@ class BendersDDMAMixin:
 
     def _reconstruct_cut_from_pi_values(
         self,
-        pi_dict: dict[str, dict | float],
+        pi_dict: dict[str, dict[str, Any] | float],
         x_sol: dict[Arc, float],
         which: str,
         TOL: float = _DDMA_TOL,
-    ) -> tuple[gp.LinExpr, float, dict]:
+    ) -> tuple[gp.LinExpr, float, dict[str, Any]]:
         """Build Benders cut  π^T B x ≤ −π^T b_const  from raw π floats.
 
         Mirrors ``BendersCGSPMixin._reconstruct_cut_from_pi`` but operates
@@ -349,10 +350,10 @@ class BendersDDMAMixin:
         """
         cut_expr = gp.LinExpr()
         cut_rhs = 0.0
-        witness: dict = {}
+        witness: dict[str, Any] = {}
         suffix = "_p" if which == "yp" else ""
 
-        def _add(group: str, pi_val: dict | float) -> None:
+        def _add(group: str, pi_val: dict[str, Any] | float) -> None:
             nonlocal cut_rhs
             if isinstance(pi_val, dict):
                 if not pi_val:
@@ -363,44 +364,44 @@ class BendersDDMAMixin:
                         continue
                     if which == "yp":
                         if group == f"alpha{suffix}":
-                            i, j = key
-                            cut_expr.addTerms([-piv], [self.x[i, j]])
+                            i, j = key  # type: ignore[str-unpack]
+                            cut_expr.addTerms([-piv], [self.x[i, j]])  # type: ignore[index]
                             cut_rhs += -piv * 1.0
                         elif group == f"beta{suffix}":
-                            i, j = key
-                            cut_expr.addTerms([piv, -piv], [self.x[j, i], self.x[i, j]])
+                            i, j = key  # type: ignore[str-unpack]
+                            cut_expr.addTerms([piv, -piv], [self.x[j, i], self.x[i, j]])  # type: ignore[index]
                         elif group == f"gamma{suffix}":
-                            i, j = key
-                            cut_expr.addTerms([piv], [self.x[j, i]])
+                            i, j = key  # type: ignore[str-unpack]
+                            cut_expr.addTerms([piv], [self.x[j, i]])  # type: ignore[index]
                         elif group == f"delta{suffix}":
-                            i, j = key
-                            cut_expr.addTerms([-piv], [self.x[i, j]])
+                            i, j = key  # type: ignore[str-unpack]
+                            cut_expr.addTerms([-piv], [self.x[i, j]])  # type: ignore[index]
                             cut_rhs += -piv * 1.0
                         elif group == f"r2{suffix}":
                             cut_rhs += -piv * 1.0
                         elif group == f"r3{suffix}":
-                            i, j, k, s = key
-                            cut_expr.addTerms([-piv, -piv], [self.x[i, j], self.x[s, k]])
+                            i, j, k, s = key  # type: ignore[str-unpack]
+                            cut_expr.addTerms([-piv, -piv], [self.x[i, j], self.x[s, k]])  # type: ignore[index]
                             cut_rhs += -piv * 1.0
                     else:
                         if group == "alpha":
-                            i, j = key
-                            cut_expr.addTerms([piv], [self.x[i, j]])
+                            i, j = key  # type: ignore[str-unpack]
+                            cut_expr.addTerms([piv], [self.x[i, j]])  # type: ignore[index]
                         elif group == "beta":
-                            i, j = key
-                            cut_expr.addTerms([piv, -piv], [self.x[i, j], self.x[j, i]])
+                            i, j = key  # type: ignore[str-unpack]
+                            cut_expr.addTerms([piv, -piv], [self.x[i, j], self.x[j, i]])  # type: ignore[index]
                         elif group == "gamma":
-                            i, j = key
-                            cut_expr.addTerms([piv], [self.x[i, j]])
+                            i, j = key  # type: ignore[str-unpack]
+                            cut_expr.addTerms([piv], [self.x[i, j]])  # type: ignore[index]
                         elif group == "delta":
-                            i, j = key
-                            cut_expr.addTerms([-piv], [self.x[j, i]])
+                            i, j = key  # type: ignore[str-unpack]
+                            cut_expr.addTerms([-piv], [self.x[j, i]])  # type: ignore[index]
                             cut_rhs += -piv * 1.0
                         elif group == "r2":
                             cut_rhs += -piv * 1.0
                         elif group == "r3":
-                            i, j, k, s = key
-                            cut_expr.addTerms([-piv, -piv], [self.x[j, i], self.x[k, s]])
+                            i, j, k, s = key  # type: ignore[str-unpack]
+                            cut_expr.addTerms([-piv, -piv], [self.x[j, i], self.x[k, s]])  # type: ignore[index]
                             cut_rhs += -piv * 1.0
             else:
                 piv = pi_val
@@ -431,13 +432,12 @@ class BendersDDMAMixin:
         max_iter: int = _DDMA_MAX_ITER,
         eps: float = _DDMA_EPS,
         TOL: float = _DDMA_TOL,
-    ) -> tuple[gp.LinExpr, float, dict] | tuple[None, None, dict]:
+    ) -> tuple[gp.LinExpr, float, dict[str, Any]] | tuple[None, None, dict[str, Any]]:
         """Generate the DDMA deepest feasibility cut for Y'.
 
         Returns (cut_expr, cut_rhs, witness) or (None, None, {'aborted': …}).
         """
-        return self._run_ddma(x_sol, which="yp", eta_sol=0.0,
-                              max_iter=max_iter, eps=eps, TOL=TOL)
+        return self._run_ddma(x_sol, which="yp", eta_sol=0.0, max_iter=max_iter, eps=eps, TOL=TOL)
 
     def get_ddma_cut_y(
         self,
@@ -446,13 +446,12 @@ class BendersDDMAMixin:
         max_iter: int = _DDMA_MAX_ITER,
         eps: float = _DDMA_EPS,
         TOL: float = _DDMA_TOL,
-    ) -> tuple[gp.LinExpr, float, dict] | tuple[None, None, dict]:
+    ) -> tuple[gp.LinExpr, float, dict[str, Any]] | tuple[None, None, dict[str, Any]]:
         """Generate the DDMA deepest feasibility (or optimality) cut for Y.
 
         Returns (cut_expr, cut_rhs, witness) or (None, None, {'aborted': …}).
         """
-        return self._run_ddma(x_sol, which="y", eta_sol=eta_sol,
-                              max_iter=max_iter, eps=eps, TOL=TOL)
+        return self._run_ddma(x_sol, which="y", eta_sol=eta_sol, max_iter=max_iter, eps=eps, TOL=TOL)
 
     # ------------------------------------------------------------------
     # Core DDMA loop
@@ -466,7 +465,7 @@ class BendersDDMAMixin:
         max_iter: int,
         eps: float,
         TOL: float,
-    ) -> tuple[gp.LinExpr, float, dict] | tuple[None, None, dict]:
+    ) -> tuple[gp.LinExpr, float, dict[str, Any]] | tuple[None, None, dict[str, Any]]:
         """Execute Algorithm 3 (DDMA) for subproblem ``which``.
 
         Algorithm
@@ -490,7 +489,7 @@ class BendersDDMAMixin:
         sub.setParam("InfUnbdInfo", 1)
 
         z = 0.0
-        best_pi: dict | None = None
+        best_pi: dict[str, Any] | None = None
         best_depth = -float("inf")
 
         for it in range(max_iter):
@@ -530,7 +529,10 @@ class BendersDDMAMixin:
             if depth - z < eps:
                 logger.debug(
                     "DDMA(%s) converged at iter %d: z=%.4e, depth=%.4e",
-                    which, it, z, depth,
+                    which,
+                    it,
+                    z,
+                    depth,
                 )
                 break
 
@@ -543,9 +545,7 @@ class BendersDDMAMixin:
         if best_depth <= TOL:
             return None, None, {"aborted": "no_violation", "depth": best_depth}
 
-        cut_expr, cut_rhs, witness = self._reconstruct_cut_from_pi_values(
-            best_pi, x_sol, which, TOL=TOL
-        )
+        cut_expr, cut_rhs, witness = self._reconstruct_cut_from_pi_values(best_pi, x_sol, which, TOL=TOL)
         witness["ddma_depth"] = best_depth
-        witness["ddma_iters"] = it + 1  # type: ignore[possibly-undefined]
+        witness["ddma_iters"] = it + 1
         return cut_expr, cut_rhs, witness

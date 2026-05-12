@@ -23,6 +23,7 @@ Standard workflow::
     model.build(objective="Internal", maximize=True)
     model.solve(time_limit=300, verbose=True)
 """
+
 from __future__ import annotations
 
 import logging
@@ -32,16 +33,16 @@ import gurobipy as gp
 import numpy as np
 from numpy.typing import NDArray
 
-from models.OAPBaseModel import OAPBaseModel
 from models.mixin.inv_benders_analysis_mixin import InvBendersAnalysisMixin
 from models.mixin.inv_benders_master_mixin import InvBendersMasterMixin
 from models.mixin.inv_benders_optimize_mixin import InvBendersOptimizeMixin
 from models.mixin.inv_benders_sub_mixin import InvBendersSubMixin
+from models.OAPBaseModel import OAPBaseModel
 
 logger = logging.getLogger(__name__)
 
 
-class OAPInverseBendersModel(
+class OAPInverseBendersModel(  # type: ignore[misc]
     InvBendersMasterMixin,
     InvBendersSubMixin,
     InvBendersOptimizeMixin,
@@ -57,9 +58,9 @@ class OAPInverseBendersModel(
 
     def __init__(
         self,
-        points:    NDArray[np.int64],
+        points: NDArray[np.int64],
         triangles: NDArray[np.int64],
-        name:      str = "OAPInverseBendersModel",
+        name: str = "OAPInverseBendersModel",
     ) -> None:
         """Initialise shared data structures and the subproblem LP.
 
@@ -76,16 +77,16 @@ class OAPInverseBendersModel(
         # 2. Subproblem LP — silenced; InfUnbdInfo + no DualReductions for
         #    Farkas ray availability (further params set in build_inv_sub)
         self.sub_x = gp.Model(f"{name}_Sub_X")
-        self.sub_x.Params.OutputFlag     = 0
-        self.sub_x.Params.InfUnbdInfo    = 1
+        self.sub_x.Params.OutputFlag = 0
+        self.sub_x.Params.InfUnbdInfo = 1
         self.sub_x.Params.DualReductions = 0
 
         # 3. Shared state initialised to safe defaults
         Arc = tuple[int, int]
         self.constrs_sub: dict[str, dict[Arc, gp.Constr]] = {}
-        self.iteration   = 0
-        self.save_cuts   = False
-        self.verbose     = False
+        self.iteration = 0
+        self.save_cuts = False
+        self.verbose = False
 
         # 4. Default log path (outputs/ is git-ignored; created on demand)
         self.log_path = f"outputs/Others/Benders/{name}_inv/log.jsonl"
@@ -109,9 +110,9 @@ class OAPInverseBendersModel(
 
     def build(
         self,
-        objective:     Literal["Internal"] = "Internal",
-        maximize:      bool                = True,
-        sum_constrain: bool                = True,
+        objective: Literal["Internal"] = "Internal",
+        maximize: bool = True,
+        sum_constrain: bool = True,
     ) -> None:
         """Build master (``y``/``yp``) and subproblem (``x`` LP).
 
@@ -126,10 +127,7 @@ class OAPInverseBendersModel(
             ValueError: If *objective* is not ``"Internal"``.
         """
         if objective != "Internal":
-            raise ValueError(
-                f"OAPInverseBendersModel only supports objective='Internal', "
-                f"got {objective!r}."
-            )
+            raise ValueError(f"OAPInverseBendersModel only supports objective='Internal', got {objective!r}.")
 
         logger.info(f"=== Building OAPInverseBendersModel ({self.name}) ===")
 

@@ -63,10 +63,11 @@ Inherited attributes expected (provided by OAPBaseModel + BendersMasterMixin
     self.cut_weights_y    : dict | None
     self.cut_weights_yp   : dict | None
 """
+
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import gurobipy as gp
 from gurobipy import GRB
@@ -101,8 +102,8 @@ class BendersCGSPMixin:
     sub_y: gp.Model
     sub_yp: gp.Model
     x: dict[Arc, gp.Var]
-    constrs_y: dict
-    constrs_yp: dict
+    constrs_y: dict[str, Any]
+    constrs_yp: dict[str, Any]
     N: int
     CH: IndexArray
     V_list: range
@@ -119,9 +120,9 @@ class BendersCGSPMixin:
 
     def _extract_cgsp_pi(
         self,
-        pi_vars: dict[str, gp.Var | gp.tupledict],
+        pi_vars: dict[str, gp.Var | gp.tupledict[Any, gp.Var]],
         TOL: float = _CGSP_TOL,
-    ) -> dict[str, float | dict]:
+    ) -> dict[str, float | dict[str, Any]]:
         """Extract non-zero dual values from a solved CGSP model.
 
         Parameters
@@ -129,7 +130,7 @@ class BendersCGSPMixin:
         pi_vars:
             Mapping from component name (e.g. 'alpha', 'beta', ...) to the
             corresponding Gurobi variable(s) in the CGSP LP.  Values may be
-            either a single gp.Var (scalar) or a gp.tupledict of vars.
+            either a single gp.Var (scalar) or a gp.tupledict[Any, gp.Var] of vars.
         TOL:
             Threshold below which a value is treated as zero.
 
@@ -138,7 +139,7 @@ class BendersCGSPMixin:
         A dict mirroring the structure of pi_vars but populated with the
         optimal values, filtered to |value| > TOL.
         """
-        result: dict[str, float | dict] = {}
+        result: dict[str, float | dict[str, Any]] = {}
         for name, var_or_td in pi_vars.items():
             if isinstance(var_or_td, gp.Var):
                 val = var_or_td.X
@@ -146,7 +147,7 @@ class BendersCGSPMixin:
                     result[name] = val
             else:
                 # tupledict
-                sub: dict = {}
+                sub: dict[str, Any] = {}
                 for k, v in var_or_td.items():
                     val = v.X
                     if abs(val) > TOL:
@@ -162,10 +163,10 @@ class BendersCGSPMixin:
     def _resolve_weights(
         self,
         which: str,
-        constrs: dict,
+        constrs: dict[str, Any],
         include_pi0: bool = False,
         x_sol: dict[Arc, float] | None = None,
-    ) -> dict[str, float | dict[tuple, float]]:
+    ) -> dict[str, float | dict[tuple[Any, ...], float]]:
         """Build the weight dictionary for the L₁ normalisation constraint.
 
         If the user supplied explicit weights via self.cut_weights_y /
@@ -197,27 +198,22 @@ class BendersCGSPMixin:
         """
         _RL1_EPS = 1e-6  # ε for Relaxed-ℓ₁ denominator
 
-        use_relaxed_l1 = (
-            getattr(self, "cgsp_norm", "misd") == "relaxed_l1"
-            and x_sol is not None
+        use_relaxed_l1 = getattr(self, "cgsp_norm", "misd") == "relaxed_l1" and x_sol is not None
+
+        user_weights: dict[str, Any] | None = (
+            getattr(self, "cut_weights_y", None) if which == "y" else getattr(self, "cut_weights_yp", None)
         )
 
-        user_weights: dict | None = (
-            getattr(self, "cut_weights_y", None)
-            if which == "y"
-            else getattr(self, "cut_weights_yp", None)
-        )
-
-        weights: dict[str, float | dict[tuple, float]] = {}
+        weights: dict[str, float | dict[tuple[Any, ...], float]] = {}
 
         for key, val in constrs.items():
             if isinstance(val, dict):
-                sub: dict[tuple, float] = {}
+                sub: dict[tuple[Any, ...], float] = {}
                 for arc_key in val:
                     if user_weights and key in user_weights and isinstance(user_weights[key], dict):
                         sub[arc_key] = float(user_weights[key].get(arc_key, 1.0))
                     elif use_relaxed_l1:
-                        rhs_val = _rhs_for_key(key, arc_key, x_sol, self)
+                        rhs_val = _rhs_for_key(key, arc_key, x_sol, self)  # type: ignore[arg-type]
                         sub[arc_key] = 1.0 / (abs(rhs_val) + _RL1_EPS)
                     else:
                         sub[arc_key] = 1.0
@@ -246,7 +242,7 @@ class BendersCGSPMixin:
     def _compute_relaxed_l1_weights(
         self,
         which: str,
-    ) -> dict[str, float | dict[tuple, float]]:
+    ) -> dict[str, float | dict[tuple[Any, ...], float]]:
         """Return static Relaxed-ℓ₁ weights derived from the constraint structure.
 
         Called at build time (after ``build_farkas/pi_subproblems``) when
@@ -301,17 +297,17 @@ class BendersCGSPMixin:
 
         # Group-level structural weights — matches BendersDDMAMixin._get_ddma_weights
         _group_weight: dict[str, float] = {
-            f"alpha{suffix}":  1.0,  # RHS = 1 - x[i,j]          → 1 x-var
-            f"beta{suffix}":   2.0,  # RHS = x[j,i] - x[i,j]     → 2 x-vars
-            f"gamma{suffix}":  1.0,  # RHS = x[j,i]               → 1 x-var
-            f"delta{suffix}":  1.0,  # RHS = 1 - x[i,j]           → 1 x-var
+            f"alpha{suffix}": 1.0,  # RHS = 1 - x[i,j]          → 1 x-var
+            f"beta{suffix}": 2.0,  # RHS = x[j,i] - x[i,j]     → 2 x-vars
+            f"gamma{suffix}": 1.0,  # RHS = x[j,i]               → 1 x-var
+            f"delta{suffix}": 1.0,  # RHS = 1 - x[i,j]           → 1 x-var
             f"global{suffix}": 0.0,  # constant RHS               → 0
-            f"r1{suffix}":     0.0,  # constant RHS               → 0
-            f"r2{suffix}":     0.0,  # constant RHS = 1           → 0
-            f"r3{suffix}":     2.0,  # RHS = 1 - x[a] - x[b]     → 2 x-vars
+            f"r1{suffix}": 0.0,  # constant RHS               → 0
+            f"r2{suffix}": 0.0,  # constant RHS = 1           → 0
+            f"r3{suffix}": 2.0,  # RHS = 1 - x[a] - x[b]     → 2 x-vars
         }
 
-        result: dict[str, float | dict[tuple, float]] = {}
+        result: dict[str, float | dict[tuple[Any, ...], float]] = {}
         for key, val in constrs.items():
             w = _group_weight.get(key, 1.0)  # unknown groups default to 1.0
             if isinstance(val, dict):
@@ -329,7 +325,7 @@ class BendersCGSPMixin:
     def _build_dual_feasibility_constrs(
         self,
         cgsp: gp.Model,
-        pi_vars: dict,
+        pi_vars: dict[str, Any],
         which: str,  # "y" or "yp"
     ) -> None:
         """Add A^T π ≤ 0 constraints to the CGSP model.
@@ -364,7 +360,7 @@ class BendersCGSPMixin:
             expr = gp.LinExpr()
 
             # alpha[_p]: equality, adjacent to CH arcs
-            for (i, j) in constrs.get(f"alpha{suffix}", {}):
+            for i, j in constrs.get(f"alpha{suffix}", {}):
                 t_list = _adj(i, j)
                 if t in t_list:
                     u = pi_vars.get(f"u_alpha{suffix}", {}).get((i, j))
@@ -375,17 +371,17 @@ class BendersCGSPMixin:
                         expr -= v
 
             # beta[_p]: equality, non-CH edges
-            for (i, j) in constrs.get(f"beta{suffix}", {}):
+            for i, j in constrs.get(f"beta{suffix}", {}):
                 u_key = f"u_beta{suffix}"
                 v_key = f"v_beta{suffix}"
-                if t in _adj(i, j):   # forward +1
+                if t in _adj(i, j):  # forward +1
                     u = pi_vars.get(u_key, {}).get((i, j))
                     v = pi_vars.get(v_key, {}).get((i, j))
                     if u is not None:
                         expr += u
                     if v is not None:
                         expr -= v
-                if t in _adj(j, i):   # backward -1
+                if t in _adj(j, i):  # backward -1
                     u = pi_vars.get(u_key, {}).get((i, j))
                     v = pi_vars.get(v_key, {}).get((i, j))
                     if u is not None:
@@ -394,14 +390,14 @@ class BendersCGSPMixin:
                         expr += v
 
             # gamma[_p]: ≥ constraint, π_γ ≥ 0 → only u_gamma
-            for (i, j) in constrs.get(f"gamma{suffix}", {}):
+            for i, j in constrs.get(f"gamma{suffix}", {}):
                 if t in _adj(i, j):
                     u = pi_vars.get(f"u_gamma{suffix}", {}).get((i, j))
                     if u is not None:
                         expr += u
 
             # delta[_p]: ≤ constraint, π_δ ≤ 0 → only -v_delta
-            for (i, j) in constrs.get(f"delta{suffix}", {}):
+            for i, j in constrs.get(f"delta{suffix}", {}):
                 if t in _adj(i, j):
                     v = pi_vars.get(f"v_delta{suffix}", {}).get((i, j))
                     if v is not None:
@@ -418,10 +414,10 @@ class BendersCGSPMixin:
             # r1[_p]: ≤ → -v_r1 * area[t]
             v_r1 = pi_vars.get(f"v_r1{suffix}")
             if isinstance(v_r1, gp.Var) and hasattr(self, "_abs_areas"):
-                expr -= self._abs_areas[t] * v_r1  # type: ignore[index]
+                expr -= self._abs_areas[t] * v_r1
 
             # r2[_p]: ≤ → -v_r2[arc]
-            for (i, j) in constrs.get(f"r2{suffix}", {}):
+            for i, j in constrs.get(f"r2{suffix}", {}):
                 if t in _adj(i, j):
                     v = pi_vars.get(f"v_r2{suffix}", {}).get((i, j))
                     if v is not None:
@@ -447,7 +443,7 @@ class BendersCGSPMixin:
         self,
         x_sol: dict[Arc, float],
         TOL: float = _CGSP_TOL,
-    ) -> tuple[gp.Model, dict[str, gp.Var | gp.tupledict]]:
+    ) -> tuple[gp.Model, dict[str, gp.Var | gp.tupledict[Any, gp.Var]]]:
         """Build the Cut-Generating Subproblem LP for Y' (external subproblem).
 
         The CGSP for Y' maximises the violation of the current x_sol:
@@ -475,9 +471,9 @@ class BendersCGSPMixin:
         -------
         cgsp_model : gp.Model
             A ready-to-solve Gurobi LP.
-        pi_vars : dict[str, gp.Var | gp.tupledict]
+        pi_vars : dict[str, gp.Var | gp.tupledict[Any, gp.Var]]
             Mapping from constraint group name to the corresponding π variables
-            (already as u - v net variables, stored as gp.Var / gp.tupledict
+            (already as u - v net variables, stored as gp.Var / gp.tupledict[Any, gp.Var]
             of the positive part u; the actual value is u.X - v.X after solve).
             The dict also contains 'u_<name>' and 'v_<name>' keys for the
             positive/negative parts if needed.
@@ -494,11 +490,9 @@ class BendersCGSPMixin:
         # We accumulate: objective terms and normalisation terms
         obj_expr = gp.LinExpr()
         norm_expr = gp.LinExpr()
-        pi_vars: dict[str, gp.Var | gp.tupledict] = {}
+        pi_vars: dict[str, gp.Var | gp.tupledict[Any, gp.Var]] = {}
 
-        def _add_pi_scalar(
-            group: str, rhs_val: float, weight: float
-        ) -> tuple[gp.Var, gp.Var]:
+        def _add_pi_scalar(group: str, rhs_val: float, weight: float) -> tuple[gp.Var, gp.Var]:
             """Add a scalar dual variable π = u - v to cgsp."""
             u = cgsp.addVar(lb=0.0, name=f"u_{group}")
             v = cgsp.addVar(lb=0.0, name=f"v_{group}")
@@ -508,10 +502,10 @@ class BendersCGSPMixin:
 
         def _add_pi_indexed(
             group: str,
-            keys: list,
-            rhs_map: dict,
-            weight_map: dict,
-        ) -> tuple[gp.tupledict, gp.tupledict]:
+            keys: list[Any],
+            rhs_map: dict[str, Any],
+            weight_map: dict[str, Any],
+        ) -> tuple[gp.tupledict[Any, gp.Var], gp.tupledict[Any, gp.Var]]:
             """Add indexed dual variables π[k] = u[k] - v[k] for each key."""
             u_td = cgsp.addVars(keys, lb=0.0, name=f"u_{group}")
             v_td = cgsp.addVars(keys, lb=0.0, name=f"v_{group}")
@@ -527,19 +521,16 @@ class BendersCGSPMixin:
             keys_ap = list(self.constrs_yp["alpha_p"].keys())
             rhs_map_ap = {(i, j): 1.0 - x_sol.get((i, j), 0.0) for (i, j) in keys_ap}
             w_map_ap = weights.get("alpha_p", {})
-            u_ap, v_ap = _add_pi_indexed("alpha_p", keys_ap, rhs_map_ap, w_map_ap)
+            u_ap, v_ap = _add_pi_indexed("alpha_p", keys_ap, rhs_map_ap, w_map_ap)  # type: ignore[arg-type]
             pi_vars["u_alpha_p"] = u_ap
             pi_vars["v_alpha_p"] = v_ap
 
         # ---- beta_p: flow balance = x[j,i] - x[i,j]  for (i,j) ∈ E'' ----
         if "beta_p" in self.constrs_yp and self.constrs_yp["beta_p"]:
             keys_bp = list(self.constrs_yp["beta_p"].keys())
-            rhs_map_bp = {
-                (i, j): x_sol.get((j, i), 0.0) - x_sol.get((i, j), 0.0)
-                for (i, j) in keys_bp
-            }
+            rhs_map_bp = {(i, j): x_sol.get((j, i), 0.0) - x_sol.get((i, j), 0.0) for (i, j) in keys_bp}
             w_map_bp = weights.get("beta_p", {})
-            u_bp, v_bp = _add_pi_indexed("beta_p", keys_bp, rhs_map_bp, w_map_bp)
+            u_bp, v_bp = _add_pi_indexed("beta_p", keys_bp, rhs_map_bp, w_map_bp)  # type: ignore[arg-type]
             pi_vars["u_beta_p"] = u_bp
             pi_vars["v_beta_p"] = v_bp
 
@@ -568,7 +559,7 @@ class BendersCGSPMixin:
             for k in keys_dp:
                 rhs_k = rhs_map_dp.get(k, 0.0)
                 w_k = w_map_dp.get(k, 1.0) if isinstance(w_map_dp, dict) else 1.0
-                obj_expr.addTerms([-rhs_k], [v_dp[k]])   # π_δ = -v_δ → contribution -rhs_k * v_δ
+                obj_expr.addTerms([-rhs_k], [v_dp[k]])  # π_δ = -v_δ → contribution -rhs_k * v_δ
                 norm_expr.addTerms([w_k], [v_dp[k]])
             pi_vars["v_delta_p"] = v_dp
             # No u_delta_p: π_δ ≤ 0
@@ -576,14 +567,14 @@ class BendersCGSPMixin:
         # ---- global_p: Σ_t yp[t] = N - |CH| ----
         if "global_p" in self.constrs_yp and isinstance(self.constrs_yp["global_p"], gp.Constr):
             rhs_global = self.constrs_yp["global_p"].RHS
-            w_global = float(weights.get("global_p", 1.0))
+            w_global = float(weights.get("global_p", 1.0))  # type: ignore[arg-type]
             u_g, v_g = _add_pi_scalar("global_p", rhs_global, w_global)
             pi_vars["u_global_p"] = u_g
             pi_vars["v_global_p"] = v_g
 
         # ---- r1_p: area balance (fixed RHS = CH_area) ----
         if "r1_p" in self.constrs_yp and isinstance(self.constrs_yp["r1_p"], gp.Constr):
-            w_r1 = float(weights.get("r1_p", 1.0))
+            w_r1 = float(weights.get("r1_p", 1.0))  # type: ignore[arg-type]
             u_r1, v_r1 = _add_pi_scalar("r1_p", self.convex_hull_area, w_r1)
             pi_vars["u_r1_p"] = u_r1
             pi_vars["v_r1_p"] = v_r1
@@ -593,7 +584,7 @@ class BendersCGSPMixin:
             keys_r2 = list(self.constrs_yp["r2_p"].keys())
             rhs_map_r2 = {k: 1.0 for k in keys_r2}
             w_map_r2 = weights.get("r2_p", {})
-            u_r2, v_r2 = _add_pi_indexed("r2_p", keys_r2, rhs_map_r2, w_map_r2)
+            u_r2, v_r2 = _add_pi_indexed("r2_p", keys_r2, rhs_map_r2, w_map_r2)  # type: ignore[arg-type]
             pi_vars["u_r2_p"] = u_r2
             pi_vars["v_r2_p"] = v_r2
 
@@ -601,11 +592,10 @@ class BendersCGSPMixin:
         if "r3_p" in self.constrs_yp and self.constrs_yp["r3_p"]:
             keys_r3 = list(self.constrs_yp["r3_p"].keys())
             rhs_map_r3 = {
-                (i, j, k, s): 1.0 - x_sol.get((i, j), 0.0) - x_sol.get((s, k), 0.0)
-                for (i, j, k, s) in keys_r3
+                (i, j, k, s): 1.0 - x_sol.get((i, j), 0.0) - x_sol.get((s, k), 0.0) for (i, j, k, s) in keys_r3
             }
             w_map_r3 = weights.get("r3_p", {})
-            u_r3, v_r3 = _add_pi_indexed("r3_p", keys_r3, rhs_map_r3, w_map_r3)
+            u_r3, v_r3 = _add_pi_indexed("r3_p", keys_r3, rhs_map_r3, w_map_r3)  # type: ignore[arg-type]
             pi_vars["u_r3_p"] = u_r3
             pi_vars["v_r3_p"] = v_r3
 
@@ -630,7 +620,7 @@ class BendersCGSPMixin:
         x_sol: dict[Arc, float],
         eta_sol: float = 0.0,
         TOL: float = _CGSP_TOL,
-    ) -> tuple[gp.Model, dict[str, gp.Var | gp.tupledict], gp.Var | None]:
+    ) -> tuple[gp.Model, dict[str, gp.Var | gp.tupledict[Any, gp.Var]], gp.Var | None]:
         """Build the Cut-Generating Subproblem LP for Y (internal subproblem).
 
         For Fekete objective (no eta):
@@ -653,10 +643,10 @@ class BendersCGSPMixin:
         Returns
         -------
         cgsp_model : gp.Model
-        pi_vars    : dict[str, gp.Var | gp.tupledict]
+        pi_vars    : dict[str, gp.Var | gp.tupledict[Any, gp.Var]]
         pi0_var    : gp.Var | None — the π₀ dual variable (None for Fekete)
         """
-        is_internal = (getattr(self, "objective", "Fekete") == "Internal")
+        is_internal = getattr(self, "objective", "Fekete") == "Internal"
         include_pi0 = is_internal
 
         cgsp = gp.Model("cgsp_y")
@@ -667,11 +657,9 @@ class BendersCGSPMixin:
 
         obj_expr = gp.LinExpr()
         norm_expr = gp.LinExpr()
-        pi_vars: dict[str, gp.Var | gp.tupledict] = {}
+        pi_vars: dict[str, gp.Var | gp.tupledict[Any, gp.Var]] = {}
 
-        def _add_pi_scalar(
-            group: str, rhs_val: float, weight: float
-        ) -> tuple[gp.Var, gp.Var]:
+        def _add_pi_scalar(group: str, rhs_val: float, weight: float) -> tuple[gp.Var, gp.Var]:
             u = cgsp.addVar(lb=0.0, name=f"u_{group}")
             v = cgsp.addVar(lb=0.0, name=f"v_{group}")
             obj_expr.addTerms([rhs_val, -rhs_val], [u, v])
@@ -680,10 +668,10 @@ class BendersCGSPMixin:
 
         def _add_pi_indexed(
             group: str,
-            keys: list,
-            rhs_map: dict,
-            weight_map: dict,
-        ) -> tuple[gp.tupledict, gp.tupledict]:
+            keys: list[Any],
+            rhs_map: dict[str, Any],
+            weight_map: dict[str, Any],
+        ) -> tuple[gp.tupledict[Any, gp.Var], gp.tupledict[Any, gp.Var]]:
             u_td = cgsp.addVars(keys, lb=0.0, name=f"u_{group}")
             v_td = cgsp.addVars(keys, lb=0.0, name=f"v_{group}")
             for k in keys:
@@ -698,19 +686,16 @@ class BendersCGSPMixin:
             keys_a = list(self.constrs_y["alpha"].keys())
             rhs_map_a = {(i, j): x_sol.get((i, j), 0.0) for (i, j) in keys_a}
             w_map_a = weights.get("alpha", {})
-            u_a, v_a = _add_pi_indexed("alpha", keys_a, rhs_map_a, w_map_a)
+            u_a, v_a = _add_pi_indexed("alpha", keys_a, rhs_map_a, w_map_a)  # type: ignore[arg-type]
             pi_vars["u_alpha"] = u_a
             pi_vars["v_alpha"] = v_a
 
         # ---- beta: flow balance = x[i,j] - x[j,i]  for (i,j) ∈ E'' ----
         if "beta" in self.constrs_y and self.constrs_y["beta"]:
             keys_b = list(self.constrs_y["beta"].keys())
-            rhs_map_b = {
-                (i, j): x_sol.get((i, j), 0.0) - x_sol.get((j, i), 0.0)
-                for (i, j) in keys_b
-            }
+            rhs_map_b = {(i, j): x_sol.get((i, j), 0.0) - x_sol.get((j, i), 0.0) for (i, j) in keys_b}
             w_map_b = weights.get("beta", {})
-            u_b, v_b = _add_pi_indexed("beta", keys_b, rhs_map_b, w_map_b)
+            u_b, v_b = _add_pi_indexed("beta", keys_b, rhs_map_b, w_map_b)  # type: ignore[arg-type]
             pi_vars["u_beta"] = u_b
             pi_vars["v_beta"] = v_b
 
@@ -739,7 +724,7 @@ class BendersCGSPMixin:
             for k in keys_d:
                 rhs_k = rhs_map_d.get(k, 0.0)
                 w_k = w_map_d.get(k, 1.0) if isinstance(w_map_d, dict) else 1.0
-                obj_expr.addTerms([-rhs_k], [v_d2[k]])   # π_δ = -v_δ → contribution -rhs_k * v_δ
+                obj_expr.addTerms([-rhs_k], [v_d2[k]])  # π_δ = -v_δ → contribution -rhs_k * v_δ
                 norm_expr.addTerms([w_k], [v_d2[k]])
             pi_vars["v_delta"] = v_d2
             # No u_delta: π_δ ≤ 0
@@ -747,14 +732,14 @@ class BendersCGSPMixin:
         # ---- global: Σ_t y[t] = N - 2 ----
         if "global" in self.constrs_y and isinstance(self.constrs_y["global"], gp.Constr):
             rhs_global = self.constrs_y["global"].RHS
-            w_global = float(weights.get("global", 1.0))
+            w_global = float(weights.get("global", 1.0))  # type: ignore[arg-type]
             u_gl, v_gl = _add_pi_scalar("global", rhs_global, w_global)
             pi_vars["u_global"] = u_gl
             pi_vars["v_global"] = v_gl
 
         # ---- r1: area balance (fixed RHS = CH_area) ----
         if "r1" in self.constrs_y and isinstance(self.constrs_y["r1"], gp.Constr):
-            w_r1 = float(weights.get("r1", 1.0))
+            w_r1 = float(weights.get("r1", 1.0))  # type: ignore[arg-type]
             u_r1, v_r1 = _add_pi_scalar("r1", self.convex_hull_area, w_r1)
             pi_vars["u_r1"] = u_r1
             pi_vars["v_r1"] = v_r1
@@ -764,7 +749,7 @@ class BendersCGSPMixin:
             keys_r2 = list(self.constrs_y["r2"].keys())
             rhs_map_r2 = {k: 1.0 for k in keys_r2}
             w_map_r2 = weights.get("r2", {})
-            u_r2, v_r2 = _add_pi_indexed("r2", keys_r2, rhs_map_r2, w_map_r2)
+            u_r2, v_r2 = _add_pi_indexed("r2", keys_r2, rhs_map_r2, w_map_r2)  # type: ignore[arg-type]
             pi_vars["u_r2"] = u_r2
             pi_vars["v_r2"] = v_r2
 
@@ -772,11 +757,10 @@ class BendersCGSPMixin:
         if "r3" in self.constrs_y and self.constrs_y["r3"]:
             keys_r3 = list(self.constrs_y["r3"].keys())
             rhs_map_r3 = {
-                (i, j, k, s): 1.0 - x_sol.get((j, i), 0.0) - x_sol.get((k, s), 0.0)
-                for (i, j, k, s) in keys_r3
+                (i, j, k, s): 1.0 - x_sol.get((j, i), 0.0) - x_sol.get((k, s), 0.0) for (i, j, k, s) in keys_r3
             }
             w_map_r3 = weights.get("r3", {})
-            u_r3, v_r3 = _add_pi_indexed("r3", keys_r3, rhs_map_r3, w_map_r3)
+            u_r3, v_r3 = _add_pi_indexed("r3", keys_r3, rhs_map_r3, w_map_r3)  # type: ignore[arg-type]
             pi_vars["u_r3"] = u_r3
             pi_vars["v_r3"] = v_r3
 
@@ -790,10 +774,10 @@ class BendersCGSPMixin:
             # f^T x̄ is computed directly from the cached master cost vector
             # self._cost_x (NEVER from self.sub_y.ObjVal, which is the
             # artificial-slack minimum, not the area).
-            cost_x: dict = getattr(self, "_cost_x", {})
-            f_dot_x = sum(cost_x.get(arc, 0.0) * x_sol.get(arc, 0.0) for arc in cost_x)
+            cost_x: dict[str, Any] = getattr(self, "_cost_x", {})
+            f_dot_x = sum(cost_x.get(arc, 0.0) * x_sol.get(arc, 0.0) for arc in cost_x)  # type: ignore[call-overload]
             pi0_contribution = f_dot_x - eta_sol
-            w_pi0 = float(weights.get("pi0", 1.0))
+            w_pi0 = float(weights.get("pi0", 1.0))  # type: ignore[arg-type]
             obj_expr.addTerms([pi0_contribution, -pi0_contribution], [pi0_pos, pi0_neg])
             norm_expr.addTerms([w_pi0, w_pi0], [pi0_pos, pi0_neg])
             pi_vars["pi0_pos"] = pi0_pos
@@ -822,10 +806,10 @@ class BendersCGSPMixin:
 
     def _reconstruct_cut_from_pi(
         self,
-        pi_vars: dict[str, gp.Var | gp.tupledict],
+        pi_vars: dict[str, gp.Var | gp.tupledict[Any, gp.Var]],
         which: str,  # "y" or "yp"
         TOL: float = _CGSP_TOL,
-    ) -> tuple[gp.LinExpr, float, dict]:
+    ) -> tuple[gp.LinExpr, float, dict[str, Any]]:
         """Reconstruct a Benders cut from an already-solved pi_vars dict.
 
         This is the shared cut-reconstruction logic, separated so that both
@@ -849,23 +833,23 @@ class BendersCGSPMixin:
         """
         suffix = "_p" if which == "yp" else ""
 
-        def _net(u_key: str, v_key: str) -> dict:
-            out: dict = {}
+        def _net(u_key: str, v_key: str) -> dict[str, Any]:
+            out: dict[str, Any] = {}
             u_vars = pi_vars.get(u_key)
             v_vars = pi_vars.get(v_key)
             if u_vars is None and v_vars is None:
                 return out
             if isinstance(u_vars, gp.Var) or isinstance(v_vars, gp.Var):
-                u_val = u_vars.X if isinstance(u_vars, gp.Var) else 0.0  # type: ignore[union-attr]
-                v_val = v_vars.X if isinstance(v_vars, gp.Var) else 0.0  # type: ignore[union-attr]
+                u_val = u_vars.X if isinstance(u_vars, gp.Var) else 0.0
+                v_val = v_vars.X if isinstance(v_vars, gp.Var) else 0.0
                 val = u_val - v_val
                 if abs(val) > TOL:
                     out["scalar"] = val
             else:
                 keys = u_vars.keys() if u_vars is not None else v_vars.keys()  # type: ignore[union-attr]
                 for k in keys:
-                    u_val = u_vars[k].X if u_vars is not None else 0.0  # type: ignore[index]
-                    v_val = v_vars[k].X if v_vars is not None else 0.0  # type: ignore[index]
+                    u_val = u_vars[k].X if u_vars is not None else 0.0
+                    v_val = v_vars[k].X if v_vars is not None else 0.0
                     val = u_val - v_val
                     if abs(val) > TOL:
                         out[k] = val
@@ -873,34 +857,34 @@ class BendersCGSPMixin:
 
         cut_expr = gp.LinExpr()
         cut_rhs = 0.0
-        witness: dict = {}
+        witness: dict[str, Any] = {}
 
         if which == "yp":
-            constrs = self.constrs_yp  # type: ignore[attr-defined]
+            constrs = self.constrs_yp
 
             ap_net = _net("u_alpha_p", "v_alpha_p")
             if ap_net:
                 witness["alpha_p"] = ap_net
-                for (i, j), pi_val in ap_net.items():
-                    cut_expr += pi_val * (1.0 - self.x[i, j])  # type: ignore[attr-defined]
+                for (i, j), pi_val in ap_net.items():  # type: ignore[str-unpack]
+                    cut_expr += pi_val * (1.0 - self.x[i, j])  # type: ignore[index]
 
             bp_net = _net("u_beta_p", "v_beta_p")
             if bp_net:
                 witness["beta_p"] = bp_net
-                for (i, j), pi_val in bp_net.items():
-                    cut_expr += pi_val * (self.x[j, i] - self.x[i, j])  # type: ignore[attr-defined]
+                for (i, j), pi_val in bp_net.items():  # type: ignore[str-unpack]
+                    cut_expr += pi_val * (self.x[j, i] - self.x[i, j])  # type: ignore[index]
 
             gp_net = _net("u_gamma_p", "v_gamma_p")
             if gp_net:
                 witness["gamma_p"] = gp_net
-                for (i, j), pi_val in gp_net.items():
-                    cut_expr += pi_val * self.x[j, i]  # type: ignore[attr-defined]
+                for (i, j), pi_val in gp_net.items():  # type: ignore[str-unpack]
+                    cut_expr += pi_val * self.x[j, i]  # type: ignore[index]
 
             dp_net = _net("u_delta_p", "v_delta_p")
             if dp_net:
                 witness["delta_p"] = dp_net
-                for (i, j), pi_val in dp_net.items():
-                    cut_expr += pi_val * (1.0 - self.x[i, j])  # type: ignore[attr-defined]
+                for (i, j), pi_val in dp_net.items():  # type: ignore[str-unpack]
+                    cut_expr += pi_val * (1.0 - self.x[i, j])  # type: ignore[index]
 
             gl_net = _net("u_global_p", "v_global_p")
             if gl_net and "scalar" in gl_net:
@@ -912,7 +896,7 @@ class BendersCGSPMixin:
             r1_net = _net("u_r1_p", "v_r1_p")
             if r1_net and "scalar" in r1_net:
                 pi_val = r1_net["scalar"]
-                cut_rhs -= pi_val * self.convex_hull_area  # type: ignore[attr-defined]
+                cut_rhs -= pi_val * self.convex_hull_area
                 witness["r1_p"] = pi_val
 
             r2_net = _net("u_r2_p", "v_r2_p")
@@ -924,35 +908,35 @@ class BendersCGSPMixin:
             r3_net = _net("u_r3_p", "v_r3_p")
             if r3_net:
                 witness["r3_p"] = r3_net
-                for (i, j, k, s), pi_val in r3_net.items():
-                    cut_expr += pi_val * (1.0 - self.x[i, j] - self.x[s, k])  # type: ignore[attr-defined]
+                for (i, j, k, s), pi_val in r3_net.items():  # type: ignore[str-unpack]
+                    cut_expr += pi_val * (1.0 - self.x[i, j] - self.x[s, k])  # type: ignore[index]
 
         else:  # "y"
-            constrs = self.constrs_y  # type: ignore[attr-defined]
+            constrs = self.constrs_y
 
             a_net = _net("u_alpha", "v_alpha")
             if a_net:
                 witness["alpha"] = a_net
-                for (i, j), pi_val in a_net.items():
-                    cut_expr += pi_val * self.x[i, j]  # type: ignore[attr-defined]
+                for (i, j), pi_val in a_net.items():  # type: ignore[str-unpack]
+                    cut_expr += pi_val * self.x[i, j]  # type: ignore[index]
 
             b_net = _net("u_beta", "v_beta")
             if b_net:
                 witness["beta"] = b_net
-                for (i, j), pi_val in b_net.items():
-                    cut_expr += pi_val * (self.x[i, j] - self.x[j, i])  # type: ignore[attr-defined]
+                for (i, j), pi_val in b_net.items():  # type: ignore[str-unpack]
+                    cut_expr += pi_val * (self.x[i, j] - self.x[j, i])  # type: ignore[index]
 
             g_net = _net("u_gamma", "v_gamma")
             if g_net:
                 witness["gamma"] = g_net
-                for (i, j), pi_val in g_net.items():
-                    cut_expr += pi_val * self.x[i, j]  # type: ignore[attr-defined]
+                for (i, j), pi_val in g_net.items():  # type: ignore[str-unpack]
+                    cut_expr += pi_val * self.x[i, j]  # type: ignore[index]
 
             d_net = _net("u_delta", "v_delta")
             if d_net:
                 witness["delta"] = d_net
-                for (i, j), pi_val in d_net.items():
-                    cut_expr += pi_val * (1.0 - self.x[j, i])  # type: ignore[attr-defined]
+                for (i, j), pi_val in d_net.items():  # type: ignore[str-unpack]
+                    cut_expr += pi_val * (1.0 - self.x[j, i])  # type: ignore[index]
 
             gl_net = _net("u_global", "v_global")
             if gl_net and "scalar" in gl_net:
@@ -964,7 +948,7 @@ class BendersCGSPMixin:
             r1_net = _net("u_r1", "v_r1")
             if r1_net and "scalar" in r1_net:
                 pi_val = r1_net["scalar"]
-                cut_rhs -= pi_val * self.convex_hull_area  # type: ignore[attr-defined]
+                cut_rhs -= pi_val * self.convex_hull_area
                 witness["r1"] = pi_val
 
             r2_net = _net("u_r2", "v_r2")
@@ -976,8 +960,8 @@ class BendersCGSPMixin:
             r3_net = _net("u_r3", "v_r3")
             if r3_net:
                 witness["r3"] = r3_net
-                for (i, j, k, s), pi_val in r3_net.items():
-                    cut_expr += pi_val * (1.0 - self.x[j, i] - self.x[k, s])  # type: ignore[attr-defined]
+                for (i, j, k, s), pi_val in r3_net.items():  # type: ignore[str-unpack]
+                    cut_expr += pi_val * (1.0 - self.x[j, i] - self.x[k, s])  # type: ignore[index]
 
         return cut_expr, cut_rhs, witness
 
@@ -987,7 +971,7 @@ class BendersCGSPMixin:
 
     def _cgsp_yp_obj_expr(
         self,
-        pi_vars: dict,
+        pi_vars: dict[str, Any],
         x_sol: dict[Arc, float],
     ) -> gp.LinExpr:
         """Rebuild the CGSP Y' objective LinExpr from cached pi_vars + new x_sol.
@@ -1003,7 +987,7 @@ class BendersCGSPMixin:
         if u_ap is not None:
             for k in u_ap.keys():
                 rhs = 1.0 - x_sol.get(k, 0.0)
-                obj.addTerms([rhs, -rhs], [u_ap[k], v_ap[k]])
+                obj.addTerms([rhs, -rhs], [u_ap[k], v_ap[k]])  # type: ignore[index]
 
         # beta_p: RHS = x[j,i] - x[i,j]
         u_bp = pi_vars.get("u_beta_p")
@@ -1012,7 +996,7 @@ class BendersCGSPMixin:
             for k in u_bp.keys():
                 i, j = k
                 rhs = x_sol.get((j, i), 0.0) - x_sol.get((i, j), 0.0)
-                obj.addTerms([rhs, -rhs], [u_bp[k], v_bp[k]])
+                obj.addTerms([rhs, -rhs], [u_bp[k], v_bp[k]])  # type: ignore[index]
 
         # gamma_p: RHS = x[j,i]  (only u, no v)
         u_gp = pi_vars.get("u_gamma_p")
@@ -1033,14 +1017,14 @@ class BendersCGSPMixin:
         u_g = pi_vars.get("u_global_p")
         v_g = pi_vars.get("v_global_p")
         if u_g is not None and v_g is not None:
-            rhs = self.constrs_yp["global_p"].RHS  # type: ignore[attr-defined]
+            rhs = self.constrs_yp["global_p"].RHS
             obj.addTerms([rhs, -rhs], [u_g, v_g])
 
         # r1_p: fixed RHS = convex_hull_area
         u_r1 = pi_vars.get("u_r1_p")
         v_r1 = pi_vars.get("v_r1_p")
         if u_r1 is not None and v_r1 is not None:
-            rhs = self.convex_hull_area  # type: ignore[attr-defined]
+            rhs = self.convex_hull_area
             obj.addTerms([rhs, -rhs], [u_r1, v_r1])
 
         # r2_p: fixed RHS = 1
@@ -1048,7 +1032,7 @@ class BendersCGSPMixin:
         v_r2 = pi_vars.get("v_r2_p")
         if u_r2 is not None:
             for k in u_r2.keys():
-                obj.addTerms([1.0, -1.0], [u_r2[k], v_r2[k]])
+                obj.addTerms([1.0, -1.0], [u_r2[k], v_r2[k]])  # type: ignore[index]
 
         # r3_p: RHS = 1 - x[i,j] - x[s,k]
         u_r3 = pi_vars.get("u_r3_p")
@@ -1057,7 +1041,7 @@ class BendersCGSPMixin:
             for k in u_r3.keys():
                 i, j, ks, s = k
                 rhs = 1.0 - x_sol.get((i, j), 0.0) - x_sol.get((s, ks), 0.0)
-                obj.addTerms([rhs, -rhs], [u_r3[k], v_r3[k]])
+                obj.addTerms([rhs, -rhs], [u_r3[k], v_r3[k]])  # type: ignore[index]
 
         return obj
 
@@ -1077,7 +1061,7 @@ class BendersCGSPMixin:
         self,
         x_sol: dict[Arc, float],
         TOL: float = _CGSP_TOL,
-    ) -> tuple[gp.Model, dict]:
+    ) -> tuple[gp.Model, dict[str, Any]]:
         """Return a cached (and updated) CGSP Y' model, building it on first call.
 
         On first call: delegates to _build_cgsp_yp and stores result.
@@ -1087,7 +1071,7 @@ class BendersCGSPMixin:
         cache = getattr(self, "_cgsp_yp_cache", None)
         if cache is None:
             cgsp, pi_vars = self._build_cgsp_yp(x_sol, TOL=TOL)
-            self._cgsp_yp_cache: tuple[gp.Model, dict] = (cgsp, pi_vars)
+            self._cgsp_yp_cache: tuple[gp.Model, dict[str, Any]] = (cgsp, pi_vars)  # type: ignore[assignment, no-redef]
             return cgsp, pi_vars
         cgsp, pi_vars = cache
         # Update objective for new x_sol
@@ -1186,7 +1170,7 @@ class BendersCGSPMixin:
         x_sol: dict[Arc, float],
         eta_sol: float = 0.0,
         TOL: float = _CGSP_TOL,
-    ) -> tuple[gp.Model, dict, gp.Var | None]:
+    ) -> tuple[gp.Model, dict[str, Any], gp.Var | None]:
         """Return a cached (and updated) CGSP Y model, building it on first call.
 
         On first call: builds and caches the full LP structure.
@@ -1207,7 +1191,7 @@ class BendersCGSPMixin:
         self,
         x_sol: dict[Arc, float],
         TOL: float = _CGSP_TOL,
-    ) -> tuple[gp.LinExpr, float, dict] | tuple[None, None, dict]:
+    ) -> tuple[gp.LinExpr, float, dict[str, Any]] | tuple[None, None, dict[str, Any]]:
         """Generate the deepest feasibility cut for Y' via CGSP.
 
         Parameters
@@ -1248,7 +1232,7 @@ class BendersCGSPMixin:
         x_sol: dict[Arc, float],
         eta_sol: float = 0.0,
         TOL: float = _CGSP_TOL,
-    ) -> tuple[gp.LinExpr, float, dict] | tuple[None, None, dict]:
+    ) -> tuple[gp.LinExpr, float, dict[str, Any]] | tuple[None, None, dict[str, Any]]:
         """Generate the deepest feasibility (or optimality) cut for Y via CGSP.
 
         For Fekete objective: returns a feasibility cut  cut_expr <= cut_rhs.
@@ -1288,7 +1272,7 @@ class BendersCGSPMixin:
         if cgsp.ObjVal <= TOL:
             return None, None, {"aborted": "no_violation"}
 
-        is_internal = (getattr(self, "objective", "Fekete") == "Internal")
+        is_internal = getattr(self, "objective", "Fekete") == "Internal"
 
         # Determine if this is an optimality cut
         pi0_net = 0.0
@@ -1308,8 +1292,7 @@ class BendersCGSPMixin:
         if is_optimality_cut and is_internal:
             if pi0_net < -TOL:
                 logger.warning(
-                    "CGSP-Y: pi0_net=%.3e < -TOL; skipping cut "
-                    "(numerical sign anomaly).",
+                    "CGSP-Y: pi0_net=%.3e < -TOL; skipping cut (numerical sign anomaly).",
                     pi0_net,
                 )
                 return None, None, {"aborted": "pi0_negative", "pi0_net": pi0_net}
@@ -1364,10 +1347,11 @@ class BendersCGSPMixin:
 # Module-level helpers
 # ------------------------------------------------------------------
 
+
 def _rhs_for_key(
     group: str,
-    arc_key: tuple,
-    x_sol: dict[tuple, float],
+    arc_key: tuple[Any, ...],
+    x_sol: dict[tuple[Any, ...], float],
     model: object,
 ) -> float:
     """Return the RHS value b_i(x_bar) for a given constraint group and key.
