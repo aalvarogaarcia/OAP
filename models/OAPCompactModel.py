@@ -101,6 +101,7 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
         verbose: bool = False,
         relaxed: bool = False,
         plot: bool = False,
+        threads: int = 0,
     ) -> None:
         """Ejecuta la optimización del modelo, aplica relajación si es necesario
         y procesa los resultados.
@@ -114,7 +115,9 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
         self.model.Params.MIPGapAbs = 1.99
         self.model.Params.NodeLimit = GRB.INFINITY
         self.model.Params.SolutionLimit = GRB.MAXINT
-
+        if threads > 0:
+            self.model.setParam("Threads", threads)
+            
         self.model.update()
 
         # --- Relajación Lineal (LP Relaxation) ---

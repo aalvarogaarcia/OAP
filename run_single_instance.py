@@ -134,6 +134,13 @@ def _parse_args() -> argparse.Namespace:
         metavar="JSON_OR_PAIRS",
         help=("L1 normalisation weights for Y'-subproblem CGSP. Same format as --cut-weights-y."),
     )
+    p.add_argument(
+        "--threads",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Number of threads for compact optimization (0 for default, typically all available cores)",
+    )
 
     return p.parse_args()
 
@@ -217,6 +224,7 @@ def _build_config_from_args(args: argparse.Namespace) -> dict[str, object]:
         # Kept for compatibility with downstream logic
         "modify_log_path": False,
         "Extra_Constraints": False,
+        "Threads": args.threads,
     }
 
 
@@ -260,7 +268,7 @@ def main() -> None:
         )
 
         print("\n[!] Resolviendo...")
-        modelo.solve(relaxed=config["relaxed"], verbose=True)  # type: ignore[arg-type]
+        modelo.solve(relaxed=config["relaxed"], verbose=True, threads=config["Threads"])  # type: ignore[arg-type]
 
         # Bloque Polihedral corregido: Preguntamos primero, extraemos/guardamos después
         if config["polihedral"]:
