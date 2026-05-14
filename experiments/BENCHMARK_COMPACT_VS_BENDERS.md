@@ -87,11 +87,12 @@ Example `config.json`:
 - `gap_pct` — optimality gap as percentage (4 decimals), or "-"
 - `time_s` — wall-clock time in seconds (2 decimals)
 - `nodes` — number of B&B nodes explored, or "-"
+- `total_cuts` — number of Benders cuts added as lazy constraints during B&B; always 0 for compact_threads1
 - `status` — "OK" for success, or "FAILED: {ExceptionType}: {message}"
 
 **Example row:**
 ```
-feat-02-01,25,benders_mw_lp,True,1234.5600,1240.9800,0.5100,4.1200,89,OK
+feat-02-01,25,benders_mw_lp,True,1234.5600,1240.9800,0.5100,4.1200,89,142,OK
 ```
 
 ### Configuration Snapshot
@@ -253,16 +254,33 @@ Open `outputs/CSV/benchmark_compact_vs_benders_*.csv` in Excel/Pandas:
 
 ```python
 import pandas as pd
+import numpy as np
+
 df = pd.read_csv("outputs/CSV/benchmark_compact_vs_benders_20260514_142000.csv")
 
 # Filter to maximize=True only
 df_max = df[df['maximize'] == True]
 
+# Convert sentinel "-" to NaN for numeric columns
+for col in ['root_lp', 'final_ip', 'gap_pct', 'time_s', 'nodes', 'total_cuts']:
+    df_max[col] = pd.to_numeric(df_max[col], errors='coerce')
+
 # Time per method
 print(df_max.groupby('method')['time_s'].agg(['sum', 'mean', 'min', 'max']))
 
 # Gap per method
-print(df_max[df_max['gap_pct'] != '-'].groupby('method')['gap_pct'].agg(['median', 'max', 'mean']))
+print(df_max.groupby('method')['gap_pct'].agg(['median', 'max', 'mean']))
+
+# Cuts per method (Benders only)
+benders = df_max[df_max['method'] != 'compact_threads1']
+print(benders.groupby('method')['total_cuts'].agg(['sum', 'mean', 'max']))
+
+# Performance profile: cumulative instances solved within time t
+import matplotlib.pyplot as plt
+for method, grp in df_max.groupby('method'):
+    times_sorted = np.sort(grp['time_s'].dropna())
+    plt.plot(times_sorted, np.arange(1, len(times_sorted)+1), label=method)
+plt.xlabel('Time (s)'); plt.ylabel('# Instances solved'); plt.legend(); plt.show()
 ```
 
 ### 4. Compare vs Baseline
@@ -280,10 +298,11 @@ for method in ['benders_farkas_vanilla', 'benders_mw_lp', 'benders_ddma']:
 
 ## Known Limitations
 
-1. **No automatic plotting** — CSV is provided; use Excel, pandas, or matplotlib to visualize.
+1. **No automatic plotting** — CSV is provided; use pandas + matplotlib for performance profiles (see example above).
 2. **Single-threaded only** — Threads=1 enforced for reproducibility; parallelism not benchmarked.
 3. **Deterministic seed** — Seed=0 for reproducibility; stochastic behavior not explored.
 4. **Fekete objective only** — Other objectives (Internal, External, Diagonals) not compared.
+5. **`total_cuts` counts lazy constraints delta** — this equals the number of Benders cuts injected via the lazy callback. For Compact, it is always 0. Note that Gurobi may also add its own cuts (Gomory, clique, etc.); those are reflected in `model.model.NumGenConstrs` separately and are not counted here.
 
 ---
 

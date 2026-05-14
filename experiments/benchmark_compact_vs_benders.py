@@ -19,25 +19,24 @@ Supports:
 """
 
 import argparse
-import csv
 import cProfile
+import csv
 import json
 import logging
-import os
 import pstats
 import sys
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 # Add repo root to path
 REPO_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from models import OAPBendersModel, OAPCompactModel
-from utils.utils import compute_triangles, read_indexed_instance
+from models import OAPBendersModel, OAPCompactModel  # noqa: E402
+from utils.utils import compute_triangles, read_indexed_instance  # noqa: E402
 
 # ============================================================================
 # LOGGING
@@ -139,6 +138,7 @@ CSV_FIELDNAMES = [
     "gap_pct",
     "time_s",
     "nodes",
+    "total_cuts",
     "status",
 ]
 
@@ -164,14 +164,15 @@ class ResultRow:
     """Single result row (instance, method, maximize)."""
 
     instance: str
-    n_nodes: Optional[int] = None
+    n_nodes: int | None = None
     method: str = ""
     maximize: bool = True
-    root_lp: Optional[float] = None
-    final_ip: Optional[float] = None
-    gap_pct: Optional[float] = None
-    time_s: Optional[float] = None
-    nodes: Optional[int] = None
+    root_lp: float | None = None
+    final_ip: float | None = None
+    gap_pct: float | None = None
+    time_s: float | None = None
+    nodes: int | None = None
+    total_cuts: int | None = None  # Benders cuts added during solve; 0 for Compact
     status: str = "PENDING"
 
 
@@ -404,6 +405,9 @@ def run_single_solve(
             profiler = cProfile.Profile()
             profiler.enable()
 
+        # Snapshot constraint count before solve to measure Benders cuts added
+        num_constrs_before = model.model.NumConstrs
+
         # Measure wall-clock time
         wall_start = time.perf_counter()
         model.solve(time_limit=time_limit, verbose=False)
@@ -421,6 +425,8 @@ def run_single_solve(
         row.gap_pct = _safe_round(gap, 4)
         row.time_s = _safe_round(wall_elapsed, 2)
         row.nodes = int(nodes) if isinstance(nodes, (int, float)) and nodes != "-" else None
+        # Cuts added as lazy constraints during B&B (0 for Compact model)
+        row.total_cuts = max(0, model.model.NumConstrs - num_constrs_before)
         row.status = "OK"
 
         # Dump profiling if enabled
@@ -472,7 +478,7 @@ def _dump_profile_csv(
             )
             writer.writeheader()
 
-            for func, (cc, nc, tt, ct, callers) in stats.stats.items():
+            for func, (_cc, nc, tt, ct, _callers) in stats.stats.items():
                 fname, lineno, funcname = func
                 profile_rows.append(
                     {
@@ -588,17 +594,18 @@ def write_report(
     for instance_name in sorted(by_instance.keys()):
         lines.append(f"### {instance_name}\n\n")
         lines.append(
-            "| Method | Maximize | Root LP | Final IP | Gap (%) | Time (s) | Nodes | Status |\n"
+            "| Method | Maximize | Root LP | Final IP | Gap (%) | Time (s) | Nodes | Cuts | Status |\n"
         )
-        lines.append("|--------|----------|---------|----------|---------|----------|-------|--------|\n")
+        lines.append("|--------|----------|---------|----------|---------|----------|-------|------|--------|\n")
 
         for method_key in cfg.methods:
             if method_key in by_instance[instance_name]:
                 for row in by_instance[instance_name][method_key]:
                     maximize_str = "Max" if row.maximize else "Min"
+                    cuts_str = str(row.total_cuts) if row.total_cuts is not None else "-"
                     lines.append(
                         f"| `{row.method}` | {maximize_str} | {row.root_lp} | {row.final_ip} | "
-                        f"{row.gap_pct} | {row.time_s} | {row.nodes} | {row.status} |\n"
+                        f"{row.gap_pct} | {row.time_s} | {row.nodes} | {cuts_str} | {row.status} |\n"
                     )
 
         lines.append("\n")
@@ -630,6 +637,24 @@ def write_report(
                          for row in t_list[method_key]
                          if row.status == "OK")
             lines.append(f"| `{method_key}` | {total:.2f} | {avg:.2f} | {min_t:.2f} | {max_t:.2f} | {ok_count} |\n")
+
+    lines.append("\n### Total Cuts Added\n\n")
+    lines.append("| Method | Total | Avg | Max |\n")
+    lines.append("|--------|-------|-----|-----|\n")
+
+    for method_key in cfg.methods:
+        cuts = [
+            row.total_cuts
+            for result_list in by_instance.values()
+            if method_key in result_list
+            for row in result_list[method_key]
+            if row.total_cuts is not None
+        ]
+        if cuts:
+            total_c = sum(cuts)
+            avg_c = total_c / len(cuts)
+            max_c = max(cuts)
+            lines.append(f"| `{method_key}` | {total_c} | {avg_c:.1f} | {max_c} |\n")
 
     lines.append("\n### Optimality Gap (%)\n\n")
     lines.append("| Method | Median | Max | Avg |\n")
