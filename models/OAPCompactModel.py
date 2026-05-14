@@ -211,78 +211,34 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
         plt.show()
 
     # ------------------------------------------------------------------
-    # LP-relaxation plotting (flow decomposition)
+    # LP-relaxation plotting (grouped by arc value)
     # ------------------------------------------------------------------
 
-    def _decompose_flows(self, arc_values: dict[Arc, float]) -> list[tuple[list[Arc], float]]:
-        """Descompone una solución LP fraccionaria en ciclos elementales.
-
-        Devuelve una lista de grupos (arcos_del_ciclo, flujo). El flujo de cada
-        ciclo es el mínimo valor residual a lo largo de sus arcos.
-        """
-        residual: dict[Arc, float] = dict(arc_values)
-        groups: list[tuple[list[Arc], float]] = []
-        eps = 1e-6
-
-        while residual:
-            # El nodo de inicio siempre tiene arco saliente en residual
-            start = next(iter(residual))[0]
-            path: list[int] = [start]
-            path_arcs: list[Arc] = []
-            visited: dict[int, int] = {start: 0}
-            current = start
-            found_cycle = False
-
-            while True:
-                out_arc = next((a for a in residual if a[0] == current), None)
-                if out_arc is None:
-                    # Dead-end numérico: no debería ocurrir con flow-balance,
-                    # pero evitamos bucle infinito.
-                    break
-
-                nxt = out_arc[1]
-                path_arcs.append(out_arc)
-
-                if nxt in visited:
-                    # Ciclo encontrado: extraer desde donde se repite el nodo
-                    cycle_arcs = path_arcs[visited[nxt]:]
-                    flow = min(residual[a] for a in cycle_arcs)
-                    groups.append((cycle_arcs, flow))
-                    for a in cycle_arcs:
-                        residual[a] -= flow
-                        if residual[a] <= eps:
-                            del residual[a]
-                    found_cycle = True
-                    break
-
-                visited[nxt] = len(path)
-                path.append(nxt)
-                current = nxt
-
-            if not found_cycle:
-                # Eliminar un arco del nodo bloqueado para garantizar progreso
-                dead_arc = next((a for a in residual if a[0] == start), None)
-                if dead_arc is not None:
-                    del residual[dead_arc]
-
-        return groups
-
     def _plot_relaxed(self, title: str) -> None:
-        """Dibuja la solución LP relajada con descomposición de flujo.
+        """Dibuja la solución LP relajada agrupando arcos por su valor fraccionario.
 
-        Cada ciclo/camino elemental de la descomposición recibe un color
-        distinto; el grosor de las aristas es proporcional al flujo.
+        Arcos con el mismo valor (redondeado a 3 decimales) comparten color,
+        permitiendo identificar visualmente dónde se divide el flujo
+        (e.g. x=0.5 indica bifurcación igual en dos caminos).
+        El grosor de línea es proporcional al valor del arco.
         """
         if not hasattr(self, "x_relaxed") or not self.x_relaxed:
             print("No LP relaxation results to plot.")
             return
 
-        groups = self._decompose_flows(self.x_relaxed)
+        # Agrupar arcos por valor redondeado
+        groups: dict[float, list[Arc]] = {}
+        for arc, val in self.x_relaxed.items():
+            key = round(val, 3)
+            groups.setdefault(key, []).append(arc)
+
+        # Ordenar niveles de mayor a menor para que los más fuertes queden al frente
+        sorted_levels = sorted(groups.keys(), reverse=True)
         cmap = plt.get_cmap("tab10")
         hull_set = set(self.CH)
 
         fig, ax = plt.subplots(figsize=(8, 8))
-        ax.set_title(f"{title} (LP relaxation — flow decomposition)")
+        ax.set_title(f"{title} (LP relaxation — arc values)")
         ax.scatter(self.points[:, 0], self.points[:, 1], color="blue", zorder=3)
 
         # Convex hull
@@ -291,17 +247,17 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
             pt2 = self.points[self.CH[(i + 1) % len(self.CH)]]
             ax.plot([pt1[0], pt2[0]], [pt1[1], pt2[1]], "g-.", alpha=0.4, zorder=1)
 
-        # Arcos por grupo, coloreados
+        # Arcos coloreados por nivel de valor
         legend_handles = []
-        for idx, (arcs, flow) in enumerate(groups):
+        for idx, level in enumerate(sorted_levels):
             color = cmap(idx % 10)
-            lw = 1.0 + 4.0 * flow
-            for arc in arcs:
+            lw = 1.0 + 4.0 * level
+            for arc in groups[level]:
                 pt1 = self.points[arc[0]]
                 pt2 = self.points[arc[1]]
-                ax.plot([pt1[0], pt2[0]], [pt1[1], pt2[1]], color=color, linewidth=lw, alpha=0.8, zorder=2)
+                ax.plot([pt1[0], pt2[0]], [pt1[1], pt2[1]], color=color, linewidth=lw, alpha=0.85, zorder=2)
             legend_handles.append(
-                Line2D([0], [0], color=color, linewidth=lw, label=f"Grupo {idx + 1}  (flow={flow:.3f})")
+                Line2D([0], [0], color=color, linewidth=lw, label=f"x = {level:.3f}  ({len(groups[level])} arcos)")
             )
 
         # Etiquetas de nodos
