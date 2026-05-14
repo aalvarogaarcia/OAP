@@ -383,14 +383,12 @@ def run_single_solve(
             model = OAPCompactModel(points, triangles, name=f"bench-{stem}-{method}")
             model.build(
                 maximize=maximize,
-                sum_constrain=True,
                 **method_cfg["build_kwargs"],
             )
         else:  # benders
             model = OAPBendersModel(points, triangles, name=f"bench-{stem}-{method}")
             model.build(
                 maximize=maximize,
-                sum_constrain=True,
                 **method_cfg["build_kwargs"],
             )
 
