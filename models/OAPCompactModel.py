@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 from gurobipy import GRB
+from matplotlib.lines import Line2D
 from numpy.typing import NDArray
 
 from models.mixin.oap_builder_mixin import OAPBuilderMixin
@@ -132,20 +133,27 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
 
         # --- Extracción de Resultados ---
         self.x_results: list[Arc] = []
+        self.x_relaxed: dict[Arc, float] = {}
 
         if self.model.SolCount > 0:
             self.x_results = [arc for arc, var in self.x.items() if var.X > 0.5]
+            if relaxed:
+                self.x_relaxed = {arc: var.X for arc, var in self.x.items() if var.X > 1e-6}
 
         # --- Visualización ---
         if plot:
             if self.model.SolCount > 0:
                 title = "Optimal Tour" if self.model.Status == GRB.OPTIMAL else "Best Found Tour"
-                self.plot(title=title)
+                self.plot(title=title, relaxed=relaxed)
             elif verbose:
                 print("No feasible solution found to plot.")
 
-    def plot(self, title: str = "Solution") -> None:
+    def plot(self, title: str = "Solution", relaxed: bool = False) -> None:
         """Dibuja la solución del modelo utilizando los resultados almacenados en la clase."""
+        if relaxed:
+            self._plot_relaxed(title)
+            return
+
         if not hasattr(self, "x_results") or not self.x_results:
             print("No results to plot. Please solve the model first and ensure a solution was found.")
             return
@@ -200,6 +208,126 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
         plt.ylabel("Y")
         plt.axis("equal")
         plt.grid(True)
+        plt.show()
+
+    # ------------------------------------------------------------------
+    # LP-relaxation plotting (flow decomposition)
+    # ------------------------------------------------------------------
+
+    def _decompose_flows(self, arc_values: dict[Arc, float]) -> list[tuple[list[Arc], float]]:
+        """Descompone una solución LP fraccionaria en ciclos elementales.
+
+        Devuelve una lista de grupos (arcos_del_ciclo, flujo). El flujo de cada
+        ciclo es el mínimo valor residual a lo largo de sus arcos.
+        """
+        residual: dict[Arc, float] = dict(arc_values)
+        groups: list[tuple[list[Arc], float]] = []
+        eps = 1e-6
+
+        while residual:
+            # El nodo de inicio siempre tiene arco saliente en residual
+            start = next(iter(residual))[0]
+            path: list[int] = [start]
+            path_arcs: list[Arc] = []
+            visited: dict[int, int] = {start: 0}
+            current = start
+            found_cycle = False
+
+            while True:
+                out_arc = next((a for a in residual if a[0] == current), None)
+                if out_arc is None:
+                    # Dead-end numérico: no debería ocurrir con flow-balance,
+                    # pero evitamos bucle infinito.
+                    break
+
+                nxt = out_arc[1]
+                path_arcs.append(out_arc)
+
+                if nxt in visited:
+                    # Ciclo encontrado: extraer desde donde se repite el nodo
+                    cycle_arcs = path_arcs[visited[nxt]:]
+                    flow = min(residual[a] for a in cycle_arcs)
+                    groups.append((cycle_arcs, flow))
+                    for a in cycle_arcs:
+                        residual[a] -= flow
+                        if residual[a] <= eps:
+                            del residual[a]
+                    found_cycle = True
+                    break
+
+                visited[nxt] = len(path)
+                path.append(nxt)
+                current = nxt
+
+            if not found_cycle:
+                # Eliminar un arco del nodo bloqueado para garantizar progreso
+                dead_arc = next((a for a in residual if a[0] == start), None)
+                if dead_arc is not None:
+                    del residual[dead_arc]
+
+        return groups
+
+    def _plot_relaxed(self, title: str) -> None:
+        """Dibuja la solución LP relajada con descomposición de flujo.
+
+        Cada ciclo/camino elemental de la descomposición recibe un color
+        distinto; el grosor de las aristas es proporcional al flujo.
+        """
+        if not hasattr(self, "x_relaxed") or not self.x_relaxed:
+            print("No LP relaxation results to plot.")
+            return
+
+        groups = self._decompose_flows(self.x_relaxed)
+        cmap = plt.get_cmap("tab10")
+        hull_set = set(self.CH)
+
+        fig, ax = plt.subplots(figsize=(8, 8))
+        ax.set_title(f"{title} (LP relaxation — flow decomposition)")
+        ax.scatter(self.points[:, 0], self.points[:, 1], color="blue", zorder=3)
+
+        # Convex hull
+        for i in range(len(self.CH)):
+            pt1 = self.points[self.CH[i]]
+            pt2 = self.points[self.CH[(i + 1) % len(self.CH)]]
+            ax.plot([pt1[0], pt2[0]], [pt1[1], pt2[1]], "g-.", alpha=0.4, zorder=1)
+
+        # Arcos por grupo, coloreados
+        legend_handles = []
+        for idx, (arcs, flow) in enumerate(groups):
+            color = cmap(idx % 10)
+            lw = 1.0 + 4.0 * flow
+            for arc in arcs:
+                pt1 = self.points[arc[0]]
+                pt2 = self.points[arc[1]]
+                ax.plot([pt1[0], pt2[0]], [pt1[1], pt2[1]], color=color, linewidth=lw, alpha=0.8, zorder=2)
+            legend_handles.append(
+                Line2D([0], [0], color=color, linewidth=lw, label=f"Grupo {idx + 1}  (flow={flow:.3f})")
+            )
+
+        # Etiquetas de nodos
+        for i, pt in enumerate(self.points):
+            if i in hull_set:
+                ax.annotate(
+                    str(i), (pt[0], pt[1]),
+                    textcoords="offset points", xytext=(5, 5),
+                    fontsize=10, color="red", fontweight="bold",
+                    bbox=dict(boxstyle="round,pad=0.3", facecolor="yellow", alpha=0.7),
+                )
+            else:
+                ax.annotate(
+                    str(i), (pt[0], pt[1]),
+                    textcoords="offset points", xytext=(5, 5),
+                    fontsize=9, color="black",
+                    bbox=dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.6),
+                )
+
+        if legend_handles:
+            ax.legend(handles=legend_handles, loc="best", fontsize=8)
+
+        ax.set_xlabel("X")
+        ax.set_ylabel("Y")
+        ax.set_aspect("equal")
+        ax.grid(True)
         plt.show()
 
     def __str__(self) -> str:
