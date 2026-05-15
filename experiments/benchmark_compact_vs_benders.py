@@ -445,6 +445,18 @@ def run_single_solve(
 # ============================================================================
 
 
+def _is_project_row(fname: str) -> bool:
+    """Return True for project-code frames; discard Python stdlib / site-packages."""
+    if fname == "~":
+        # built-in methods — keep, they show real cost
+        return True
+    try:
+        Path(fname).resolve().relative_to(REPO_ROOT)
+        return True
+    except ValueError:
+        return False
+
+
 def _dump_profile_csv(
     profiler: cProfile.Profile, method: str, instance_stem: str
 ) -> list[dict[str, Any]]:
@@ -452,43 +464,49 @@ def _dump_profile_csv(
     profile_rows: list[dict[str, Any]] = []
 
     try:
-        # Get stats
         stats = pstats.Stats(profiler)
         stats.strip_dirs()
 
-        # Per-instance profile
         profiling_dir = REPO_ROOT / "outputs" / "profiling"
         _ensure_dir(profiling_dir)
 
         profile_csv = profiling_dir / f"profile_{method}_{instance_stem}.csv"
 
+        for func, (_cc, nc, tt, ct, _callers) in stats.stats.items():
+            fname, lineno, funcname = func
+            if not _is_project_row(fname):
+                continue
+            profile_rows.append(
+                {
+                    "ncalls": nc,
+                    "tottime": tt,
+                    "percall_tot": tt / nc if nc > 0 else 0,
+                    "cumtime": ct,
+                    "percall_cum": ct / nc if nc > 0 else 0,
+                    "filename": fname,
+                    "lineno": lineno,
+                    "function": funcname,
+                }
+            )
+
+        profile_rows.sort(key=lambda r: r["tottime"], reverse=True)
+
         with open(profile_csv, "w", newline="") as f:
             writer = csv.DictWriter(
                 f,
                 fieldnames=[
-                    "function",
                     "ncalls",
                     "tottime",
                     "percall_tot",
                     "cumtime",
                     "percall_cum",
+                    "filename",
+                    "lineno",
+                    "function",
                 ],
             )
             writer.writeheader()
-
-            for func, (_cc, nc, tt, ct, _callers) in stats.stats.items():
-                fname, lineno, funcname = func
-                profile_rows.append(
-                    {
-                        "function": f"{fname}:{funcname}",
-                        "ncalls": nc,
-                        "tottime": tt,
-                        "percall_tot": tt / nc if nc > 0 else 0,
-                        "cumtime": ct,
-                        "percall_cum": ct / nc if nc > 0 else 0,
-                    }
-                )
-                writer.writerow(profile_rows[-1])
+            writer.writerows(profile_rows)
 
         logger.info("Profiling CSV written to %s", profile_csv)
 

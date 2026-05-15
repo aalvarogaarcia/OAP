@@ -1,5 +1,7 @@
 # OAPCompactModel.py
-from typing import Literal
+import csv
+from pathlib import Path
+from typing import Any, Literal
 
 import gurobipy as gp
 import matplotlib.pyplot as plt
@@ -285,6 +287,58 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
         ax.set_aspect("equal")
         ax.grid(True)
         plt.show()
+
+    def dump_vars_csv(self, filepath: str | Path) -> None:
+        """Write solution variable values to a CSV file.
+
+        Columns: var_type, idx_0, idx_1, value
+          - x, f, z, zp  : idx_0 = arc source, idx_1 = arc destination
+          - y, yp         : idx_0 = triangle index, idx_1 = ""
+          - u             : idx_0 = node index,     idx_1 = ""
+          - f_mcf         : idx_0 = commodity,      idx_1 = "src_dst"
+
+        Only variables with |X| > 1e-9 are written.
+        Rows are sorted by (var_type, idx_0, idx_1).
+        Must be called after solve() when model.SolCount > 0.
+        """
+        if self.model.SolCount == 0:
+            raise RuntimeError("dump_vars_csv: no feasible solution available (SolCount == 0)")
+
+        path = Path(filepath)
+        parent = path.parent
+        if parent:
+            parent.mkdir(parents=True, exist_ok=True)
+
+        rows: list[dict[str, Any]] = []
+
+        def _collect(var_type: str, idx_0: Any, idx_1: Any, var: gp.Var) -> None:
+            if abs(var.X) < 1e-9:
+                return
+            rows.append({"var_type": var_type, "idx_0": idx_0, "idx_1": idx_1, "value": round(var.X, 8)})
+
+        for (i, j), v in self.x.items():
+            _collect("x", i, j, v)
+        for t, v in self.y.items():
+            _collect("y", t, "", v)
+        for t, v in self.yp.items():
+            _collect("yp", t, "", v)
+        for (i, j), v in self.f.items():
+            _collect("f", i, j, v)
+        for n, v in self.u.items():
+            _collect("u", n, "", v)
+        for (i, j), v in self.z.items():
+            _collect("z", i, j, v)
+        for (i, j), v in self.zp.items():
+            _collect("zp", i, j, v)
+        for (k, i, j), v in self.f_mcf.items():
+            _collect("f_mcf", k, f"{i}_{j}", v)
+
+        rows.sort(key=lambda r: (r["var_type"], r["idx_0"], str(r["idx_1"])))
+
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=["var_type", "idx_0", "idx_1", "value"])
+            writer.writeheader()
+            writer.writerows(rows)
 
     def __str__(self) -> str:
         """Define lo que se muestra al hacer print() de la instancia de la clase."""
