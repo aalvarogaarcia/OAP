@@ -52,6 +52,8 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
         self.f_mcf: McfVarMap = {}
         self.z: ArcVarMap = {}
         self.zp: ArcVarMap = {}
+        # Variables η_s del híbrido MT3D+η (una por celda del arreglo)
+        self.eta: dict[int, gp.Var] = {}
 
     def build(
         self,
@@ -68,6 +70,7 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
         use_triangle_cliques: bool = False,
         arc_triangle_link: bool = False,
         cell_coverage: bool = False,
+        hybrid_eta: bool = False,
     ) -> None:
         """
         Orquestador principal que construye el modelo paso a paso.
@@ -109,6 +112,9 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
 
         if cell_coverage:
             self._add_cell_coverage_constraints()
+
+        if hybrid_eta:
+            self._add_hybrid_eta_constraints()
 
         self.model.update()
 
@@ -775,3 +781,81 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
                     n_added += 1
 
         print(f"Añadidas {n_added} restricciones de cobertura de celdas.")
+
+    def _add_hybrid_eta_constraints(self) -> None:
+        """Formulación híbrida MT3D + η (Modelo A).
+
+        Introduce variables η_s ∈ [0,1] por celda s del arreglo de segmentos
+        candidatos E" y añade:
+
+          (i)  η_s = Σ_{t ⊇ s} y_t                     ∀s ∈ W   (enlace)
+          (ii) η_s − η_{s'} = x_ij − x_ji               ∀{s,s'}∈H_ij, {i,j}∈E"
+                                                                   (MSD constraint 28)
+
+        El bound LP resultante domina simultáneamente al de MT3D y al de MSD
+        (Teorema 4 del paper), sin eliminar variables — MT3D sigue siendo el
+        subconjunto de restricciones de partida.
+        """
+        e_double_prime = [
+            (i, j)
+            for (i, j) in self.x.keys()
+            if i < j and (i not in self.CH or j not in self.CH)
+        ]
+        hij_data = compute_hij_data(self.points, self.triangles, e_double_prime)
+
+        # ------------------------------------------------------------------
+        # 1. Identificar celdas únicas y crear variables η_s
+        # ------------------------------------------------------------------
+        cells: dict[frozenset[int], int] = {}  # tris_key → cell_id
+
+        for sub_segs in hij_data.values():
+            for left_tris, right_tris in sub_segs:
+                for cell_tris in (left_tris, right_tris):
+                    key = frozenset(cell_tris)
+                    if key and key not in cells:
+                        cell_id = len(cells)
+                        cells[key] = cell_id
+                        self.eta[cell_id] = self.model.addVar(
+                            lb=0.0, ub=1.0, vtype=GRB.CONTINUOUS,
+                            name=f"eta_{cell_id}",
+                        )
+
+        self.model.update()
+
+        # ------------------------------------------------------------------
+        # 2. Enlace η_s = Σ_{t ⊇ s} y_t
+        # ------------------------------------------------------------------
+        for key, cell_id in cells.items():
+            self.model.addConstr(
+                self.eta[cell_id] == gp.quicksum(self.y[t] for t in key),
+                name=f"eta_link_{cell_id}",
+            )
+
+        # ------------------------------------------------------------------
+        # 3. Cruce H_ij: η_s − η_{s'} = x_ij − x_ji  (MSD constraint 28)
+        # ------------------------------------------------------------------
+        n_cross = 0
+        for (i, j), sub_segs in hij_data.items():
+            x_diff = gp.LinExpr()
+            x_diff.addTerms(1.0, self.x[i, j])
+            if (j, i) in self.x:
+                x_diff.addTerms(-1.0, self.x[j, i])
+
+            for k, (left_tris, right_tris) in enumerate(sub_segs):
+                left_key = frozenset(left_tris)
+                right_key = frozenset(right_tris)
+                if left_key not in cells or right_key not in cells:
+                    continue
+                left_id = cells[left_key]
+                right_id = cells[right_key]
+                self.model.addConstr(
+                    self.eta[left_id] - self.eta[right_id] == x_diff,
+                    name=f"eta_cross_{i}_{j}_{k}",
+                )
+                n_cross += 1
+
+        print(
+            f"Híbrido MT3D+η: {len(cells)} vars η, "
+            f"{len(cells)} restricciones de enlace, "
+            f"{n_cross} restricciones de cruce H_ij."
+        )
