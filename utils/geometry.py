@@ -594,3 +594,115 @@ def extract_metric_to_csv(
         print(f"Error: No se encontró el archivo '{input_tsv}'.")
     except Exception as exc:
         print(f"Error inesperado: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# Arrangement-based H_ij utilities (arc-triangle dual link constraints)
+# ---------------------------------------------------------------------------
+
+
+def segment_intersection_parameter(
+    p1: NDArray[np.int64],
+    p2: NDArray[np.int64],
+    p3: NDArray[np.int64],
+    p4: NDArray[np.int64],
+) -> float:
+    """Return t ∈ (0,1) such that p1 + t*(p2-p1) is where {p1,p2} crosses {p3,p4}.
+
+    Precondition: ``segments_intersect(p1, p2, p3, p4)`` is True.
+    Uses the 2-D cross-product to solve the parametric intersection system.
+    """
+    r = (p2 - p1).astype(float)
+    s = (p4 - p3).astype(float)
+    d = (p3 - p1).astype(float)
+    r_cross_s = r[0] * s[1] - r[1] * s[0]
+    d_cross_s = d[0] * s[1] - d[1] * s[0]
+    return float(d_cross_s / r_cross_s)
+
+
+def point_in_triangle_float(
+    pt: NDArray[np.floating[Any]],
+    v1: NDArray[np.int64],
+    v2: NDArray[np.int64],
+    v3: NDArray[np.int64],
+) -> bool:
+    """Float-coordinate variant of ``point_in_triangle``.
+
+    Returns ``True`` if *pt* (real-valued) lies inside or on the boundary of
+    the triangle with integer vertices *v1*, *v2*, *v3*.
+    Uses the same sign-of-determinant test as the integer version.
+    """
+    d1 = (pt[0] - float(v2[0])) * float(v1[1] - v2[1]) - float(v1[0] - v2[0]) * (pt[1] - float(v2[1]))
+    d2 = (pt[0] - float(v3[0])) * float(v2[1] - v3[1]) - float(v2[0] - v3[0]) * (pt[1] - float(v3[1]))
+    d3 = (pt[0] - float(v1[0])) * float(v3[1] - v1[1]) - float(v3[0] - v1[0]) * (pt[1] - float(v1[1]))
+    has_neg = (d1 < 0.0) or (d2 < 0.0) or (d3 < 0.0)
+    has_pos = (d1 > 0.0) or (d2 > 0.0) or (d3 > 0.0)
+    return not (has_neg and has_pos)
+
+
+def compute_hij_data(
+    points: NDArray[np.int64],
+    triangles: NDArray[np.int64],
+    e_double_prime: list[tuple[int, int]],
+) -> dict[tuple[int, int], list[tuple[list[int], list[int]]]]:
+    """Precompute H_ij data for the arc-triangle dual link constraints.
+
+    For each directed-arc pair (i, j) ∈ E" (passed as i < j pairs), finds all
+    sub-segments created by other crossing segments and, for each sub-segment,
+    determines which triangles of V cover the left cell (s) and right cell (s')
+    of i→j.
+
+    Returns
+    -------
+    dict mapping ``(i, j)`` → list of ``(left_tris, right_tris)`` per sub-segment,
+    where triangle IDs are indices into *triangles*.
+    """
+    result: dict[tuple[int, int], list[tuple[list[int], list[int]]]] = {}
+
+    for (i, j) in e_double_prime:
+        pi_f = points[i].astype(float)
+        pj_f = points[j].astype(float)
+        direction = pj_f - pi_f
+        length = float(np.linalg.norm(direction))
+        if length < 1e-12:
+            continue
+        dir_norm = direction / length
+        normal = np.array([-dir_norm[1], dir_norm[0]], dtype=float)  # CCW normal
+        eps = max(length * 1e-6, 1e-9)
+
+        # Collect t-parameters where other E" segments cross {i,j}
+        cross_ts: list[float] = []
+        for (k, ll) in e_double_prime:
+            if k == i and ll == j:
+                continue
+            if segments_intersect(points[i], points[j], points[k], points[ll]):
+                t = segment_intersection_parameter(points[i], points[j], points[k], points[ll])
+                if 1e-9 < t < 1.0 - 1e-9:
+                    cross_ts.append(t)
+
+        cross_ts_clean = sorted({round(t, 12) for t in cross_ts})
+        breakpoints = [0.0] + cross_ts_clean + [1.0]
+
+        sub_segs: list[tuple[list[int], list[int]]] = []
+        for idx in range(len(breakpoints) - 1):
+            t_mid = (breakpoints[idx] + breakpoints[idx + 1]) / 2.0
+            mid = pi_f + t_mid * direction
+            left_sample: NDArray[np.floating[Any]] = mid + eps * normal
+            right_sample: NDArray[np.floating[Any]] = mid - eps * normal
+
+            left_tris: list[int] = []
+            right_tris: list[int] = []
+            for tid, tri in enumerate(triangles):
+                v1, v2, v3 = points[tri[0]], points[tri[1]], points[tri[2]]
+                if point_in_triangle_float(left_sample, v1, v2, v3):
+                    left_tris.append(tid)
+                if point_in_triangle_float(right_sample, v1, v2, v3):
+                    right_tris.append(tid)
+
+            if left_tris or right_tris:
+                sub_segs.append((left_tris, right_tris))
+
+        if sub_segs:
+            result[(i, j)] = sub_segs
+
+    return result

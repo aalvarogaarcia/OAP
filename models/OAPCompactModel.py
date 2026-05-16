@@ -16,6 +16,7 @@ from models.OAPBaseModel import OAPBaseModel
 from utils.utils import (
     compute_convex_hull,
     compute_convex_hull_area,
+    compute_hij_data,
     cost_function_area,
     incompatible_triangles,
     point_in_triangle,
@@ -698,35 +699,42 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
         print(f"Añadidas {n_added} restricciones de clique I₃.")
 
     def _add_arc_triangle_link_constraints(self) -> None:
-        """Enlace local arco-triángulo: |y_t - y_{t'}| ≤ x_ij + x_ji.
+        """Restricciones H_ij: traducción directa de la constraint MSD (28).
 
-        Para cada diagonal {i,j} ∈ E" y cada par de triángulos adyacentes
-        (t ∈ V_ij, t' ∈ V̄_ij), el estado interior de ambos debe ser
-        consistente con si el arco forma parte del tour:
-            y_t  - y_{t'} ≤ x_ij + x_ji
-            y_{t'} - y_t  ≤ x_ij + x_ji
+        Para cada {i,j} ∈ E" y cada par {s,s'} ∈ H_ij (celdas izquierda/derecha
+        de cada sub-segmento del arreglo sobre {i,j}):
+            Σ_{t⊇s}  y_t − Σ_{t⊇s'} y_t  ≤  x_ij + x_ji
+            Σ_{t⊇s'} y_t − Σ_{t⊇s}  y_t  ≤  x_ij + x_ji
         """
+        e_double_prime = [
+            (i, j)
+            for (i, j) in self.x.keys()
+            if i < j and (i not in self.CH or j not in self.CH)
+        ]
+        hij_data = compute_hij_data(self.points, self.triangles, e_double_prime)
+
         n_added = 0
-        for (i, j) in list(self.x.keys()):
-            if i >= j:
-                continue
-            tris_left = self.triangles_adj_list[i][j]
-            tris_right = self.triangles_adj_list[j][i]
-            if not tris_left or not tris_right:
-                continue
-            x_sum = gp.LinExpr()
-            x_sum.addTerms(1.0, self.x[i, j])
+        for (i, j), sub_segs in hij_data.items():
+            x_rhs = gp.LinExpr()
+            x_rhs.addTerms(1.0, self.x[i, j])
             if (j, i) in self.x:
-                x_sum.addTerms(1.0, self.x[j, i])
-            for t in tris_left:
-                for tp in tris_right:
-                    self.model.addConstr(
-                        self.y[t] - self.y[tp] <= x_sum,
-                        name=f"atl_{i}_{j}_{t}_{tp}_p",
-                    )
-                    self.model.addConstr(
-                        self.y[tp] - self.y[t] <= x_sum,
-                        name=f"atl_{i}_{j}_{t}_{tp}_m",
-                    )
-                    n_added += 2
-        print(f"Añadidas {n_added} restricciones de enlace arco-triángulo.")
+                x_rhs.addTerms(1.0, self.x[j, i])
+
+            for k, (left_tris, right_tris) in enumerate(sub_segs):
+                left_expr = gp.LinExpr()
+                for t in left_tris:
+                    left_expr.addTerms(1.0, self.y[t])
+                right_expr = gp.LinExpr()
+                for t in right_tris:
+                    right_expr.addTerms(1.0, self.y[t])
+                self.model.addConstr(
+                    left_expr - right_expr <= x_rhs,
+                    name=f"hij_{i}_{j}_{k}_p",
+                )
+                self.model.addConstr(
+                    right_expr - left_expr <= x_rhs,
+                    name=f"hij_{i}_{j}_{k}_m",
+                )
+                n_added += 2
+
+        print(f"Añadidas {n_added} restricciones H_ij arco-triángulo.")
