@@ -17,6 +17,7 @@ from utils.utils import (
     compute_convex_hull,
     compute_convex_hull_area,
     cost_function_area,
+    incompatible_triangles,
     point_in_triangle,
     segments_intersect,
 )
@@ -63,6 +64,8 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
         use_knapsack: bool = False,
         use_cliques: bool = False,
         crossing_constrain: bool = False,
+        use_triangle_cliques: bool = False,
+        arc_triangle_link: bool = False,
     ) -> None:
         """
         Orquestador principal que construye el modelo paso a paso.
@@ -95,6 +98,12 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
 
         if crossing_constrain:
             self._add_crossing_constraints()
+
+        if use_triangle_cliques:
+            self._add_triangle_clique_constraints()
+
+        if arc_triangle_link:
+            self._add_arc_triangle_link_constraints()
 
         self.model.update()
 
@@ -659,3 +668,65 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
                 cortes_añadidos += 1
 
         print(f"Inyectados {cortes_añadidos} Cortes de Clique de Cruces.")
+
+    # ------------------------------------------------------------------
+    # Nuevas familias de desigualdades sobre triángulos
+    # ------------------------------------------------------------------
+
+    def _add_triangle_clique_constraints(self) -> None:
+        """Cliques en I₃: conjuntos de triángulos internos mutuamente incompatibles.
+
+        Para cada clique maximal K en el grafo de incompatibilidades de triángulos:
+            Σ_{t ∈ K} y_t ≤ 1
+        """
+        pairs = incompatible_triangles(self.triangles, self.points)
+        if len(pairs) == 0:
+            return
+        G_i3: nx.Graph[int] = nx.Graph()
+        G_i3.add_nodes_from(self.V_list)
+        for row in pairs:
+            G_i3.add_edge(int(row[0]), int(row[1]))
+        cliques = list(nx.find_cliques(G_i3))
+        n_added = 0
+        for clique in cliques:
+            if len(clique) >= 2:
+                self.model.addConstr(
+                    gp.quicksum(self.y[t] for t in clique) <= 1,
+                    name=f"i3_clique_{n_added}",
+                )
+                n_added += 1
+        print(f"Añadidas {n_added} restricciones de clique I₃.")
+
+    def _add_arc_triangle_link_constraints(self) -> None:
+        """Enlace local arco-triángulo: |y_t - y_{t'}| ≤ x_ij + x_ji.
+
+        Para cada diagonal {i,j} ∈ E" y cada par de triángulos adyacentes
+        (t ∈ V_ij, t' ∈ V̄_ij), el estado interior de ambos debe ser
+        consistente con si el arco forma parte del tour:
+            y_t  - y_{t'} ≤ x_ij + x_ji
+            y_{t'} - y_t  ≤ x_ij + x_ji
+        """
+        n_added = 0
+        for (i, j) in list(self.x.keys()):
+            if i >= j:
+                continue
+            tris_left = self.triangles_adj_list[i][j]
+            tris_right = self.triangles_adj_list[j][i]
+            if not tris_left or not tris_right:
+                continue
+            x_sum = gp.LinExpr()
+            x_sum.addTerms(1.0, self.x[i, j])
+            if (j, i) in self.x:
+                x_sum.addTerms(1.0, self.x[j, i])
+            for t in tris_left:
+                for tp in tris_right:
+                    self.model.addConstr(
+                        self.y[t] - self.y[tp] <= x_sum,
+                        name=f"atl_{i}_{j}_{t}_{tp}_p",
+                    )
+                    self.model.addConstr(
+                        self.y[tp] - self.y[t] <= x_sum,
+                        name=f"atl_{i}_{j}_{t}_{tp}_m",
+                    )
+                    n_added += 2
+        print(f"Añadidas {n_added} restricciones de enlace arco-triángulo.")
