@@ -67,6 +67,7 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
         crossing_constrain: bool = False,
         use_triangle_cliques: bool = False,
         arc_triangle_link: bool = False,
+        cell_coverage: bool = False,
     ) -> None:
         """
         Orquestador principal que construye el modelo paso a paso.
@@ -105,6 +106,9 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
 
         if arc_triangle_link:
             self._add_arc_triangle_link_constraints()
+
+        if cell_coverage:
+            self._add_cell_coverage_constraints()
 
         self.model.update()
 
@@ -738,3 +742,36 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
                 n_added += 2
 
         print(f"Añadidas {n_added} restricciones H_ij arco-triángulo.")
+
+    def _add_cell_coverage_constraints(self) -> None:
+        """Cobertura de celdas del arreglo: Σ_{t⊇w}(y_t + ȳ_t) = 1 para cada celda w.
+
+        Cada celda w de la teselación W de CH(N) está cubierta por exactamente
+        un triángulo de V, que puede ser interior (y_t = 1) o exterior (ȳ_t = 1).
+        Las celdas se obtienen como las caras del arreglo de segmentos E",
+        representadas por los puntos de muestreo izquierdo/derecho de cada
+        sub-segmento de H_ij.
+        """
+        e_double_prime = [
+            (i, j)
+            for (i, j) in self.x.keys()
+            if i < j and (i not in self.CH or j not in self.CH)
+        ]
+        hij_data = compute_hij_data(self.points, self.triangles, e_double_prime)
+
+        seen: set[frozenset[int]] = set()
+        n_added = 0
+        for sub_segs in hij_data.values():
+            for left_tris, right_tris in sub_segs:
+                for cell_tris in (left_tris, right_tris):
+                    key = frozenset(cell_tris)
+                    if not key or key in seen:
+                        continue
+                    seen.add(key)
+                    self.model.addConstr(
+                        gp.quicksum(self.y[t] + self.yp[t] for t in cell_tris) == 1,
+                        name=f"cell_cov_{n_added}",
+                    )
+                    n_added += 1
+
+        print(f"Añadidas {n_added} restricciones de cobertura de celdas.")
