@@ -496,10 +496,12 @@ class BendersFarkasMixin:
 
         # --- Construir entrada JSON (sin I/O) ---
         if save_cuts and hasattr(self, "log_path"):
+            _source = getattr(self, "_callback_source", "MIPSOL")
             entry = dict(
                 iteration=self.iteration,
                 node_depth=0,
                 subproblem_type="Y" if sub_name == "Y" else "Y_prime",
+                source=_source,
                 cut_value=cut_val,
                 tolerance=TOL,
                 sense=sense,
@@ -527,6 +529,7 @@ class BendersFarkasMixin:
                         tolerance=TOL,
                         cut_expr=cut_expr,
                         sense=sense,
+                        source=_source,
                     )
                 except NameError:
                     logger.warning("No se pudo guardar el log estructurado: log_benders_cut no está definido.")

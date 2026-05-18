@@ -89,6 +89,7 @@ def log_benders_cut(
     tolerance: float = 1e-5,
     cut_expr: gp.LinExpr | None = None,
     sense: str | None = None,
+    source: str = "MIPSOL",
 ) -> None:
     """Append a Benders cut record to a JSONL log file.
 
@@ -105,6 +106,8 @@ def log_benders_cut(
         tolerance: Threshold below which arc values are treated as zero.
         cut_expr: Optional Gurobi expression for the generated cut.
         sense: Cut sense (``'<='``, ``'>='``, or ``None``).
+        source: Callback origin — ``'MIPSOL'`` (integer solution) or
+            ``'MIPNODE'`` (LP relaxation at a B&B node).
     """
     active_x: SerializedCoeffMap = {f"{i}_{j}": round(val, 4) for (i, j), val in x_sol.items() if abs(val) > tolerance}
 
@@ -121,6 +124,7 @@ def log_benders_cut(
         "iteration": iteration,
         "node_depth": node_depth,
         "subproblem": subproblem_type,
+        "source": source,
         "cut_value": round(cut_value, 6),
         "sense": sense,
         "active_x": active_x,

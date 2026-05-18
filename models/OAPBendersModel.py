@@ -74,6 +74,12 @@ class OAPBendersModel(  # type: ignore[misc]
         # F3 — DDMA configuration (defaults off for backward compat)
         self.use_ddma: bool = False
 
+        # MIPNODE user cuts — defaults to off for backward compat
+        self.use_mipnode_cuts: bool = False
+        # Tracks which callback is currently executing (MIPSOL / MIPNODE).
+        # Read by _log_and_print_farkas to tag JSON log entries.
+        self._callback_source: str = "MIPSOL"
+
         # Magnanti-Wong (pareto-optimal cuts) — defaults to off
         self.use_magnanti_wong: bool = False
         self._core_point: dict[str, Any] | None = None  # type: ignore[assignment]
@@ -110,6 +116,7 @@ class OAPBendersModel(  # type: ignore[misc]
         core_point_strategy: Literal["lp_relaxation", "uniform"] = "lp_relaxation",
         cgsp_norm: Literal["misd", "relaxed_l1"] = "relaxed_l1",
         use_ddma: bool = False,
+        use_mipnode_cuts: bool = False,
     ) -> None:
         """
         Orquesta la construcción del Problema Maestro y de los Subproblemas.
@@ -150,6 +157,13 @@ class OAPBendersModel(  # type: ignore[misc]
               Applied automatically when use_deepest_cuts=True and no explicit
               cut_weights_y/yp are supplied.
             - 'misd': unit weights (original MISD behaviour, all weights = 1).
+        use_mipnode_cuts : bool, default False
+            When True, the callback also fires at MIPNODE (LP relaxation at
+            each B&B node) and injects Farkas feasibility cuts via cbCut().
+            Only Farkas cuts from infeasible Y / Y' are added; Pi / CGSP /
+            DDMA / MW cuts are not used at MIPNODE (LP-validity not proven).
+            r3/r3_p RHS are set to 1.0 at MIPNODE to prevent artificial
+            infeasibility from fractional x and ensure LP-valid cuts.
 
         Notes
         -----
@@ -228,5 +242,8 @@ class OAPBendersModel(  # type: ignore[misc]
 
         # F3 — DDMA configuration (after subproblems are built)
         self.use_ddma = use_ddma
+
+        # MIPNODE user cuts flag
+        self.use_mipnode_cuts = use_mipnode_cuts
 
         logger.info("Construcción completada con éxito.")

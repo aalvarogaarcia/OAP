@@ -192,6 +192,7 @@ model.build(
     core_point_strategy: Literal["lp_relaxation", "uniform"] = "lp_relaxation",
     cgsp_norm: Literal["misd", "relaxed_l1"] = "relaxed_l1",
     use_ddma: bool = False,               # DDMA Algorithm 3
+    use_mipnode_cuts: bool = False,       # Farkas user cuts at MIPNODE (LP-valid, no r3 tightening)
 ) -> None
 ```
 
