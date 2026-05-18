@@ -135,6 +135,30 @@ def _parse_args() -> argparse.Namespace:
         help=("L1 normalisation weights for Y'-subproblem CGSP. Same format as --cut-weights-y."),
     )
     p.add_argument(
+        "--cgsp-norm",
+        choices=["misd", "relaxed_l1"],
+        default="relaxed_l1",
+        help="Normalisation mode for CGSP deepest cuts (default: relaxed_l1)",
+    )
+    p.add_argument(
+        "--use-magnanti-wong",
+        action="store_true",
+        default=False,
+        help="Enable Magnanti-Wong Pareto-optimal cuts for Benders model",
+    )
+    p.add_argument(
+        "--core-point-strategy",
+        choices=["lp_relaxation", "uniform"],
+        default="lp_relaxation",
+        help="Core-point strategy for Magnanti-Wong (default: lp_relaxation)",
+    )
+    p.add_argument(
+        "--use-ddma",
+        action="store_true",
+        default=False,
+        help="Enable DDMA Algorithm 3 (Hosseini & Turner 2025) for Benders model",
+    )
+    p.add_argument(
         "--threads",
         type=int,
         default=0,
@@ -187,6 +211,23 @@ def _build_config_from_args(args: argparse.Namespace) -> dict[str, object]:
                 file=sys.stderr,
             )
             sys.exit(1)
+        if args.use_magnanti_wong or args.use_ddma:
+            print(
+                "ERROR: --use-magnanti-wong, --use-ddma are Benders-only flags. "
+                "Remove them when --model Compacto is set.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+    # Validate: mutually exclusive cut strategies
+    active_cut_strategies = sum([args.use_deepest_cuts, args.use_magnanti_wong, args.use_ddma])
+    if active_cut_strategies > 1:
+        print(
+            "ERROR: --use-deepest-cuts, --use-magnanti-wong, --use-ddma are "
+            "mutually exclusive. Set at most one.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     return {
         "instance_dir": args.instance_dir,
@@ -211,12 +252,18 @@ def _build_config_from_args(args: argparse.Namespace) -> dict[str, object]:
         "crosses_constrain": (args.crosses_constrain if args.model_type == "Benders" else False),
         # CGSP flags (Benders-only)
         "use_deepest_cuts": args.use_deepest_cuts if args.model_type == "Benders" else False,
+        "cgsp_norm": args.cgsp_norm if args.model_type == "Benders" else "relaxed_l1",
         "cut_weights_y": (
             _parse_weight_dict(args.cut_weights_y, "--cut-weights-y") if args.model_type == "Benders" else None
         ),
         "cut_weights_yp": (
             _parse_weight_dict(args.cut_weights_yp, "--cut-weights-yp") if args.model_type == "Benders" else None
         ),
+        # Magnanti-Wong flags (Benders-only)
+        "use_magnanti_wong": args.use_magnanti_wong if args.model_type == "Benders" else False,
+        "core_point_strategy": args.core_point_strategy if args.model_type == "Benders" else "lp_relaxation",
+        # DDMA flag (Benders-only)
+        "use_ddma": args.use_ddma if args.model_type == "Benders" else False,
         # Benders semiplane (master-side V1, Benders-only)
         "benders_semiplane": args.benders_semiplane if args.model_type == "Benders" else 0,
         # Shared
@@ -291,8 +338,12 @@ def main() -> None:
             sum_constrain=config["sum_constrain"],  # type: ignore[arg-type]
             crosses_constrain=config["crosses_constrain"],
             use_deepest_cuts=config["use_deepest_cuts"],
+            cgsp_norm=config["cgsp_norm"],
             cut_weights_y=config["cut_weights_y"],
             cut_weights_yp=config["cut_weights_yp"],
+            use_magnanti_wong=config["use_magnanti_wong"],
+            core_point_strategy=config["core_point_strategy"],
+            use_ddma=config["use_ddma"],
             semiplane=config["benders_semiplane"],  # type: ignore[arg-type]
         )
 

@@ -6,12 +6,14 @@ triangles = compute_triangles(points)
 
 # Relajado — debe mostrar grupos coloreados por flujo
 model = OAPCompactModel(points, triangles, name="test")
-model.build(objective="External", maximize=False, subtour="SCF", sum_constrain=True)
+model.build(objective="External", maximize=False, subtour="SCF", sum_constrain=True, hybrid_eta=True)
 model.solve(time_limit=60, relaxed=True, plot=True, verbose=True)
 
 # Entero — comportamiento actual sin cambios
 model2 = OAPCompactModel(points, triangles, name="test2")
-model2.build(objective="External", maximize=False, subtour="SCF", sum_constrain=True)
+model2.build(objective="External", maximize=False, subtour="SCF", sum_constrain=True, hybrid_eta=True)
 model2.solve(time_limit=60, relaxed=False, plot=True, verbose=True)
 
+
+model.dump_vars_csv("outputs/LP_vars/uniform-0000015-1_LP.csv")
 print(model2)
