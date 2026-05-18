@@ -159,6 +159,16 @@ def _parse_args() -> argparse.Namespace:
         help="Enable DDMA Algorithm 3 (Hosseini & Turner 2025) for Benders model",
     )
     p.add_argument(
+        "--use-mipnode-cuts",
+        action="store_true",
+        default=False,
+        help=(
+            "Enable Farkas user cuts at MIPNODE (LP-valid, no r3 tightening). "
+            "Compatible with any Benders method; mutually exclusive flags are "
+            "not affected (use_mipnode_cuts can be combined with any cut strategy)."
+        ),
+    )
+    p.add_argument(
         "--threads",
         type=int,
         default=0,
@@ -218,6 +228,13 @@ def _build_config_from_args(args: argparse.Namespace) -> dict[str, object]:
                 file=sys.stderr,
             )
             sys.exit(1)
+        if args.use_mipnode_cuts:
+            print(
+                "ERROR: --use-mipnode-cuts is a Benders-only flag. "
+                "Remove it when --model Compacto is set.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
     # Validate: mutually exclusive cut strategies
     active_cut_strategies = sum([args.use_deepest_cuts, args.use_magnanti_wong, args.use_ddma])
@@ -264,6 +281,8 @@ def _build_config_from_args(args: argparse.Namespace) -> dict[str, object]:
         "core_point_strategy": args.core_point_strategy if args.model_type == "Benders" else "lp_relaxation",
         # DDMA flag (Benders-only)
         "use_ddma": args.use_ddma if args.model_type == "Benders" else False,
+        # MIPNODE user cuts flag (Benders-only)
+        "use_mipnode_cuts": args.use_mipnode_cuts if args.model_type == "Benders" else False,
         # Benders semiplane (master-side V1, Benders-only)
         "benders_semiplane": args.benders_semiplane if args.model_type == "Benders" else 0,
         # Shared
@@ -344,6 +363,7 @@ def main() -> None:
             use_magnanti_wong=config["use_magnanti_wong"],
             core_point_strategy=config["core_point_strategy"],
             use_ddma=config["use_ddma"],
+            use_mipnode_cuts=config["use_mipnode_cuts"],
             semiplane=config["benders_semiplane"],  # type: ignore[arg-type]
         )
 
