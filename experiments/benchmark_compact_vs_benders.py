@@ -19,27 +19,24 @@ Supports:
 """
 
 import argparse
-import csv
 import cProfile
+import csv
 import json
 import logging
-import os
 import pstats
 import sys
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
-
-import inquirer
+from typing import Any
 
 # Add repo root to path
 REPO_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from models import OAPBendersModel, OAPCompactModel
-from utils.utils import compute_triangles, read_indexed_instance
+from models import OAPBendersModel, OAPCompactModel  # noqa: E402
+from utils.utils import compute_triangles, read_indexed_instance  # noqa: E402
 
 # ============================================================================
 # LOGGING
@@ -124,6 +121,27 @@ METHOD_CONFIG: dict[str, dict[str, Any]] = {
             "use_magnanti_wong": False,
             "use_deepest_cuts": False,
             "use_ddma": True,
+            "use_mipnode_cuts": False,
+            "semiplane": 0,
+            "use_knapsack": False,
+            "use_cliques": False,
+        },
+    },
+    "benders_farkas_mipnode": {
+        "model_type": "benders",
+        "threads": 1,
+        "label": "Benders Farkas + MIPNODE cuts",
+        "build_kwargs": {
+            "objective": "Fekete",
+            "benders_method": "farkas",
+            "subtour": "SCF",
+            "sum_constrain": True,
+            "strengthen": False,
+            "crosses_constrain": False,
+            "use_magnanti_wong": False,
+            "use_deepest_cuts": False,
+            "use_ddma": False,
+            "use_mipnode_cuts": True,
             "semiplane": 0,
             "use_knapsack": False,
             "use_cliques": False,
@@ -141,6 +159,7 @@ CSV_FIELDNAMES = [
     "gap_pct",
     "time_s",
     "nodes",
+    "total_cuts",
     "status",
 ]
 
@@ -166,14 +185,15 @@ class ResultRow:
     """Single result row (instance, method, maximize)."""
 
     instance: str
-    n_nodes: Optional[int] = None
+    n_nodes: int | None = None
     method: str = ""
     maximize: bool = True
-    root_lp: Optional[float] = None
-    final_ip: Optional[float] = None
-    gap_pct: Optional[float] = None
-    time_s: Optional[float] = None
-    nodes: Optional[int] = None
+    root_lp: float | None = None
+    final_ip: float | None = None
+    gap_pct: float | None = None
+    time_s: float | None = None
+    nodes: int | None = None
+    total_cuts: int | None = None  # Benders cuts added during solve; 0 for Compact
     status: str = "PENDING"
 
 
@@ -218,6 +238,7 @@ def _ensure_dir(path: Path | str) -> None:
 
 def prompt_config() -> BenchmarkConfig:
     """Interactive configuration via inquirer."""
+    import inquirer
     logger.info("Starting interactive configuration...")
 
     # Step 1: Instance directory and glob
@@ -403,6 +424,9 @@ def run_single_solve(
             profiler = cProfile.Profile()
             profiler.enable()
 
+        # Snapshot constraint count before solve to measure Benders cuts added
+        num_constrs_before = model.model.NumConstrs
+
         # Measure wall-clock time
         wall_start = time.perf_counter()
         model.solve(time_limit=time_limit, verbose=False)
@@ -420,6 +444,8 @@ def run_single_solve(
         row.gap_pct = _safe_round(gap, 4)
         row.time_s = _safe_round(wall_elapsed, 2)
         row.nodes = int(nodes) if isinstance(nodes, (int, float)) and nodes != "-" else None
+        # Cuts added as lazy constraints during B&B (0 for Compact model)
+        row.total_cuts = max(0, model.model.NumConstrs - num_constrs_before)
         row.status = "OK"
 
         # Dump profiling if enabled
@@ -440,6 +466,18 @@ def run_single_solve(
 # ============================================================================
 
 
+def _is_project_row(fname: str) -> bool:
+    """Return True for project-code frames; discard Python stdlib / site-packages."""
+    if fname == "~":
+        # built-in methods — keep, they show real cost
+        return True
+    try:
+        Path(fname).resolve().relative_to(REPO_ROOT)
+        return True
+    except ValueError:
+        return False
+
+
 def _dump_profile_csv(
     profiler: cProfile.Profile, method: str, instance_stem: str
 ) -> list[dict[str, Any]]:
@@ -447,43 +485,49 @@ def _dump_profile_csv(
     profile_rows: list[dict[str, Any]] = []
 
     try:
-        # Get stats
         stats = pstats.Stats(profiler)
         stats.strip_dirs()
 
-        # Per-instance profile
         profiling_dir = REPO_ROOT / "outputs" / "profiling"
         _ensure_dir(profiling_dir)
 
         profile_csv = profiling_dir / f"profile_{method}_{instance_stem}.csv"
 
+        for func, (_cc, nc, tt, ct, _callers) in stats.stats.items():
+            fname, lineno, funcname = func
+            if not _is_project_row(fname):
+                continue
+            profile_rows.append(
+                {
+                    "ncalls": nc,
+                    "tottime": tt,
+                    "percall_tot": tt / nc if nc > 0 else 0,
+                    "cumtime": ct,
+                    "percall_cum": ct / nc if nc > 0 else 0,
+                    "filename": fname,
+                    "lineno": lineno,
+                    "function": funcname,
+                }
+            )
+
+        profile_rows.sort(key=lambda r: r["tottime"], reverse=True)
+
         with open(profile_csv, "w", newline="") as f:
             writer = csv.DictWriter(
                 f,
                 fieldnames=[
-                    "function",
                     "ncalls",
                     "tottime",
                     "percall_tot",
                     "cumtime",
                     "percall_cum",
+                    "filename",
+                    "lineno",
+                    "function",
                 ],
             )
             writer.writeheader()
-
-            for func, (cc, nc, tt, ct, callers) in stats.stats.items():
-                fname, lineno, funcname = func
-                profile_rows.append(
-                    {
-                        "function": f"{fname}:{funcname}",
-                        "ncalls": nc,
-                        "tottime": tt,
-                        "percall_tot": tt / nc if nc > 0 else 0,
-                        "cumtime": ct,
-                        "percall_cum": ct / nc if nc > 0 else 0,
-                    }
-                )
-                writer.writerow(profile_rows[-1])
+            writer.writerows(profile_rows)
 
         logger.info("Profiling CSV written to %s", profile_csv)
 
@@ -587,17 +631,18 @@ def write_report(
     for instance_name in sorted(by_instance.keys()):
         lines.append(f"### {instance_name}\n\n")
         lines.append(
-            "| Method | Maximize | Root LP | Final IP | Gap (%) | Time (s) | Nodes | Status |\n"
+            "| Method | Maximize | Root LP | Final IP | Gap (%) | Time (s) | Nodes | Cuts | Status |\n"
         )
-        lines.append("|--------|----------|---------|----------|---------|----------|-------|--------|\n")
+        lines.append("|--------|----------|---------|----------|---------|----------|-------|------|--------|\n")
 
         for method_key in cfg.methods:
             if method_key in by_instance[instance_name]:
                 for row in by_instance[instance_name][method_key]:
                     maximize_str = "Max" if row.maximize else "Min"
+                    cuts_str = str(row.total_cuts) if row.total_cuts is not None else "-"
                     lines.append(
                         f"| `{row.method}` | {maximize_str} | {row.root_lp} | {row.final_ip} | "
-                        f"{row.gap_pct} | {row.time_s} | {row.nodes} | {row.status} |\n"
+                        f"{row.gap_pct} | {row.time_s} | {row.nodes} | {cuts_str} | {row.status} |\n"
                     )
 
         lines.append("\n")
@@ -629,6 +674,24 @@ def write_report(
                          for row in t_list[method_key]
                          if row.status == "OK")
             lines.append(f"| `{method_key}` | {total:.2f} | {avg:.2f} | {min_t:.2f} | {max_t:.2f} | {ok_count} |\n")
+
+    lines.append("\n### Total Cuts Added\n\n")
+    lines.append("| Method | Total | Avg | Max |\n")
+    lines.append("|--------|-------|-----|-----|\n")
+
+    for method_key in cfg.methods:
+        cuts = [
+            row.total_cuts
+            for result_list in by_instance.values()
+            if method_key in result_list
+            for row in result_list[method_key]
+            if row.total_cuts is not None
+        ]
+        if cuts:
+            total_c = sum(cuts)
+            avg_c = total_c / len(cuts)
+            max_c = max(cuts)
+            lines.append(f"| `{method_key}` | {total_c} | {avg_c:.1f} | {max_c} |\n")
 
     lines.append("\n### Optimality Gap (%)\n\n")
     lines.append("| Method | Median | Max | Avg |\n")

@@ -25,10 +25,18 @@ class BendersOptimizeMixin:
     benders_method: str
     objective: Literal["Fekete", "Internal"]
     
-    def _update_subproblem_rhs(self, x_sol: dict[Arc, float]) -> None:
+    def _update_subproblem_rhs(self, x_sol: dict[Arc, float], tighten_r3: bool = True) -> None:
         """
-        Actualiza los lados derechos (RHS) de los subproblemas Y y Y' 
+        Actualiza los lados derechos (RHS) de los subproblemas Y y Y'
         usando la solución propuesta por el problema Maestro.
+
+        Parameters
+        ----------
+        tighten_r3 : bool, default True
+            When False, r3/r3_p RHS are set to 1.0 instead of
+            ``1 − x[j,i] − x[k,l]``.  Use False at MIPNODE to prevent
+            fractional x from creating artificial infeasibility in r3/r3_p,
+            which would produce cuts that are not LP-valid.
         """
         self.iteration += 1
 
@@ -64,10 +72,10 @@ class BendersOptimizeMixin:
 
         # R3 / R4 strengthening constraints (parameterised by x)
         for (i, j, k, s), constr in self.constrs_y.get('r3', {}).items():
-            constr.RHS = 1 - x_sol.get((j, i), 0.0) - x_sol.get((k, s), 0.0)
+            constr.RHS = (1 - x_sol.get((j, i), 0.0) - x_sol.get((k, s), 0.0)) if tighten_r3 else 1.0
 
         for (i, j, k, s), constr in self.constrs_yp.get('r3_p', {}).items():
-            constr.RHS = 1 - x_sol.get((i, j), 0.0) - x_sol.get((s, k), 0.0)
+            constr.RHS = (1 - x_sol.get((i, j), 0.0) - x_sol.get((s, k), 0.0)) if tighten_r3 else 1.0
 
     def _benders_callback(self, model: gp.Model, where: int) -> None:
         """
@@ -88,6 +96,7 @@ class BendersOptimizeMixin:
             # y se vacían al salir, evitando I/O síncrono dentro del hot-path del solver.
             self._log_buffer: list[str] = []
             self._cut_buffer: list[dict] = []
+            self._callback_source = "MIPSOL"
 
             # 1. Extraer la solución actual del Maestro (x_bar)
             x_sol = model.cbGetSolution(self.x)
@@ -272,6 +281,117 @@ class BendersOptimizeMixin:
                             tolerance=_entry['tolerance'],
                             cut_expr=None,
                             sense=_entry['sense'],
+                            source=_entry.get('source', 'MIPSOL'),
+                        )
+                except NameError:
+                    pass
+            self._log_buffer = []
+            self._cut_buffer = []
+
+        elif where == GRB.Callback.MIPNODE:
+            if not getattr(self, "use_mipnode_cuts", False):
+                return
+            if model.cbGet(GRB.Callback.MIPNODE_STATUS) != GRB.OPTIMAL:
+                return
+
+            # Initialise log buffers so _log_and_print_farkas buffers instead of
+            # doing synchronous I/O inside the callback hot-path.
+            self._log_buffer: list[str] = []
+            self._cut_buffer: list[dict] = []
+            self._callback_source = "MIPNODE"
+
+            x_sol = model.cbGetNodeRel(self.x)
+
+            # Full r3 tightening is LP-valid at MIPNODE: Benders feasibility cuts
+            # derived from infeasible Y(x_LP) are valid for the combined LP even
+            # when x_LP is fractional (the combined LP requires Y(x) feasible).
+            self._update_subproblem_rhs(x_sol, tighten_r3=True)
+
+            self.sub_y.optimize()
+            self.sub_yp.optimize()
+
+            TOL = 1e-6
+
+            use_deepest = getattr(self, "use_deepest_cuts", False)
+            use_mw      = getattr(self, "use_magnanti_wong", False)
+            use_ddma    = getattr(self, "use_ddma", False)
+
+            # ---- Y subproblem — feasibility cuts only (no Pi / optimality) ----
+            if self.sub_y.Status == GRB.INFEASIBLE:
+                if use_deepest:
+                    cut_expr_y, cut_rhs_y, _ = self.get_cgsp_cut_y(x_sol, TOL=TOL)
+                    if cut_expr_y is not None:
+                        model.cbCut(cut_expr_y <= cut_rhs_y)
+                elif use_ddma:
+                    cut_expr_y, cut_rhs_y, _ = self.get_ddma_cut_y(x_sol, TOL=TOL)
+                    if cut_expr_y is not None:
+                        model.cbCut(cut_expr_y <= cut_rhs_y)
+                elif use_mw:
+                    cut_expr_y, cut_rhs_y, _ = self.get_mw_cut_y(x_sol, TOL=TOL)
+                    if cut_expr_y is not None:
+                        model.cbCut(cut_expr_y <= cut_rhs_y)
+                    else:
+                        cut_expr, cut_val = self.get_farkas_cut_y(x_sol, TOL)
+                        if cut_val > TOL:
+                            model.cbCut(cut_expr <= 0)
+                        elif cut_val < -TOL:
+                            model.cbCut(cut_expr >= 0)
+                else:
+                    cut_expr, cut_val = self.get_farkas_cut_y(x_sol, TOL)
+                    if cut_val > TOL:
+                        model.cbCut(cut_expr <= 0)
+                    elif cut_val < -TOL:
+                        model.cbCut(cut_expr >= 0)
+
+            # ---- Y' subproblem — feasibility cuts only ----
+            if self.sub_yp.Status == GRB.INFEASIBLE:
+                if use_deepest:
+                    cut_expr_yp, cut_rhs_yp, _ = self.get_cgsp_cut_yp(x_sol, TOL=TOL)
+                    if cut_expr_yp is not None:
+                        model.cbCut(cut_expr_yp <= cut_rhs_yp)
+                elif use_ddma:
+                    cut_expr_yp, cut_rhs_yp, _ = self.get_ddma_cut_yp(x_sol, TOL=TOL)
+                    if cut_expr_yp is not None:
+                        model.cbCut(cut_expr_yp <= cut_rhs_yp)
+                elif use_mw:
+                    cut_expr_yp, cut_rhs_yp, _ = self.get_mw_cut_yp(x_sol, TOL=TOL)
+                    if cut_expr_yp is not None:
+                        model.cbCut(cut_expr_yp <= cut_rhs_yp)
+                    else:
+                        cut_expr, cut_val = self.get_farkas_cut_yp(x_sol, TOL)
+                        if cut_val > TOL:
+                            model.cbCut(cut_expr <= 0)
+                        elif cut_val < -TOL:
+                            model.cbCut(cut_expr >= 0)
+                else:
+                    cut_expr, cut_val = self.get_farkas_cut_yp(x_sol, TOL)
+                    if cut_val > TOL:
+                        model.cbCut(cut_expr <= 0)
+                    elif cut_val < -TOL:
+                        model.cbCut(cut_expr >= 0)
+
+            # Flush log buffers (Farkas-path cuts are persisted; CGSP/DDMA/MW
+            # witnesses are not buffered here — same behaviour as at MIPSOL).
+            _log_buf_mn = getattr(self, '_log_buffer', [])
+            _cut_buf_mn = getattr(self, '_cut_buffer', [])
+            if _log_buf_mn:
+                logger.info("\n".join(_log_buf_mn))
+            if _cut_buf_mn and hasattr(self, 'log_path'):
+                try:
+                    from utils.utils import log_benders_cut
+                    for _entry in _cut_buf_mn:
+                        log_benders_cut(
+                            filepath=self.log_path,
+                            iteration=_entry['iteration'],
+                            node_depth=_entry['node_depth'],
+                            subproblem_type=_entry['subproblem_type'],
+                            x_sol={},
+                            v_components=_entry['v_components'],
+                            cut_value=_entry['cut_value'],
+                            tolerance=_entry['tolerance'],
+                            cut_expr=None,
+                            sense=_entry['sense'],
+                            source=_entry.get('source', 'MIPNODE'),
                         )
                 except NameError:
                     pass

@@ -1,5 +1,7 @@
 # OAPCompactModel.py
-from typing import Literal
+import csv
+from pathlib import Path
+from typing import Any, Literal
 
 import gurobipy as gp
 import matplotlib.pyplot as plt
@@ -14,7 +16,9 @@ from models.OAPBaseModel import OAPBaseModel
 from utils.utils import (
     compute_convex_hull,
     compute_convex_hull_area,
+    compute_hij_data,
     cost_function_area,
+    incompatible_triangles,
     point_in_triangle,
     segments_intersect,
 )
@@ -48,6 +52,8 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
         self.f_mcf: McfVarMap = {}
         self.z: ArcVarMap = {}
         self.zp: ArcVarMap = {}
+        # Variables η_s del híbrido MT3D+η (una por celda del arreglo)
+        self.eta: dict[int, gp.Var] = {}
 
     def build(
         self,
@@ -61,6 +67,10 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
         use_knapsack: bool = False,
         use_cliques: bool = False,
         crossing_constrain: bool = False,
+        use_triangle_cliques: bool = False,
+        arc_triangle_link: bool = False,
+        cell_coverage: bool = False,
+        hybrid_eta: bool = False,
     ) -> None:
         """
         Orquestador principal que construye el modelo paso a paso.
@@ -93,6 +103,18 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
 
         if crossing_constrain:
             self._add_crossing_constraints()
+
+        if use_triangle_cliques:
+            self._add_triangle_clique_constraints()
+
+        if arc_triangle_link:
+            self._add_arc_triangle_link_constraints()
+
+        if cell_coverage:
+            self._add_cell_coverage_constraints()
+
+        if hybrid_eta:
+            self._add_hybrid_eta_constraints()
 
         self.model.update()
 
@@ -285,6 +307,58 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
         ax.set_aspect("equal")
         ax.grid(True)
         plt.show()
+
+    def dump_vars_csv(self, filepath: str | Path) -> None:
+        """Write solution variable values to a CSV file.
+
+        Columns: var_type, idx_0, idx_1, value
+          - x, f, z, zp  : idx_0 = arc source, idx_1 = arc destination
+          - y, yp         : idx_0 = triangle index, idx_1 = ""
+          - u             : idx_0 = node index,     idx_1 = ""
+          - f_mcf         : idx_0 = commodity,      idx_1 = "src_dst"
+
+        Only variables with |X| > 1e-9 are written.
+        Rows are sorted by (var_type, idx_0, idx_1).
+        Must be called after solve() when model.SolCount > 0.
+        """
+        if self.model.SolCount == 0:
+            raise RuntimeError("dump_vars_csv: no feasible solution available (SolCount == 0)")
+
+        path = Path(filepath)
+        parent = path.parent
+        if parent:
+            parent.mkdir(parents=True, exist_ok=True)
+
+        rows: list[dict[str, Any]] = []
+
+        def _collect(var_type: str, idx_0: Any, idx_1: Any, var: gp.Var) -> None:
+            if abs(var.X) < 1e-9:
+                return
+            rows.append({"var_type": var_type, "idx_0": idx_0, "idx_1": idx_1, "value": round(var.X, 8)})
+
+        for (i, j), v in self.x.items():
+            _collect("x", i, j, v)
+        for t, v in self.y.items():
+            _collect("y", t, "", v)
+        for t, v in self.yp.items():
+            _collect("yp", t, "", v)
+        for (i, j), v in self.f.items():
+            _collect("f", i, j, v)
+        for n, v in self.u.items():
+            _collect("u", n, "", v)
+        for (i, j), v in self.z.items():
+            _collect("z", i, j, v)
+        for (i, j), v in self.zp.items():
+            _collect("zp", i, j, v)
+        for (k, i, j), v in self.f_mcf.items():
+            _collect("f_mcf", k, f"{i}_{j}", v)
+
+        rows.sort(key=lambda r: (r["var_type"], r["idx_0"], str(r["idx_1"])))
+
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=["var_type", "idx_0", "idx_1", "value"])
+            writer.writeheader()
+            writer.writerows(rows)
 
     def __str__(self) -> str:
         """Define lo que se muestra al hacer print() de la instancia de la clase."""
@@ -605,3 +679,183 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
                 cortes_añadidos += 1
 
         print(f"Inyectados {cortes_añadidos} Cortes de Clique de Cruces.")
+
+    # ------------------------------------------------------------------
+    # Nuevas familias de desigualdades sobre triángulos
+    # ------------------------------------------------------------------
+
+    def _add_triangle_clique_constraints(self) -> None:
+        """Cliques en I₃: conjuntos de triángulos internos mutuamente incompatibles.
+
+        Para cada clique maximal K en el grafo de incompatibilidades de triángulos:
+            Σ_{t ∈ K} y_t ≤ 1
+        """
+        pairs = incompatible_triangles(self.triangles, self.points)
+        if len(pairs) == 0:
+            return
+        G_i3: nx.Graph[int] = nx.Graph()
+        G_i3.add_nodes_from(self.V_list)
+        for row in pairs:
+            G_i3.add_edge(int(row[0]), int(row[1]))
+        cliques = list(nx.find_cliques(G_i3))
+        n_added = 0
+        for clique in cliques:
+            if len(clique) >= 2:
+                self.model.addConstr(
+                    gp.quicksum(self.y[t] for t in clique) <= 1,
+                    name=f"i3_clique_{n_added}",
+                )
+                n_added += 1
+        print(f"Añadidas {n_added} restricciones de clique I₃.")
+
+    def _add_arc_triangle_link_constraints(self) -> None:
+        """Restricciones H_ij: traducción directa de la constraint MSD (28).
+
+        Para cada {i,j} ∈ E" y cada par {s,s'} ∈ H_ij (celdas izquierda/derecha
+        de cada sub-segmento del arreglo sobre {i,j}):
+            Σ_{t⊇s}  y_t − Σ_{t⊇s'} y_t  ≤  x_ij + x_ji
+            Σ_{t⊇s'} y_t − Σ_{t⊇s}  y_t  ≤  x_ij + x_ji
+        """
+        e_double_prime = [
+            (i, j)
+            for (i, j) in self.x.keys()
+            if i < j and (i not in self.CH or j not in self.CH)
+        ]
+        hij_data = compute_hij_data(self.points, self.triangles, e_double_prime)
+
+        n_added = 0
+        for (i, j), sub_segs in hij_data.items():
+            x_rhs = gp.LinExpr()
+            x_rhs.addTerms(1.0, self.x[i, j])
+            if (j, i) in self.x:
+                x_rhs.addTerms(1.0, self.x[j, i])
+
+            for k, (left_tris, right_tris) in enumerate(sub_segs):
+                left_expr = gp.LinExpr()
+                for t in left_tris:
+                    left_expr.addTerms(1.0, self.y[t])
+                right_expr = gp.LinExpr()
+                for t in right_tris:
+                    right_expr.addTerms(1.0, self.y[t])
+                self.model.addConstr(
+                    left_expr - right_expr <= x_rhs,
+                    name=f"hij_{i}_{j}_{k}_p",
+                )
+                self.model.addConstr(
+                    right_expr - left_expr <= x_rhs,
+                    name=f"hij_{i}_{j}_{k}_m",
+                )
+                n_added += 2
+
+        print(f"Añadidas {n_added} restricciones H_ij arco-triángulo.")
+
+    def _add_cell_coverage_constraints(self) -> None:
+        """Cobertura de celdas del arreglo: Σ_{t⊇w}(y_t + ȳ_t) = 1 para cada celda w.
+
+        Cada celda w de la teselación W de CH(N) está cubierta por exactamente
+        un triángulo de V, que puede ser interior (y_t = 1) o exterior (ȳ_t = 1).
+        Las celdas se obtienen como las caras del arreglo de segmentos E",
+        representadas por los puntos de muestreo izquierdo/derecho de cada
+        sub-segmento de H_ij.
+        """
+        e_double_prime = [
+            (i, j)
+            for (i, j) in self.x.keys()
+            if i < j and (i not in self.CH or j not in self.CH)
+        ]
+        hij_data = compute_hij_data(self.points, self.triangles, e_double_prime)
+
+        seen: set[frozenset[int]] = set()
+        n_added = 0
+        for sub_segs in hij_data.values():
+            for left_tris, right_tris in sub_segs:
+                for cell_tris in (left_tris, right_tris):
+                    key = frozenset(cell_tris)
+                    if not key or key in seen:
+                        continue
+                    seen.add(key)
+                    self.model.addConstr(
+                        gp.quicksum(self.y[t] + self.yp[t] for t in cell_tris) == 1,
+                        name=f"cell_cov_{n_added}",
+                    )
+                    n_added += 1
+
+        print(f"Añadidas {n_added} restricciones de cobertura de celdas.")
+
+    def _add_hybrid_eta_constraints(self) -> None:
+        """Formulación híbrida MT3D + η (Modelo A).
+
+        Introduce variables η_s ∈ [0,1] por celda s del arreglo de segmentos
+        candidatos E" y añade:
+
+          (i)  η_s = Σ_{t ⊇ s} y_t                     ∀s ∈ W   (enlace)
+          (ii) η_s − η_{s'} = x_ij − x_ji               ∀{s,s'}∈H_ij, {i,j}∈E"
+                                                                   (MSD constraint 28)
+
+        El bound LP resultante domina simultáneamente al de MT3D y al de MSD
+        (Teorema 4 del paper), sin eliminar variables — MT3D sigue siendo el
+        subconjunto de restricciones de partida.
+        """
+        e_double_prime = [
+            (i, j)
+            for (i, j) in self.x.keys()
+            if i < j and (i not in self.CH or j not in self.CH)
+        ]
+        hij_data = compute_hij_data(self.points, self.triangles, e_double_prime)
+
+        # ------------------------------------------------------------------
+        # 1. Identificar celdas únicas y crear variables η_s
+        # ------------------------------------------------------------------
+        cells: dict[frozenset[int], int] = {}  # tris_key → cell_id
+
+        for sub_segs in hij_data.values():
+            for left_tris, right_tris in sub_segs:
+                for cell_tris in (left_tris, right_tris):
+                    key = frozenset(cell_tris)
+                    if key and key not in cells:
+                        cell_id = len(cells)
+                        cells[key] = cell_id
+                        self.eta[cell_id] = self.model.addVar(
+                            lb=0.0, ub=1.0, vtype=GRB.CONTINUOUS,
+                            name=f"eta_{cell_id}",
+                        )
+
+        self.model.update()
+
+        # ------------------------------------------------------------------
+        # 2. Enlace η_s = Σ_{t ⊇ s} y_t
+        # ------------------------------------------------------------------
+        for key, cell_id in cells.items():
+            self.model.addConstr(
+                self.eta[cell_id] == gp.quicksum(self.y[t] for t in key),
+                name=f"eta_link_{cell_id}",
+            )
+
+        # ------------------------------------------------------------------
+        # 3. Cruce H_ij: η_s − η_{s'} = x_ij − x_ji  (MSD constraint 28)
+        # ------------------------------------------------------------------
+        n_cross = 0
+        for (i, j), sub_segs in hij_data.items():
+            x_diff = gp.LinExpr()
+            x_diff.addTerms(1.0, self.x[i, j])
+            if (j, i) in self.x:
+                x_diff.addTerms(-1.0, self.x[j, i])
+
+            for k, (left_tris, right_tris) in enumerate(sub_segs):
+                left_key = frozenset(left_tris)
+                right_key = frozenset(right_tris)
+                if left_key not in cells or right_key not in cells:
+                    continue
+                left_id = cells[left_key]
+                right_id = cells[right_key]
+                self.model.addConstr(
+                    self.eta[left_id] - self.eta[right_id] == x_diff,
+                    name=f"eta_cross_{i}_{j}_{k}",
+                )
+                n_cross += 1
+
+        print(
+            f"Híbrido MT3D+η: {len(cells)} vars η, "
+            f"{len(cells)} restricciones de enlace, "
+            f"{n_cross} restricciones de cruce H_ij."
+        )
