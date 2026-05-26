@@ -4,23 +4,24 @@ import os
 from gurobipy import GRB
 
 from models import OAPCompactModel
-from utils.utils import compute_triangles, read_indexed_instance
+from utils.utils import compute_triangles, read_indexed_instance, write_prefile
 
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s - %(levelname)s - %(message)s", datefmt="%H:%M:%S")
 
 
 if __name__ == "__main__":
     # Aquí puedes cambiar el nombre de la instancia que quieres ejecutar
-    instance_name = "stars-0000030"
+    instance_name = "uniform-0000006-2"
 
     # 1. Preparar datos
     points = read_indexed_instance(f"instance/{instance_name}.instance")
     triangles = compute_triangles(points)
-
+    write_prefile(f"instance/{instance_name}.instance")
+    
     # 2. Instanciar el modelo
     compact = OAPCompactModel(points, triangles, name=instance_name)
     compact.build(
-        objective="Internal", maximize=True, subtour="SCF", semiplane=2, use_knapsack=False, use_cliques=False
+        objective="External", maximize=False, subtour="SCF"
     )
 
     # Instanciar el modelo de Benders (si quieres probarlo también)

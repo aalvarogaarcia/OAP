@@ -1,7 +1,7 @@
 from models import OAPCompactModel
 from utils.utils import compute_triangles, read_indexed_instance
 
-points    = read_indexed_instance("instance/uniform-0000015-1.instance")
+points    = read_indexed_instance("instance/uniform-0000007-2.instance")
 triangles = compute_triangles(points)
 
 # Relajado — debe mostrar grupos coloreados por flujo
@@ -15,5 +15,5 @@ model2.build(objective="External", maximize=False, subtour="SCF", sum_constrain=
 model2.solve(time_limit=60, relaxed=False, plot=True, verbose=True)
 
 
-model.dump_vars_csv("outputs/LP_vars/uniform-0000015-1_LP.csv")
+model.dump_vars_csv("outputs/LP_vars/uniform-0000007-2_LP.csv")
 print(model2)

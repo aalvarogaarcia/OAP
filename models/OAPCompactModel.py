@@ -180,6 +180,8 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
             print("No results to plot. Please solve the model first and ensure a solution was found.")
             return
 
+        self._write_tikz_plot(title=title, relaxed=False)
+
         G = nx.DiGraph()
         G.add_edges_from(self.x_results)
 
@@ -248,6 +250,8 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
             print("No LP relaxation results to plot.")
             return
 
+        self._write_tikz_plot(title=title, relaxed=True)
+
         # Agrupar arcos por valor redondeado
         groups: dict[float, list[Arc]] = {}
         for arc, val in self.x_relaxed.items():
@@ -307,6 +311,85 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
         ax.set_aspect("equal")
         ax.grid(True)
         plt.show()
+
+    def _write_tikz_plot(self, title: str, relaxed: bool) -> Path:
+        """Exporta la solución actual a un archivo LaTeX/TikZ en outputs/LaTex."""
+        suffix = "LP" if relaxed else "IP"
+        filename = f"{self.model.ModelName}_{suffix}.tex"
+        output_path = Path("outputs") / "LaTex" / filename
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        lines: list[str] = []
+        lines.extend(
+            [
+                r"\documentclass[a4paper,11pt,landscape]{article}",
+                r"\usepackage{xcolor}",
+                r"\usepackage{tikz}",
+                r"\textheight = 17.000cm",
+                r"\textwidth = 25.000cm",
+                r"\voffset = -3cm",
+                r"\hoffset = -7cm",
+                "",
+                r"\begin{document}",
+                "",
+                r"\begin{center}",
+                r"\small",
+                r"\begin{tikzpicture}[scale=0.19]",
+            ]
+        )
+
+        # Mantenemos coordenadas en un rango manejable para que la escala del TikZ sea estable.
+        coordinate_factor = 10.0
+        for i, pt in enumerate(self.points):
+            x = float(pt[0]) / coordinate_factor
+            y = float(pt[1]) / coordinate_factor
+            lines.append(
+                f"\\node (v{i}) at ( {x:.1f} , {y:.1f}) [circle, fill = black, inner sep = 2pt]{{}};"
+            )
+
+        if relaxed:
+            arc_values = sorted(self.x_relaxed.items(), key=lambda item: (-item[1], item[0][0], item[0][1]))
+        else:
+            arc_values = sorted(((arc, 1.0) for arc in self.x_results), key=lambda item: (item[0][0], item[0][1]))
+
+        for (i, j), val in arc_values:
+            width = 2.0 * float(val)
+            val_str = f"{val:.6f}".rstrip("0").rstrip(".")
+            lines.append(
+                f"\\draw (v{i}) edge [->,line width={width:.3f}pt] node[below,sloped] {{\\tiny {val_str} }} (v{j});"
+            )
+
+        for i in range(self.N):
+            lines.append(f"\\path (v{i}) [late options={{label= 0: \\textcolor{{blue}}{{{i} }} }}];")
+
+        x_min = float(np.min(self.points[:, 0])) / coordinate_factor
+        y_max = float(np.max(self.points[:, 1])) / coordinate_factor
+        objective_value = float(self.model.ObjVal) if self.model.SolCount > 0 else 0.0
+        ch_area = float(self.convex_hull_area)
+
+        lines.append(
+            f"\\node at ({x_min:.1f} , {y_max + 2.4:.1f}) [fill=red!20,rounded corners,above right] {{ {self.model.ModelName} }};"
+        )
+        lines.append(
+            f"\\node at ({x_min + 41.1:.1f} , {y_max + 2.4:.1f}) [fill=red!20,rounded corners,above right] {{  Area= {objective_value:.0f}  (CH area = {ch_area:.0f}) }};"
+        )
+
+        lines.extend(
+            [
+                r"\end{tikzpicture}",
+                "",
+                r"\end{center}",
+                "",
+                r"\end{document}",
+                "",
+            ]
+        )
+
+        with open(output_path, "w", encoding="utf-8", newline="\n") as f:
+            f.write("\n".join(lines))
+
+        print(f"LaTeX plot exported to: {output_path}")
+        return output_path
 
     def dump_vars_csv(self, filepath: str | Path) -> None:
         """Write solution variable values to a CSV file.
