@@ -348,7 +348,7 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
                 "",
                 r"\begin{center}",
                 r"\small",
-                r"\begin{tikzpicture}[scale=0.19]",
+                r"\begin{tikzpicture}[scale=0.9]",
             ]
         )
 
@@ -370,7 +370,7 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
             width = 2.0 * float(val)
             val_str = f"{val:.6f}".rstrip("0").rstrip(".")
             lines.append(
-                f"\\draw (v{i}) edge [->,line width={width:.3f}pt] node[below,sloped] {{\\tiny {val_str} }} (v{j});"
+                f"\\draw (v{i}) edge [->,line width={width:.3f}pt] node[below,sloped] {{\\footnotesize {val_str} }} (v{j});"
             )
 
         for i in range(self.N):

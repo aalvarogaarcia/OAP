@@ -185,4 +185,4 @@ class OAPBaseModel(OAPStatsMixin):
 
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
         with open(filepath, "a") as f:
-            f.write(json.dumps(log_entry) + "\n")
+            f.write(json.dumps(log_entry) + "\n")   
