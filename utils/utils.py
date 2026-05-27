@@ -61,6 +61,8 @@ from utils.geometry import (
     write_prefile,
 )
 from utils.visualization import (
+    enumerate_facet_solutions,
+    facets_to_latex,
     plot_cut_heatmap,
     plot_cut_weights,
     plot_farkas_ray_network,
@@ -116,6 +118,8 @@ __all__ = [
     "parse_edge",
     "serialize_expr",
     # --- visualization ---
+    "enumerate_facet_solutions",
+    "facets_to_latex",
     "plot_cut_heatmap",
     "plot_cut_weights",
     "plot_farkas_ray_network",

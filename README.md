@@ -76,7 +76,7 @@ OAP_NextGen/
 │   ├── geometry.py            – pure geometry, I/O helpers, type aliases
 │   ├── constraints.py         – Gurobi constraint injection helpers
 │   ├── benders_log.py         – cut logging & JSONL serialisation
-│   ├── visualization.py       – plotting & diagnostic visualisations
+│   ├── visualization.py       – plotting, diagnostic visualisations & polyhedral export
 │   ├── geometry_classifier.py – convex-layer onion peeling
 │   ├── model_stats.py         – tabular result aggregation
 │   └── analyze_benders.py     – Benders cut analysis CLI
@@ -105,7 +105,7 @@ OAP_NextGen/
 └── outputs/                   – solver output files (git-ignored)
 ```
 
-## 4. Reproducibility and Execution
+## 7. Reproducibility and Execution
 
 ### Environment setup
 
@@ -150,7 +150,70 @@ python run_single_instance.py instance/little-instances/uniform-0000010-1-HIPOLI
 pytest -q
 ```
 
-## 5. Current Research Status
+## 5. Visualization & Polyhedral Analysis Utilities
+
+`utils/visualization.py` exposes the following public functions (all re-exported via `utils/utils.py`):
+
+| Function | Description |
+|---|---|
+| `plot_solution` | Draw the solved polygon and point set with matplotlib |
+| `plot_strengthening_constraints` | Visualise active half-plane and strengthening constraints |
+| `plot_cut_heatmap` | Heat-map of Benders cut coefficient densities |
+| `plot_cut_weights` | Bar chart of ℓ₁ / CGSP cut weights |
+| `plot_farkas_ray_network` | Network graph of a Farkas infeasibility ray |
+| `plot_sankey_traceability` | Sankey diagram tracing cut origins across iterations |
+| `facets_to_latex` | Convert a polyhedral JSONL log to a structured `.tex` file |
+| `enumerate_facet_solutions` | Enumerate all integer-feasible solutions of a polyhedral system via Gurobi |
+
+### `facets_to_latex`
+
+Reads a polyhedral-description JSONL file produced by `OAPBaseModel.log_facets` and writes a
+single `.tex` file with one `\maketitle` block per iteration.  Facets are grouped into sections
+by variable family (`x`, `f`, `y⁻`, `y⁺`) and subsections by structural role (assignment,
+fixing, linking, flow conservation/balance, inequality).  Long `align` environments are
+auto-split every 40 equations.
+
+```python
+from utils.visualization import facets_to_latex
+
+facets_to_latex(
+    "outputs/Logs/uniform-0000007-2-HIPOLITO-mod_compact_polyhedral.json",
+    "outputs/LaTex/uniform-0000007-polyhedral.tex",
+)
+```
+
+### `enumerate_facet_solutions`
+
+Builds a Gurobi MIP from all facets of a given iteration (variables matching `var_prefix` are
+declared **binary**; all auxiliary variables are continuous), then uses the Gurobi solution pool
+(`PoolSearchMode = 2`) for exhaustive enumeration.  Returns a `list[dict[str, float]]` — one
+dict per feasible solution containing only the `var_prefix` variables.
+
+```python
+from utils.visualization import enumerate_facet_solutions
+
+solutions = enumerate_facet_solutions(
+    "outputs/Logs/uniform-0000007-2-HIPOLITO-mod_compact_polyhedral.json",
+    iteration=0,
+    var_prefix="x",       # binary family to enumerate
+    max_solutions=500,
+    time_limit=60.0,
+)
+# solutions[i] == {"x_0_1": 1.0, "x_0_3": 0.0, ...}
+print(f"{len(solutions)} feasible arc assignments found")
+```
+
+Key parameters:
+
+| Parameter | Default | Description |
+|---|---|---|
+| `iteration` | `0` | Which JSONL iteration entry to use |
+| `var_prefix` | `"x"` | Variable prefix declared as binary (`x`, `f`, `y`, `yp`) |
+| `max_solutions` | `10_000` | Cap on `Params.PoolSolutions` |
+| `time_limit` | `300.0` | Gurobi time limit in seconds |
+| `verbose` | `False` | Print Gurobi solver log |
+
+## 6. Current Research Status
 
 This repository is under active development. Recent work (v0.2.0) includes:
 
@@ -158,11 +221,13 @@ This repository is under active development. Recent work (v0.2.0) includes:
 - split of the monolithic `utils/utils.py` into focused submodules (`geometry`, `constraints`, `benders_log`, `visualization`),
 - Farkas-ray and π-cut logging infrastructure with JSONL serialisation,
 - geometry-aware constraint helpers (half-plane, knapsack, clique-of-crossing-edges),
-- improvements in typing, PEP 8 compliance, and parametric test coverage.
+- improvements in typing, PEP 8 compliance, and parametric test coverage,
+- `facets_to_latex` utility to export polyhedral descriptions to structured LaTeX,
+- `enumerate_facet_solutions` utility for exhaustive integer-solution enumeration via Gurobi solution pool.
 
 The project is intended as a research codebase; interfaces and experimentation workflows may evolve.
 
-## 6. Citation
+## 8. Citation
 
 If this repository contributes to your research, please cite via `CITATION.cff` (or GitHub "Cite this repository").
 
@@ -171,7 +236,7 @@ García, Á. Optimal Area Polygonization (OAP) NextGen: MILP Framework. v0.2.0
 Repository: https://github.com/aalvarogaarcia/OAP
 ```
 
-## 7. References
+## 9. References
 
 - Hernández-Pérez, H., Riera-Ledesma, J., Rodríguez-Martín, I., & Salazar-González, J. J.  
   *Optimal area polygonisation problems: Mixed integer linear programming models*.  

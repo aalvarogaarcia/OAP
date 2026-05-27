@@ -427,3 +427,514 @@ def plot_strengthening_constraints(
         plt.close()
     elif show_plot:
         plt.show()
+
+
+# ---------------------------------------------------------------------------
+# Polyhedral facet → LaTeX export
+# ---------------------------------------------------------------------------
+
+def facets_to_latex(jsonl_path: str, output_path: str) -> None:
+    """Convert a polyhedral-description JSONL log to a LaTeX ``.tex`` file.
+
+    Each line of *jsonl_path* must be a JSON object with the keys:
+
+    * ``"iteration"`` – int
+    * ``"num_facets"`` – int
+    * ``"facets"`` – list of facet dicts, each with:
+
+      * ``"sense"`` – ``"=="`` or ``"<="``
+      * ``"rhs"``   – float
+      * ``"components"`` – ``dict[str, float]`` mapping variable name →
+        coefficient.  Variable naming conventions recognised:
+
+        - ``x_i_j``  → :math:`x_{i,j}`
+        - ``f_i_j``  → :math:`f_{i,j}`
+        - ``y_k``    → :math:`y_k`
+        - ``yp_k``   → :math:`yp_k`
+
+    The output is a single ``.tex`` file with one ``\\maketitle`` block per
+    iteration.  Each iteration is divided into sections by variable type
+    (``x``, ``f``, ``y``, ``y+``) and subsections inferred from fixed
+    structural rules.  Long ``align`` environments are split every 40
+    equations to avoid LaTeX memory issues.
+
+    Parameters
+    ----------
+    jsonl_path:
+        Path to the input ``.json`` / ``.jsonl`` file.
+    output_path:
+        Destination ``.tex`` file path (parent directories are created
+        automatically).
+    """
+    import json
+    import re
+    from datetime import date
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _var_to_tex(name: str) -> str:
+        """Convert an internal variable name to a LaTeX subscript token."""
+        # x_i_j  /  f_i_j  → var_{i,j}
+        m2 = re.fullmatch(r"([a-zA-Z]+)_(\d+)_(\d+)", name)
+        if m2:
+            prefix, i, j = m2.group(1), m2.group(2), m2.group(3)
+            return f"{prefix}_{{{i},{j}}}"
+        # yp_k  /  y_k  → yp_k  (single subscript, no braces if single digit)
+        m1 = re.fullmatch(r"([a-zA-Z]+)_(\d+)", name)
+        if m1:
+            prefix, k = m1.group(1), m1.group(2)
+            sub = k if len(k) == 1 else f"{{{k}}}"
+            return f"{prefix}_{sub}"
+        return name  # fallback
+
+    def _fmt_coeff(c: float, first: bool) -> str:
+        """Render a coefficient as a LaTeX string prefix for its variable."""
+        # Represent as integer when possible
+        ci = int(c) if c == int(c) else None
+        if ci is not None:
+            if ci == 1:
+                return "" if first else "+ "
+            if ci == -1:
+                return "-"
+            # large integer coefficient: use \, thin space
+            if first:
+                return f"{ci}\\,"
+            return f"+ {ci}\\," if ci > 0 else f"- {abs(ci)}\\,"
+        # float fallback
+        if first:
+            return f"{c:.2f}"
+        return f"+ {c:.2f}" if c > 0 else f"- {abs(c):.2f}"
+
+    def _fmt_rhs(r: float) -> str:
+        ri = int(r) if r == int(r) else None
+        return str(ri) if ri is not None else f"{r:.2f}"
+
+    def _build_lhs(components: dict[str, float]) -> str:
+        """Render the left-hand side of a constraint in LaTeX."""
+        terms: list[str] = []
+        for idx, (var, coeff) in enumerate(components.items()):
+            tex_var = _var_to_tex(var)
+            prefix = _fmt_coeff(coeff, idx == 0)
+            if prefix.endswith("\\,"):
+                terms.append(f"{prefix}{tex_var}")
+            elif prefix in ("", "+ "):
+                terms.append(f"{prefix}{tex_var}")
+            elif prefix == "-":
+                terms.append(f"-{tex_var}")
+            else:
+                terms.append(f"{prefix}{tex_var}")
+        return " ".join(terms)
+
+    def _sense_tex(sense: str) -> str:
+        return r"&=" if sense == "==" else r"&\leq"
+
+    def _align_blocks(
+        equations: list[str], split: int = 40
+    ) -> list[list[str]]:
+        """Split a flat list of equation strings into chunks of *split*."""
+        return [equations[i : i + split] for i in range(0, len(equations), split)]
+
+    def _render_align(equations: list[str], extra_vspace: list[int] | None = None) -> list[str]:
+        """Return lines for one or more align environments."""
+        if not equations:
+            return []
+        blocks = _align_blocks(equations)
+        lines: list[str] = []
+        for block in blocks:
+            lines.append(r"\begin{align}")
+            for eq in block:
+                lines.append(f"  {eq}")
+            lines.append(r"\end{align}")
+            lines.append("")
+        return lines
+
+    # ------------------------------------------------------------------
+    # Variable-type classification
+    # ------------------------------------------------------------------
+
+    def _var_types(components: dict[str, float]) -> set[str]:
+        """Return the set of variable prefixes present in *components*."""
+        prefixes: set[str] = set()
+        for name in components:
+            m = re.match(r"([a-zA-Z]+)_", name)
+            if m:
+                prefixes.add(m.group(1))
+        return prefixes
+
+    def _primary_section(components: dict[str, float]) -> str:
+        """Return the primary section key for a facet."""
+        prefixes = _var_types(components)
+        if "yp" in prefixes:
+            return "yp"
+        if "y" in prefixes:
+            return "y"
+        if "f" in prefixes:
+            return "f"
+        return "x"
+
+    # ------------------------------------------------------------------
+    # Subsection classification (fixed rule-based)
+    # ------------------------------------------------------------------
+
+    def _subsection_x(facet: dict[str, object]) -> str:
+        sense = facet["sense"]
+        rhs = float(facet["rhs"])  # type: ignore[arg-type]
+        components: dict[str, float] = facet["components"]  # type: ignore[assignment]
+        if sense == "==" and rhs == 1.0 and all(v == 1.0 for v in components.values()):
+            return "Assignment constraints"
+        if sense == "==":
+            return "Fixing constraints"
+        return "Inequality constraints"
+
+    def _subsection_f(facet: dict[str, object]) -> str:
+        sense = facet["sense"]
+        components: dict[str, float] = facet["components"]  # type: ignore[assignment]
+        prefixes = _var_types(components)
+        if sense == "<=":
+            return "Inequality constraints"
+        # pure f_ terms → flow conservation
+        if prefixes == {"f"}:
+            return "Flow conservation constraints"
+        # one x_ + one f_ → linking
+        x_vars = [k for k in components if k.startswith("x_")]
+        f_vars = [k for k in components if k.startswith("f_")]
+        if len(x_vars) == 1 and len(f_vars) == 1:
+            return "Linking constraints"
+        return "Flow / balance constraints"
+
+    def _subsection_yp(facet: dict[str, object]) -> str:
+        sense = facet["sense"]
+        components: dict[str, float] = facet["components"]  # type: ignore[assignment]
+        if sense == "<=":
+            return "Inequality constraints"
+        # structural: only yp_ vars, all same sign → global/structural
+        coeffs = list(components.values())
+        if all(c > 0 for c in coeffs) or all(c < 0 for c in coeffs):
+            return "Global and structural constraints"
+        return "Flow / balance constraints"
+
+    def _subsection_y(facet: dict[str, object]) -> str:
+        sense = facet["sense"]
+        components: dict[str, float] = facet["components"]  # type: ignore[assignment]
+        if sense == "<=":
+            return "Inequality constraints"
+        coeffs = list(components.values())
+        if all(c > 0 for c in coeffs) or all(c < 0 for c in coeffs):
+            return "Global and structural constraints"
+        return "Flow / balance constraints"
+
+    _SUBSECTION_DISPATCH: dict[str, Any] = {
+        "x": _subsection_x,
+        "f": _subsection_f,
+        "yp": _subsection_yp,
+        "y": _subsection_y,
+    }
+
+    # Desired subsection ordering within each section
+    _SUBSECTION_ORDER: dict[str, list[str]] = {
+        "x": ["Assignment constraints", "Fixing constraints", "Inequality constraints"],
+        "f": [
+            "Linking constraints",
+            "Flow conservation constraints",
+            "Flow / balance constraints",
+            "Inequality constraints",
+        ],
+        "yp": [
+            "Global and structural constraints",
+            "Flow / balance constraints",
+            "Inequality constraints",
+        ],
+        "y": [
+            "Global and structural constraints",
+            "Flow / balance constraints",
+            "Inequality constraints",
+        ],
+    }
+
+    _SECTION_TITLES: dict[str, str] = {
+        "x": r"Variables \boldmath$x$",
+        "f": r"Variables \boldmath$f$",
+        "yp": r"Variables \boldmath$y^+$",
+        "y": r"Variables \boldmath$y^-$",
+    }
+
+    # Desired section ordering
+    _SECTION_ORDER = ["x", "f", "y", "yp"]
+
+    # ------------------------------------------------------------------
+    # Read all iterations
+    # ------------------------------------------------------------------
+
+    iterations: list[dict[str, Any]] = []
+    with open(jsonl_path, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if line:
+                iterations.append(json.loads(line))
+
+    # ------------------------------------------------------------------
+    # Build .tex content
+    # ------------------------------------------------------------------
+
+    today = date.today()
+    today_str = f"{today.day} {today.strftime('%B %Y')}"
+
+    output_lines: list[str] = []
+
+    for iter_obj in iterations:
+        iteration = int(iter_obj["iteration"])
+        facets: list[dict[str, Any]] = iter_obj["facets"]
+
+        # Title block
+        output_lines += [
+            rf"\title{{Polyhedral Description\\[0.5em]\large Iteration {iteration}}}",
+            rf"\date{{{today_str}}}",
+            "",
+            r"\maketitle",
+            "",
+        ]
+
+        # Group facets by section, then subsection
+        # sections: dict[section_key, dict[subsection_label, list[str(equation)]]]
+        from collections import defaultdict
+
+        sections: dict[str, dict[str, list[str]]] = {
+            k: defaultdict(list) for k in _SECTION_ORDER
+        }
+
+        for facet in facets:
+            components: dict[str, float] = facet["components"]
+            sense = str(facet["sense"])
+            rhs = float(facet["rhs"])
+
+            sec = _primary_section(components)
+            sub_fn = _SUBSECTION_DISPATCH[sec]
+            sub = sub_fn(facet)
+
+            lhs = _build_lhs(components)
+            sense_tok = _sense_tex(sense)
+            rhs_tok = _fmt_rhs(rhs)
+            eq_line = f"{lhs} {sense_tok} {rhs_tok} \\\\"
+            sections[sec][sub].append(eq_line)
+
+        # Render sections
+        for sec_key in _SECTION_ORDER:
+            sub_dict = sections[sec_key]
+            if not sub_dict:
+                continue
+
+            total_in_section = sum(len(v) for v in sub_dict.values())
+            sec_title = _SECTION_TITLES[sec_key]
+
+            output_lines += [
+                "% " + "=" * 60,
+                rf"\section{{{sec_title}}}",
+                f"% {total_in_section} facets",
+                "% " + "=" * 60,
+                "",
+            ]
+
+            sub_order = _SUBSECTION_ORDER[sec_key]
+            # include any subsections not in the predefined order at the end
+            extra = [s for s in sub_dict if s not in sub_order]
+            for sub_label in sub_order + extra:
+                eqs = sub_dict.get(sub_label)
+                if not eqs:
+                    continue
+                output_lines.append(rf"\subsection*{{{sub_label}}}")
+                output_lines.append("")
+                output_lines += _render_align(eqs)
+
+        output_lines.append("")  # blank line between iterations
+
+    # ------------------------------------------------------------------
+    # Write output
+    # ------------------------------------------------------------------
+
+    _ensure_dir(output_path)
+    with open(output_path, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(output_lines))
+        fh.write("\n")
+
+
+# ---------------------------------------------------------------------------
+# Polyhedral facet → integer solution enumeration (Gurobi solution pool)
+# ---------------------------------------------------------------------------
+
+
+def enumerate_facet_solutions(
+    jsonl_path: str,
+    iteration: int = 0,
+    var_prefix: str = "x",
+    max_solutions: int = 10_000,
+    time_limit: float = 300.0,
+    verbose: bool = False,
+) -> list[dict[str, float]]:
+    """Enumerate all integer feasible solutions described by a polyhedral JSONL log.
+
+    Reads the facets for the given *iteration* from *jsonl_path*, builds a
+    Gurobi MIP model where variables whose name starts with *var_prefix* are
+    declared **binary** and all other variables are **continuous** (lb = 0),
+    then uses Gurobi's solution-pool exhaustive search
+    (``PoolSearchMode = 2``) to find up to *max_solutions* feasible points.
+
+    Parameters
+    ----------
+    jsonl_path:
+        Path to the polyhedral JSONL log produced by
+        :py:meth:`~models.OAPBaseModel.log_facets`.
+    iteration:
+        Which iteration entry to use (matched by the ``"iteration"`` key).
+        Defaults to ``0``.
+    var_prefix:
+        Variable-name prefix that should be treated as **binary**.  All
+        variables whose name starts with this prefix get ``vtype=GRB.BINARY``;
+        the rest are continuous (lb = 0, ub = GRB.INFINITY).
+        Defaults to ``"x"`` (the arc-selection variables).
+    max_solutions:
+        Maximum number of feasible solutions to collect
+        (``Params.PoolSolutions``).  Defaults to ``10_000``.
+    time_limit:
+        Gurobi time limit in seconds.  Defaults to ``300.0``.
+    verbose:
+        If ``True``, Gurobi output is printed to stdout.  Defaults to
+        ``False``.
+
+    Returns
+    -------
+    list[dict[str, float]]
+        Each element is a dict ``{var_name: value}`` containing **only** the
+        variables whose name starts with *var_prefix*, with values rounded to
+        the nearest integer (0 or 1 for binary variables).
+
+    Notes
+    -----
+    * The function uses a **dummy objective** (minimise 0) — it is a pure
+      feasibility enumeration.
+    * ``PoolSearchMode = 2`` performs exhaustive search; for large instances
+      the number of solutions can be exponential.  Use *max_solutions* and
+      *time_limit* to cap the run.
+    * Non-``var_prefix`` variables (``f``, ``y``, ``yp``) are continuous so
+      that the full 62-facet system remains feasible without requiring an
+      integer assignment for auxiliary variables.
+    """
+    import json
+    import re
+    import time
+
+    import gurobipy as gp
+    from gurobipy import GRB
+
+    # ------------------------------------------------------------------
+    # 1. Read the requested iteration
+    # ------------------------------------------------------------------
+    target: dict[str, Any] | None = None
+    with open(jsonl_path, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            obj: dict[str, Any] = json.loads(line)
+            if int(obj["iteration"]) == iteration:
+                target = obj
+                break
+
+    if target is None:
+        raise ValueError(
+            f"Iteration {iteration} not found in {jsonl_path!r}"
+        )
+
+    facets: list[dict[str, Any]] = target["facets"]
+
+    # ------------------------------------------------------------------
+    # 2. Collect all variable names and infer types
+    # ------------------------------------------------------------------
+    all_vars: set[str] = set()
+    for facet in facets:
+        all_vars.update(facet["components"].keys())
+
+    # ------------------------------------------------------------------
+    # 3. Build Gurobi model
+    # ------------------------------------------------------------------
+    env = gp.Env(empty=True)
+    env.setParam("OutputFlag", 1 if verbose else 0)
+    env.start()
+
+    model = gp.Model(env=env)
+    model.Params.OutputFlag = 1 if verbose else 0
+
+    # Create variables
+    gvars: dict[str, gp.Var] = {}
+    for vname in sorted(all_vars):
+        prefix_match = re.match(r"([a-zA-Z]+)_", vname)
+        prefix = prefix_match.group(1) if prefix_match else ""
+        if prefix == var_prefix:
+            gvars[vname] = model.addVar(vtype=GRB.BINARY, name=vname)
+        else:
+            gvars[vname] = model.addVar(lb=0.0, ub=GRB.INFINITY,
+                                         vtype=GRB.CONTINUOUS, name=vname)
+
+    model.update()
+
+    # Add constraints
+    for facet in facets:
+        components: dict[str, float] = facet["components"]
+        sense: str = facet["sense"]
+        rhs: float = float(facet["rhs"])
+
+        lhs_expr: gp.LinExpr = gp.LinExpr()
+        for vname, coeff in components.items():
+            lhs_expr.add(gvars[vname], coeff)
+
+        if sense == "==":
+            model.addConstr(lhs_expr == rhs)
+        elif sense == "<=":
+            model.addConstr(lhs_expr <= rhs)
+        else:
+            raise ValueError(f"Unsupported constraint sense: {sense!r}")
+
+    # Dummy objective — pure feasibility
+    model.setObjective(gp.LinExpr(), GRB.MINIMIZE)
+
+    # ------------------------------------------------------------------
+    # 4. Configure solution pool for exhaustive enumeration
+    # ------------------------------------------------------------------
+    model.Params.PoolSearchMode = 2       # exhaustive
+    model.Params.PoolSolutions = max_solutions
+    model.Params.TimeLimit = time_limit
+
+    # ------------------------------------------------------------------
+    # 5. Solve
+    # ------------------------------------------------------------------
+    t0 = time.perf_counter()
+    model.optimize()
+    elapsed = time.perf_counter() - t0
+
+    n_found = model.SolCount
+    if not verbose:
+        print(f"[enumerate_facet_solutions] {n_found} solution(s) found "
+              f"in {elapsed:.2f}s  (iteration={iteration}, "
+              f"var_prefix={var_prefix!r})")
+
+    # ------------------------------------------------------------------
+    # 6. Extract solutions — only var_prefix variables
+    # ------------------------------------------------------------------
+    solutions: list[dict[str, float]] = []
+    prefix_vars = sorted(
+        [vname for vname in gvars if vname.startswith(f"{var_prefix}_")]
+    )
+
+    for s in range(n_found):
+        model.Params.SolutionNumber = s
+        sol: dict[str, float] = {
+            vname: round(gvars[vname].Xn)
+            for vname in prefix_vars
+        }
+        solutions.append(sol)
+
+    model.dispose()
+    env.dispose()
+
+    return solutions
