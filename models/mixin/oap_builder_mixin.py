@@ -40,6 +40,7 @@ class OAPBuilderMixin:
     z: dict[Arc, gp.Var]
     zp: dict[Arc, gp.Var]
     _abs_areas: list[float]
+    _use_tk_cuts: bool
 
     def _create_variables(self, subtour: str, objective: str, mode: int) -> None:
         """Crea todas las variables y limpia los arcos inválidos de la envolvente convexa (CH)."""

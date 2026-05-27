@@ -8,6 +8,8 @@ visualisation submodules.
 
 from __future__ import annotations
 
+from typing import NamedTuple
+
 import gurobipy as gp
 import networkx as nx
 import numpy as np
@@ -347,3 +349,159 @@ def aplicar_semiplanos_por_capas(
                             break
 
     return model, constraints
+
+
+# ---------------------------------------------------------------------------
+# T_k (lifted cycle) inequality separation
+# ---------------------------------------------------------------------------
+
+_MAX_TK_CUTS: int = 10
+"""Maximum T_k cuts injected per callback invocation (hardcoded constant)."""
+
+
+class TkCut(NamedTuple):
+    """A violated T_k (lifted cycle) inequality.
+
+    Encodes:  x(S, S)  +  x_{pw}  +  x_{wq}  +  x_{pq}  ≤  |S|
+    with  w ∈ S,  p ∉ S,  q ∉ S.
+    """
+
+    S: frozenset[int]
+    p: int
+    w: int
+    q: int
+    violation: float
+
+
+def _build_tk_network(
+    x_sol: dict[Arc, float],
+    d: dict[int, float],
+    N: int,
+    p: int,
+    w: int,
+    q: int,
+    INF: float,
+) -> nx.DiGraph:
+    """Build the directed min-cut network for T_k separation (fixed p, w, q).
+
+    N + 2 nodes: 0 … N-1 are problem nodes; N = source s; N+1 = sink t.
+
+    Capacity assignment (max-weight-closure → min-cut transformation):
+
+    - s → w  :  INF   (force w on s-side / in S)
+    - p → t  :  INF   (force p on t-side / not in S)
+    - q → t  :  INF   (force q on t-side / not in S)
+    - For each optional node i ∉ {p, q, w}:
+        d_i  > 1  →  s → i  cap  (d_i − 1)   [positive profit]
+        d_i  ≤ 1  →  i → t  cap  (1 − d_i)   [penalty]
+    - For every LP arc (i, j) with x_ij > 0:  i → j  cap  x_ij
+
+    where d_i = Σ_j x_{ij} (LP out-degree, precomputed by the caller).
+    """
+    s, t = N, N + 1
+    G: nx.DiGraph = nx.DiGraph()
+    G.add_nodes_from(range(N + 2))
+
+    # Force-inclusion / force-exclusion INF arcs
+    G.add_edge(s, w, capacity=INF)
+    G.add_edge(p, t, capacity=INF)
+    G.add_edge(q, t, capacity=INF)
+
+    # Profit / penalty arcs for optional nodes
+    for i in range(N):
+        if i in (p, q, w):
+            continue
+        di = d[i]
+        if di > 1.0:
+            G.add_edge(s, i, capacity=di - 1.0)
+        else:
+            G.add_edge(i, t, capacity=1.0 - di)
+
+    # LP arc capacities
+    for (i, j), val in x_sol.items():
+        if val > 1e-12:
+            G.add_edge(i, j, capacity=val)
+
+    return G
+
+
+def separate_tk_cuts(
+    x_sol: dict[Arc, float],
+    N: int,
+    threshold: float = 1e-6,
+) -> list[TkCut]:
+    """Find most-violated T_k (lifted cycle) inequalities via min-cut separation.
+
+    For every ordered triple (p, w, q) of distinct nodes the T_k inequality is:
+
+        x(S, S)  +  x_{pw}  +  x_{wq}  +  x_{pq}  ≤  |S|
+
+    with w ∈ S and p, q ∉ S.
+
+    The optimal S for a fixed triple is found by solving a max-weight closure
+    problem reformulated as a min s-t cut.  The violation formula is:
+
+        violation  =  D  −  min_cut  +  (d_w − 1)  +  x_{pw} + x_{wq} + x_{pq}
+
+    where  D = Σ_{i ∉ {p,q,w},  d_i > 1}  (d_i − 1)
+    and    d_i = Σ_j x_{ij}  (LP out-degree).
+
+    Returns at most *_MAX_TK_CUTS* violated cuts sorted by violation descending.
+    """
+    if N < 3:
+        return []
+
+    INF: float = sum(x_sol.values()) + float(N) + 1.0
+
+    # LP out-degrees (precomputed once for all triples)
+    d: dict[int, float] = {i: 0.0 for i in range(N)}
+    for (i, _j), val in x_sol.items():
+        d[i] += val
+
+    # Sum of all positive node profits (will be adjusted per triple)
+    D_all: float = sum(d[i] - 1.0 for i in range(N) if d[i] > 1.0)
+
+    s_node, t_node = N, N + 1
+    cuts: list[TkCut] = []
+    seen: set[tuple[frozenset[int], int, int, int]] = set()
+
+    for p in range(N):
+        for w in range(N):
+            if w == p:
+                continue
+            for q in range(N):
+                if q == p or q == w:
+                    continue
+
+                x_pw = x_sol.get((p, w), 0.0)
+                x_wq = x_sol.get((w, q), 0.0)
+                x_pq = x_sol.get((p, q), 0.0)
+
+                # Screening: skip if the three special arcs are negligible
+                if x_pw + x_wq + x_pq <= threshold:
+                    continue
+
+                # D for this triple: exclude p, q, w from the profit sum
+                D = D_all
+                for node in (p, q, w):
+                    if d[node] > 1.0:
+                        D -= d[node] - 1.0
+
+                G = _build_tk_network(x_sol, d, N, p, w, q, INF)
+                mc, (s_side, _t_side) = nx.minimum_cut(G, s_node, t_node, capacity="capacity")
+
+                violation = D - mc + (d[w] - 1.0) + x_pw + x_wq + x_pq
+
+                if violation > threshold:
+                    S = frozenset(v for v in s_side if v < N)
+                    if w not in S:
+                        continue  # degenerate cut — skip
+
+                    key = (S, p, w, q)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    cuts.append(TkCut(S=S, p=p, w=w, q=q, violation=violation))
+
+    cuts.sort(key=lambda c: c.violation, reverse=True)
+    return cuts[:_MAX_TK_CUTS]

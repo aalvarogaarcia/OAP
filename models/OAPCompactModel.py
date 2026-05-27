@@ -13,6 +13,7 @@ from numpy.typing import NDArray
 
 from models.mixin.oap_builder_mixin import OAPBuilderMixin
 from models.OAPBaseModel import OAPBaseModel
+from utils.constraints import separate_tk_cuts
 from utils.utils import (
     compute_convex_hull,
     compute_convex_hull_area,
@@ -71,6 +72,7 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
         arc_triangle_link: bool = False,
         cell_coverage: bool = False,
         hybrid_eta: bool = False,
+        use_tk_cuts: bool = False,
     ) -> None:
         """
         Orquestador principal que construye el modelo paso a paso.
@@ -80,6 +82,7 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
             cruzados) — Sec. 5.4 del paper. Son redundantes para el IP
             pero cierran sustancialmente el gap LP.
         """
+        self._use_tk_cuts = use_tk_cuts
         self._create_variables(subtour, objective, mode)
         self._set_objective(objective, mode, maximize)
         self._add_degree_constraints()
@@ -140,7 +143,7 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
         self.model.Params.SolutionLimit = GRB.MAXINT
         if threads > 0:
             self.model.setParam("Threads", threads)
-            
+
         self.model.update()
 
         # --- Relajación Lineal (LP Relaxation) ---
@@ -151,7 +154,11 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
             self.model.update()
 
         # --- Optimización ---
-        self.model.optimize()
+        if not relaxed and getattr(self, "_use_tk_cuts", False):
+            self.model.setParam("LazyConstraints", 1)
+            self.model.optimize(self._compact_tk_callback)
+        else:
+            self.model.optimize()
 
         # --- Extracción de Resultados ---
         self.x_results: list[Arc] = []
@@ -290,16 +297,23 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
         for i, pt in enumerate(self.points):
             if i in hull_set:
                 ax.annotate(
-                    str(i), (pt[0], pt[1]),
-                    textcoords="offset points", xytext=(5, 5),
-                    fontsize=10, color="red", fontweight="bold",
+                    str(i),
+                    (pt[0], pt[1]),
+                    textcoords="offset points",
+                    xytext=(5, 5),
+                    fontsize=10,
+                    color="red",
+                    fontweight="bold",
                     bbox=dict(boxstyle="round,pad=0.3", facecolor="yellow", alpha=0.7),
                 )
             else:
                 ax.annotate(
-                    str(i), (pt[0], pt[1]),
-                    textcoords="offset points", xytext=(5, 5),
-                    fontsize=9, color="black",
+                    str(i),
+                    (pt[0], pt[1]),
+                    textcoords="offset points",
+                    xytext=(5, 5),
+                    fontsize=9,
+                    color="black",
                     bbox=dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.6),
                 )
 
@@ -764,6 +778,58 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
         print(f"Inyectados {cortes_añadidos} Cortes de Clique de Cruces.")
 
     # ------------------------------------------------------------------
+    # T_k cut callback
+    # ------------------------------------------------------------------
+
+    def _compact_tk_callback(self, model: gp.Model, where: int) -> None:
+        """Gurobi callback for dynamic T_k (lifted cycle) cut separation.
+
+        Separates T_k inequalities  x(S,S) + x_pw + x_wq + x_pq ≤ |S|
+        at two points:
+        - MIPSOL : integer incumbent  → lazy constraints (cbLazy), threshold 1e-6
+        - MIPNODE: optimal LP node    → user cuts      (cbCut),  threshold 1e-3
+        """
+        if where == GRB.Callback.MIPSOL:
+            x_sol: dict[Arc, float] = {arc: model.cbGetSolution(var) for arc, var in self.x.items()}
+            cuts = separate_tk_cuts(x_sol, self.N, threshold=1e-6)
+            for cut in cuts:
+                S_list = list(cut.S)
+                rhs = len(S_list)
+                lhs = gp.LinExpr()
+                for i in S_list:
+                    for j in S_list:
+                        if i != j and (i, j) in self.x:
+                            lhs.addTerms(1.0, self.x[i, j])
+                if (cut.p, cut.w) in self.x:
+                    lhs.addTerms(1.0, self.x[cut.p, cut.w])
+                if (cut.w, cut.q) in self.x:
+                    lhs.addTerms(1.0, self.x[cut.w, cut.q])
+                if (cut.p, cut.q) in self.x:
+                    lhs.addTerms(1.0, self.x[cut.p, cut.q])
+                model.cbLazy(lhs <= rhs)
+
+        elif where == GRB.Callback.MIPNODE:
+            if model.cbGet(GRB.Callback.MIPNODE_STATUS) != GRB.OPTIMAL:
+                return
+            x_sol = {arc: model.cbGetNodeRel(var) for arc, var in self.x.items()}
+            cuts = separate_tk_cuts(x_sol, self.N, threshold=1e-3)
+            for cut in cuts:
+                S_list = list(cut.S)
+                rhs = len(S_list)
+                lhs = gp.LinExpr()
+                for i in S_list:
+                    for j in S_list:
+                        if i != j and (i, j) in self.x:
+                            lhs.addTerms(1.0, self.x[i, j])
+                if (cut.p, cut.w) in self.x:
+                    lhs.addTerms(1.0, self.x[cut.p, cut.w])
+                if (cut.w, cut.q) in self.x:
+                    lhs.addTerms(1.0, self.x[cut.w, cut.q])
+                if (cut.p, cut.q) in self.x:
+                    lhs.addTerms(1.0, self.x[cut.p, cut.q])
+                model.cbCut(lhs <= rhs)
+
+    # ------------------------------------------------------------------
     # Nuevas familias de desigualdades sobre triángulos
     # ------------------------------------------------------------------
 
@@ -799,11 +865,7 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
             Σ_{t⊇s}  y_t − Σ_{t⊇s'} y_t  ≤  x_ij + x_ji
             Σ_{t⊇s'} y_t − Σ_{t⊇s}  y_t  ≤  x_ij + x_ji
         """
-        e_double_prime = [
-            (i, j)
-            for (i, j) in self.x.keys()
-            if i < j and (i not in self.CH or j not in self.CH)
-        ]
+        e_double_prime = [(i, j) for (i, j) in self.x.keys() if i < j and (i not in self.CH or j not in self.CH)]
         hij_data = compute_hij_data(self.points, self.triangles, e_double_prime)
 
         n_added = 0
@@ -841,11 +903,7 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
         representadas por los puntos de muestreo izquierdo/derecho de cada
         sub-segmento de H_ij.
         """
-        e_double_prime = [
-            (i, j)
-            for (i, j) in self.x.keys()
-            if i < j and (i not in self.CH or j not in self.CH)
-        ]
+        e_double_prime = [(i, j) for (i, j) in self.x.keys() if i < j and (i not in self.CH or j not in self.CH)]
         hij_data = compute_hij_data(self.points, self.triangles, e_double_prime)
 
         seen: set[frozenset[int]] = set()
@@ -879,11 +937,7 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
         (Teorema 4 del paper), sin eliminar variables — MT3D sigue siendo el
         subconjunto de restricciones de partida.
         """
-        e_double_prime = [
-            (i, j)
-            for (i, j) in self.x.keys()
-            if i < j and (i not in self.CH or j not in self.CH)
-        ]
+        e_double_prime = [(i, j) for (i, j) in self.x.keys() if i < j and (i not in self.CH or j not in self.CH)]
         hij_data = compute_hij_data(self.points, self.triangles, e_double_prime)
 
         # ------------------------------------------------------------------
@@ -899,7 +953,9 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
                         cell_id = len(cells)
                         cells[key] = cell_id
                         self.eta[cell_id] = self.model.addVar(
-                            lb=0.0, ub=1.0, vtype=GRB.CONTINUOUS,
+                            lb=0.0,
+                            ub=1.0,
+                            vtype=GRB.CONTINUOUS,
                             name=f"eta_{cell_id}",
                         )
 
