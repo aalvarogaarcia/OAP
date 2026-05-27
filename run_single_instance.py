@@ -169,6 +169,21 @@ def _parse_args() -> argparse.Namespace:
         ),
     )
     p.add_argument(
+        "--modify-log-path",
+        action="store_true",
+        default=False,
+        help=(
+            "Prompt for a custom Benders cut-log output path, overriding the "
+            "default outputs/Others/Benders/{name}/log.json. Benders-only."
+        ),
+    )
+    p.add_argument(
+        "--plot",
+        action="store_true",
+        default=False,
+        help="Generate plots for Compacto",
+    )
+    p.add_argument(
         "--threads",
         type=int,
         default=0,
@@ -234,7 +249,15 @@ def _build_config_from_args(args: argparse.Namespace) -> dict[str, object]:
                 "Remove it when --model Compacto is set.",
                 file=sys.stderr,
             )
+            sys.exit(1)  
+        if args.modify_log_path:
+            print(
+                "ERROR: --modify-log-path is a Benders-only flag. "
+                "Remove it when --model Compacto is set.",
+                file=sys.stderr,
+            )
             sys.exit(1)
+
 
     # Validate: mutually exclusive cut strategies
     active_cut_strategies = sum([args.use_deepest_cuts, args.use_magnanti_wong, args.use_ddma])
@@ -288,9 +311,10 @@ def _build_config_from_args(args: argparse.Namespace) -> dict[str, object]:
         # Shared
         "time_limit": args.time_limit,
         # Kept for compatibility with downstream logic
-        "modify_log_path": False,
+        "modify_log_path": args.modify_log_path if args.model_type == "Benders" else False,
         "Extra_Constraints": False,
         "Threads": args.threads,
+        "plot": args.plot if args.model_type == "Compacto" else False,
     }
 
 
@@ -334,7 +358,7 @@ def main() -> None:
         )
 
         print("\n[!] Resolviendo...")
-        modelo.solve(relaxed=config["relaxed"], verbose=True, threads=config["Threads"])  # type: ignore[arg-type]
+        modelo.solve(relaxed=config["relaxed"], verbose=True, threads=config["Threads"], plot=config["plot"])  # type: ignore[arg-type]
 
         # Bloque Polihedral corregido: Preguntamos primero, extraemos/guardamos después
         if config["polihedral"]:
