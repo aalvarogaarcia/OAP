@@ -60,7 +60,7 @@ METHOD_CONFIG: dict[str, dict[str, Any]] = {
         "label": "OAPCompactModel (Threads=1)",
         "build_kwargs": {
             "objective": "Fekete",
-            "subtour": "SCF",
+            "subtour": "DFJ",
             "sum_constrain": True,
             "strengthen": False,
             "semiplane": 0,
@@ -75,7 +75,7 @@ METHOD_CONFIG: dict[str, dict[str, Any]] = {
         "build_kwargs": {
             "objective": "Fekete",
             "benders_method": "farkas",
-            "subtour": "SCF",
+            "subtour": "DFJ",
             "sum_constrain": True,
             "strengthen": False,
             "crosses_constrain": False,
@@ -94,7 +94,7 @@ METHOD_CONFIG: dict[str, dict[str, Any]] = {
         "build_kwargs": {
             "objective": "Fekete",
             "benders_method": "farkas",
-            "subtour": "SCF",
+            "subtour": "DFJ",
             "sum_constrain": True,
             "strengthen": False,
             "crosses_constrain": False,
@@ -114,7 +114,7 @@ METHOD_CONFIG: dict[str, dict[str, Any]] = {
         "build_kwargs": {
             "objective": "Fekete",
             "benders_method": "farkas",
-            "subtour": "SCF",
+            "subtour": "DFJ",
             "sum_constrain": True,
             "strengthen": False,
             "crosses_constrain": False,
@@ -134,7 +134,7 @@ METHOD_CONFIG: dict[str, dict[str, Any]] = {
         "build_kwargs": {
             "objective": "Fekete",
             "benders_method": "farkas",
-            "subtour": "SCF",
+            "subtour": "DFJ",
             "sum_constrain": True,
             "strengthen": False,
             "crosses_constrain": False,
@@ -352,7 +352,11 @@ def load_json_config(path: str) -> BenchmarkConfig:
     """Load configuration from JSON file."""
     logger.info("Loading config from %s", path)
     with open(path, "r") as f:
-        cfg_dict = json.load(f)
+        raw = json.load(f)
+
+    # Support both flat configs and the snapshot format produced by
+    # write_config_snapshot (which nests the config under a "config" key).
+    cfg_dict: dict[str, Any] = raw.get("config", raw)
 
     return BenchmarkConfig(
         dir_path=cfg_dict["dir_path"],
