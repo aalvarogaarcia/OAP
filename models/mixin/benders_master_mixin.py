@@ -60,6 +60,9 @@ class BendersMasterMixin:
         """
         # Guardar para que el callback pueda consultarlo sin referencia a build()
         self._subtour_method = subtour
+        # DDMA MIPNODE deduplication counter — reset on each build() so stale
+        # node counts from previous solves do not suppress the first MIPNODE entry.
+        self._last_mipnode_ddma_nodcnt: int = -1
 
         self._add_variables_master(objective)  # Método auxiliar para añadir variables al maestro
 

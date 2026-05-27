@@ -316,6 +316,15 @@ class BendersOptimizeMixin:
             use_mw      = getattr(self, "use_magnanti_wong", False)
             use_ddma    = getattr(self, "use_ddma", False)
 
+            # Deduplicate DDMA calls: Gurobi may re-enter MIPNODE after cbCut()
+            # adds a cut.  Each re-entry resolves subproblems and would call DDMA
+            # again with the same x_sol, producing duplicate cuts.
+            if use_ddma:
+                nodcnt = int(model.cbGet(GRB.Callback.MIPNODE_NODCNT))
+                if nodcnt == getattr(self, "_last_mipnode_ddma_nodcnt", -1):
+                    return  # already processed this node's LP; avoid duplicate DDMA cuts
+                self._last_mipnode_ddma_nodcnt = nodcnt
+
             # ---- Y subproblem — feasibility cuts only (no Pi / optimality) ----
             if self.sub_y.Status == GRB.INFEASIBLE:
                 if use_deepest:
@@ -323,19 +332,13 @@ class BendersOptimizeMixin:
                     if cut_expr_y is not None:
                         model.cbCut(cut_expr_y <= cut_rhs_y)
                 elif use_ddma:
-                    cut_expr_y, cut_rhs_y, _ = self.get_ddma_cut_y(x_sol, TOL=TOL)
+                    cut_expr_y, cut_rhs_y, _ = self.get_ddma_cut_y(x_sol)
                     if cut_expr_y is not None:
                         model.cbCut(cut_expr_y <= cut_rhs_y)
                 elif use_mw:
                     cut_expr_y, cut_rhs_y, _ = self.get_mw_cut_y(x_sol, TOL=TOL)
                     if cut_expr_y is not None:
                         model.cbCut(cut_expr_y <= cut_rhs_y)
-                    else:
-                        cut_expr, cut_val = self.get_farkas_cut_y(x_sol, TOL)
-                        if cut_val > TOL:
-                            model.cbCut(cut_expr <= 0)
-                        elif cut_val < -TOL:
-                            model.cbCut(cut_expr >= 0)
                 else:
                     cut_expr, cut_val = self.get_farkas_cut_y(x_sol, TOL)
                     if cut_val > TOL:
@@ -350,7 +353,7 @@ class BendersOptimizeMixin:
                     if cut_expr_yp is not None:
                         model.cbCut(cut_expr_yp <= cut_rhs_yp)
                 elif use_ddma:
-                    cut_expr_yp, cut_rhs_yp, _ = self.get_ddma_cut_yp(x_sol, TOL=TOL)
+                    cut_expr_yp, cut_rhs_yp, _ = self.get_ddma_cut_yp(x_sol)
                     if cut_expr_yp is not None:
                         model.cbCut(cut_expr_yp <= cut_rhs_yp)
                 elif use_mw:

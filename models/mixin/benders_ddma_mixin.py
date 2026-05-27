@@ -76,7 +76,7 @@ Arc = tuple[int, int]
 
 _DDMA_TOL: float = 1e-8
 _DDMA_EPS: float = 1e-6
-_DDMA_MAX_ITER: int = 20
+_DDMA_MAX_ITER: int = 10
 
 
 class BendersDDMAMixin:
@@ -84,8 +84,8 @@ class BendersDDMAMixin:
 
     Public entry points
     -------------------
-    get_ddma_cut_y(x_sol, eta_sol=0.0, max_iter=20, eps=1e-6)
-    get_ddma_cut_yp(x_sol, max_iter=20, eps=1e-6)
+    get_ddma_cut_y(x_sol, eta_sol=0.0, max_iter=10, eps=1e-6)
+    get_ddma_cut_yp(x_sol, max_iter=10, eps=1e-6)
 
     Both return (cut_expr, cut_rhs, witness) or (None, None, dict).
     """
@@ -492,11 +492,10 @@ class BendersDDMAMixin:
         sub.setParam("InfUnbdInfo", 1)
 
         z_abs = 0.0
-        best_pi: dict[str, Any] | None = None
-        best_depth = 0.0  # signed depth of the selected π
-        best_numerator = 0.0  # signed numerator of the selected π
-        best_abs_numerator = -float("inf")  # selection criterion (|numerator|)
-        best_status: int | None = None  # GRB.INFEASIBLE or GRB.OPTIMAL of best π
+        last_pi: dict[str, Any] | None = None
+        last_depth = 0.0  # signed depth of the most recent valid π
+        last_numerator = 0.0  # signed numerator of the most recent valid π
+        last_status: int | None = None  # GRB.INFEASIBLE or GRB.OPTIMAL of last π
 
         for it in range(max_iter):
             # Step 1 — perturb RHS by −z_abs·w (always subtract = always tighten).
@@ -532,26 +531,26 @@ class BendersDDMAMixin:
             # numerator = π^T (b − B x̄), the raw (unnormalised) violation (signed)
             depth, numerator = self._compute_ddma_depth(pi_dict, x_sol, which, weights, TOL=TOL)
 
-            # Selection criterion is status-aware:
-            # - INFEASIBLE (FarkasDual): Gurobi can return either sign convention;
-            #   select by |numerator|.  A negative-numerator ray is handled by the
-            #   flip block at the end (−π is also a valid Farkas certificate).
-            # - OPTIMAL (.Pi): only accept numerator > TOL.  Negating a dual basis
-            #   solution is NOT valid — .Pi values do not form a cone, so −π is not
-            #   dual feasible and would produce an invalid cut.
-            if status == GRB.INFEASIBLE:
-                accept = abs(numerator) > TOL and abs(numerator) > best_abs_numerator
-            else:  # OPTIMAL
-                accept = numerator > TOL and numerator > best_abs_numerator
-            if accept:
-                best_abs_numerator = abs(numerator)
-                best_depth = depth
-                best_numerator = numerator
-                best_pi = pi_dict
-                best_status = status
+            # Track the most recent valid iterate (last-π rule, Remark 6):
+            # depth is monotonically non-decreasing, so the last valid π
+            # always yields the deepest cut.
+            # - INFEASIBLE (FarkasDual): accept any ray with |numerator| > TOL.
+            #   Negative-numerator rays are flipped at the end.
+            # - OPTIMAL (.Pi): only accept numerator > TOL; negating .Pi is
+            #   not valid (dual basis solutions do not form a cone).
+            if status == GRB.INFEASIBLE and abs(numerator) > TOL:
+                last_pi = pi_dict
+                last_depth = depth
+                last_numerator = numerator
+                last_status = status
+            elif status == GRB.OPTIMAL and numerator > TOL:
+                last_pi = pi_dict
+                last_depth = depth
+                last_numerator = numerator
+                last_status = status
 
             # Check for convergence on absolute depth increment
-            if abs(depth) - z_abs < eps:
+            if abs(abs(depth) - z_abs) < eps:
                 logger.debug(
                     "DDMA(%s) converged at iter %d: z_abs=%.4e, |depth|=%.4e, numerator=%.4e",
                     which,
@@ -564,39 +563,30 @@ class BendersDDMAMixin:
 
             z_abs = abs(depth)
 
-        if best_pi is None:
+        if last_pi is None:
             return None, None, {"aborted": "no_pi"}
 
-        # Validity check: |π^T (b − B x̄)| > TOL.  The unnormalised quantity is what the
-        # Farkas-mixin uses (TOL = 1e-6 from the callback).  Using the normalised depth
-        # would be incorrect because Gurobi's FarkasDuals are not scaled to ‖π‖₁ = 1
-        # (CGSP normalises explicitly via its LP).
-        if best_abs_numerator <= TOL:
-            return (
-                None,
-                None,
-                {
-                    "aborted": "no_violation",
-                    "depth": best_depth,
-                    "numerator": best_numerator,
-                },
-            )
+        # Validity check: the last accepted π must still produce a violated cut.
+        if last_status == GRB.INFEASIBLE and abs(last_numerator) <= TOL:
+            return None, None, {"aborted": "no_violation", "numerator": last_numerator}
+        if last_status == GRB.OPTIMAL and last_numerator <= TOL:
+            return None, None, {"aborted": "no_violation", "numerator": last_numerator}
 
-        cut_expr, cut_rhs, witness = self._reconstruct_cut_from_pi_values(best_pi, x_sol, which, TOL=TOL)
-        witness["ddma_depth"] = best_depth
-        witness["ddma_numerator"] = best_numerator
+        cut_expr, cut_rhs, witness = self._reconstruct_cut_from_pi_values(last_pi, x_sol, which, TOL=TOL)
+        witness["ddma_depth"] = last_depth
+        witness["ddma_numerator"] = last_numerator
         witness["ddma_iters"] = it + 1
 
-        # If the best π came from an INFEASIBLE subproblem and numerator < 0, the
+        # If the last π came from an INFEASIBLE subproblem and numerator < 0, the
         # Farkas certificate has the negative Gurobi sign convention (−π is the ray).
         # The callback injects `cut_expr ≤ cut_rhs`, so we negate both sides to flip
         # the inequality: `−cut_expr ≤ −cut_rhs` ≡ `cut_expr ≥ cut_rhs`.
         #
         # This flip is valid ONLY for Farkas rays (INFEASIBLE status): rays form a
         # cone so −λ is also a valid Farkas certificate.  For OPTIMAL (.Pi) duals,
-        # −π is not dual feasible in general, so we must NEVER flip when best came
+        # −π is not dual feasible in general, so we must NEVER flip when last came
         # from an OPTIMAL solve.
-        if best_numerator < 0 and best_status == GRB.INFEASIBLE:
+        if last_numerator < 0 and last_status == GRB.INFEASIBLE:
             cut_expr = -cut_expr
             cut_rhs = -cut_rhs
             witness["ddma_flipped"] = True
