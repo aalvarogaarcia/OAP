@@ -55,7 +55,7 @@ class OAPBaseModel(OAPStatsMixin):
         # 1. Separar las variables libres indicadas del resto
         for i, v in enumerate(vars):
             # Magia aquí: Comprueba si empieza por 'x' O por 'y'
-            if any(v.VarName.startswith(prefix) for prefix in var_prefixes):
+            if any(v.VarName.startswith(prefix + "_") for prefix in var_prefixes):
                 free_indices.append(i)
                 free_names.append(v.VarName)
             else:

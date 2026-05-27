@@ -436,10 +436,21 @@ def separate_tk_cuts(
 
         x(S, S)  +  x_{pw}  +  x_{wq}  +  x_{pq}  ≤  |S|
 
-    with w ∈ S and p, q ∉ S.
+    with w ∈ S,  p ∉ S,  q ∉ S,  and  |S| ≥ 2.
 
-    The optimal S for a fixed triple is found by solving a max-weight closure
-    problem reformulated as a min s-t cut.  The violation formula is:
+    Validity note: the inequality is valid for ATSP only when |S| ≥ 2.
+    For |S| = 1 (i.e. S = {w}), the constraint reduces to
+    x_pw + x_wq + x_pq ≤ 1, which is violated by any Hamiltonian cycle that
+    uses the path p→w→q.  Cuts with |S| = 1 are therefore rejected.
+
+    Necessary screening condition (Salazar, 2026-05-22): for LP-feasible
+    solutions (d_i = 1 ∀i), the SEC guarantees x(S, V\S) ≥ 1 for all S with
+    |S| ≥ 2, so violation = x_pw + x_wq + x_pq − mc can be positive only when
+    x_pw + x_wq + x_pq > 1.  Triples with a smaller sum are skipped.
+
+    The optimal S for a fixed triple (satisfying the screening) is found by
+    solving a max-weight closure problem reformulated as a min s-t cut.
+    The violation formula is:
 
         violation  =  D  −  min_cut  +  (d_w − 1)  +  x_{pw} + x_{wq} + x_{pq}
 
@@ -477,8 +488,14 @@ def separate_tk_cuts(
                 x_wq = x_sol.get((w, q), 0.0)
                 x_pq = x_sol.get((p, q), 0.0)
 
-                # Screening: skip if the three special arcs are negligible
-                if x_pw + x_wq + x_pq <= threshold:
+                # Screening: Salazar's necessary condition.
+                # For LP-feasible solutions (d_i = 1 ∀i), the min-cut over any set
+                # S ⊇ {w} with |S| ≥ 2 and {p,q} ∩ S = ∅ satisfies mc ≥ 1 (by the
+                # SEC: x(S,S) ≤ |S|−1 ⟹ x(S,V\S) = |S| − x(S,S) ≥ 1).
+                # Therefore violation = x_pw + x_wq + x_pq − mc can be positive only
+                # when x_pw + x_wq + x_pq > 1.  Skip all triples that cannot yield a
+                # violated valid T_k cut.
+                if x_pw + x_wq + x_pq <= 1.0:
                     continue
 
                 # D for this triple: exclude p, q, w from the profit sum
@@ -496,6 +513,9 @@ def separate_tk_cuts(
                     S = frozenset(v for v in s_side if v < N)
                     if w not in S:
                         continue  # degenerate cut — skip
+                    if len(S) < 2:
+                        continue  # T_k is invalid for |S| = 1: x_pw + x_wq + x_pq ≤ 1
+                                   # does not hold for all Hamiltonian cycles (e.g. p→w→q).
 
                     key = (S, p, w, q)
                     if key in seen:

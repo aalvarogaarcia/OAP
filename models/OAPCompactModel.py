@@ -785,9 +785,15 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
         """Gurobi callback for dynamic T_k (lifted cycle) cut separation.
 
         Separates T_k inequalities  x(S,S) + x_pw + x_wq + x_pq ≤ |S|
-        at two points:
-        - MIPSOL : integer incumbent  → lazy constraints (cbLazy), threshold 1e-6
-        - MIPNODE: optimal LP node    → user cuts      (cbCut),  threshold 1e-3
+        with w ∈ S, p ∉ S, q ∉ S, |S| ≥ 2.
+
+        - MIPSOL : integer incumbent  → lazy constraints (cbLazy).
+          Valid T_k inequalities are never violated by Hamiltonian cycles
+          (they are facets of the ATSP polytope), so this branch should be
+          a no-op in practice.  It is kept as a defensive safety net.
+        - MIPNODE: optimal LP node    → user cuts      (cbCut).
+          Violations only exist when x_pw + x_wq + x_pq > 1 (necessary
+          condition, enforced inside separate_tk_cuts).
         """
         if where == GRB.Callback.MIPSOL:
             x_sol: dict[Arc, float] = {arc: model.cbGetSolution(var) for arc, var in self.x.items()}
