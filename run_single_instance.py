@@ -190,7 +190,24 @@ def _parse_args() -> argparse.Namespace:
         metavar="N",
         help="Number of threads for compact optimization (0 for default, typically all available cores)",
     )
-
+    p.add_argument(
+        "--tk-cuts",
+        action="store_true",
+        default=False,
+        help="Enable TK cuts (Tavares-Kim, Benders-only)",
+    )
+    p.add_argument(
+        "--no-tk-cuts",
+        action="store_false",
+        dest="tk_cuts",
+        help="Disable TK cuts (Tavares-Kim); this is the default",
+    )
+    p.add_argument(
+        "--root-only",
+        action="store_true",
+        dest="root_only",
+        help="Only consider the root node for cut generation (When using callbacks)",
+    )
     return p.parse_args()
 
 
@@ -205,6 +222,7 @@ def _build_config_from_args(args: argparse.Namespace) -> dict[str, object]:
             or args.use_knapsack
             or args.use_cliques
             or args.crossing_constrain
+            or args.tk_cuts
         ):
             print(
                 "ERROR: --objective, --subtour, --semiplane, --use-knapsack, "
@@ -213,6 +231,7 @@ def _build_config_from_args(args: argparse.Namespace) -> dict[str, object]:
                 file=sys.stderr,
             )
             sys.exit(1)
+        
 
     # Validate: Benders-only flags not used with Compacto
     if args.model_type == "Compacto":
@@ -257,6 +276,7 @@ def _build_config_from_args(args: argparse.Namespace) -> dict[str, object]:
                 file=sys.stderr,
             )
             sys.exit(1)
+
 
 
     # Validate: mutually exclusive cut strategies
@@ -315,6 +335,8 @@ def _build_config_from_args(args: argparse.Namespace) -> dict[str, object]:
         "Extra_Constraints": False,
         "Threads": args.threads,
         "plot": args.plot if args.model_type == "Compacto" else False,
+        "tk_cuts": args.tk_cuts if args.model_type == "Compacto" else False,
+        "root_only": args.root_only if args.model_type == "Compacto" else False,
     }
 
 
@@ -355,10 +377,11 @@ def main() -> None:
             use_knapsack=config["use_knapsack"],  # type: ignore[arg-type]
             use_cliques=config["use_cliques"],  # type: ignore[arg-type]
             crossing_constrain=config["crossing_constrain"],  # type: ignore[arg-type]
+            use_tk_cuts=config["tk_cuts"],  # type: ignore[arg-type]
         )
 
         print("\n[!] Resolviendo...")
-        modelo.solve(relaxed=config["relaxed"], verbose=True, threads=config["Threads"], plot=config["plot"])  # type: ignore[arg-type]
+        modelo.solve(relaxed=config["relaxed"], verbose=True, threads=config["Threads"], plot=config["plot"], root_only=config["root_only"],)  # type: ignore[arg-type]
 
         # Bloque Polihedral corregido: Preguntamos primero, extraemos/guardamos después
         if config["polihedral"]:

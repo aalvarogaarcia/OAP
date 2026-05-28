@@ -14,6 +14,7 @@ class OAPStatsMixin:
 
     model: gp.Model
     points: np.ndarray
+    N: int
     convex_hull_area: float
     x_results: list[tuple[int, int]]
     x: dict[tuple[int, int], gp.Var]
@@ -61,6 +62,82 @@ class OAPStatsMixin:
             obj_val += (pi[0] * pj[1] - pj[0] * pi[1]) / 2.0 * val
         return abs(obj_val)
 
+    def _compute_lp_tk_bound(self) -> float | str:
+        """LP bound for a Compact MIP with T_k cuts, via a cutting-plane loop.
+
+        Creates a fresh LP relaxation (``model.relax()``), then iterates:
+        solve LP -> separate T_k inequalities -> add cuts -> repeat until no
+        new violated cuts are found.  The result is cached in ``self.lp_objval``
+        so subsequent calls to ``get_objval_lp()`` return immediately.
+
+        Called automatically by ``get_objval_lp()`` when ``_use_tk_cuts`` is
+        True and the model is still a MIP (i.e. the full B&C was run, not the
+        pure LP relaxation path).
+        """
+        # Local import to avoid circular-import issues at module load time.
+        from utils.constraints import separate_tk_cuts  # type: ignore[import]
+
+        N: int = getattr(self, "N", len(self.points))
+        if N < 3:
+            return "-"
+
+        lp: gp.Model = self.model.relax()
+        lp.Params.OutputFlag = 0
+        lp.update()
+
+        # Build (i, j) -> lp_var mapping by variable name ("x_i_j").
+        x_lp: dict[tuple[int, int], gp.Var] = {}
+        for v in lp.getVars():
+            name = v.VarName
+            if name.startswith("x_"):
+                parts = name.split("_")
+                if len(parts) >= 3:
+                    try:
+                        x_lp[(int(parts[1]), int(parts[2]))] = v
+                    except ValueError:
+                        pass
+
+        if not x_lp:
+            return "-"
+
+        iteration = 0
+        while True:
+            lp.optimize()
+            if lp.Status != GRB.OPTIMAL:
+                self.lp_objval: float | str = "-"
+                return "-"
+
+            x_sol = {arc: var.X for arc, var in x_lp.items() if var.X > 1e-9}
+            cuts = separate_tk_cuts(x_sol, N, threshold=1e-3)
+            if not cuts:
+                break  # Converged: no violated T_k cut found.
+
+            for cut in cuts:
+                S_list = list(cut.S)
+                rhs = len(S_list)
+                lhs = gp.LinExpr()
+                for i in S_list:
+                    for j in S_list:
+                        if i != j and (i, j) in x_lp:
+                            lhs.addTerms(1.0, x_lp[i, j])
+                if (cut.p, cut.w) in x_lp:
+                    lhs.addTerms(1.0, x_lp[cut.p, cut.w])
+                if (cut.w, cut.q) in x_lp:
+                    lhs.addTerms(1.0, x_lp[cut.w, cut.q])
+                if (cut.p, cut.q) in x_lp:
+                    lhs.addTerms(1.0, x_lp[cut.p, cut.q])
+                lp.addConstr(
+                    lhs <= rhs,
+                    name=f"tk_lp_stat_{iteration}_{cut.p}_{cut.w}_{cut.q}",
+                )
+            lp.update()
+            iteration += 1
+
+        x_vals: dict[tuple[int, int], float] = {arc: var.X for arc, var in x_lp.items()}
+        result: float | str = self._shoelace_from_x_vars(x_vals)  # type: ignore[arg-type]
+        self.lp_objval = result  # Cache so future calls hit case 1 directly.
+        return result
+
     def get_objval_lp(self) -> float | str:
         """
         Recupera o calcula la Relajación Lineal de manera segura dependiendo de la arquitectura.
@@ -89,7 +166,13 @@ class OAPStatsMixin:
             x_vals = {k: v.X for k, v in self.x.items()}
             return self._shoelace_from_x_vars(x_vals)  # type: ignore[arg-type]
 
-        # 4. Si es Compacto MIP (Comportamiento Clásico) — resolver relajación y leer x
+        # 4. Si es Compacto MIP — resolver relajación y leer x.
+        #    When T_k cuts are active, run the cutting-plane loop on a fresh
+        #    model.relax() copy so the bound reflects the tightened LP.
+        if getattr(self, "_use_tk_cuts", False):
+            return self._compute_lp_tk_bound()
+
+        # Classic case: plain LP relaxation without T_k cuts.
         lp = self.model.relax()
         lp.Params.OutputFlag = 0
         lp.optimize()

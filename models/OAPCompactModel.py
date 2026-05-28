@@ -128,9 +128,20 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
         relaxed: bool = False,
         plot: bool = False,
         threads: int = 0,
+        root_only: bool = False,
     ) -> None:
         """Ejecuta la optimización del modelo, aplica relajación si es necesario
         y procesa los resultados.
+
+        Parameters
+        ----------
+        root_only:
+            When *True* (and ``use_tk_cuts`` was set in ``build()``), solves
+            only the root LP node with T_k user cuts injected via the callback.
+            Achieved by setting ``Presolve=0`` and ``NodeLimit=0`` so Gurobi
+            processes the root node (LP + root cuts via MIPNODE callback) and
+            then stops before branching.  Ignored when *relaxed* is *True*
+            (which uses the pure LP cutting-plane loop instead).
         """
         if verbose:
             print("Constraints added. \nOptimizing model...")
@@ -154,9 +165,26 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
             self.model.update()
 
         # --- Optimización ---
-        if not relaxed and getattr(self, "_use_tk_cuts", False):
+        use_tk: bool = getattr(self, "_use_tk_cuts", False)
+
+        if relaxed and use_tk:
+            # Iterative LP cutting-plane loop: solve LP → separate T_k cuts →
+            # add constraints → repeat until no new violated cuts are found.
+            self._solve_lp_tk_cutting_plane(verbose=verbose)
+        elif not relaxed and use_tk:
             self.model.setParam("LazyConstraints", 1)
+            if root_only:
+                # Stop after the root node: LP solved + root cuts added via the
+                # MIPNODE callback, no branching.  Presolve=0 ensures the root
+                # LP is solved as-is so the callback fires before any
+                # presolve-induced model transformation.
+                self.model.setParam("Presolve", 0)
+                self.model.setParam("NodeLimit", 0)
             self.model.optimize(self._compact_tk_callback)
+            if root_only:
+                # Restore defaults so the model can be re-solved if desired.
+                self.model.setParam("Presolve", -1)   # -1 = automatic
+                self.model.setParam("NodeLimit", GRB.INFINITY)
         else:
             self.model.optimize()
 
@@ -778,6 +806,67 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
         print(f"Inyectados {cortes_añadidos} Cortes de Clique de Cruces.")
 
     # ------------------------------------------------------------------
+    # T_k LP cutting-plane loop (relaxed=True)
+    # ------------------------------------------------------------------
+
+    def _solve_lp_tk_cutting_plane(self, verbose: bool = False) -> None:
+        """Iterative LP cutting-plane loop with T_k cut separation.
+
+        Called by ``solve()`` when both *relaxed* and *use_tk_cuts* are set.
+        Each iteration solves the current LP relaxation, separates the most
+        violated T_k inequalities, adds them as ordinary constraints, and
+        repeats until no new violated cuts are found or the LP is no longer
+        optimal.
+
+        Cuts added here become permanent constraints on the model (they tighten
+        the LP relaxation).  The threshold is kept at 1e-3 (same as MIPNODE)
+        to avoid chasing tiny violations that vanish on re-solve.
+        """
+        iteration = 0
+        while True:
+            self.model.optimize()
+            if self.model.Status != GRB.OPTIMAL:
+                if verbose:
+                    print(f"  [T_k LP] stopped at iter {iteration}: status {self.model.Status}")
+                break
+            x_sol: dict[Arc, float] = {
+                arc: var.X for arc, var in self.x.items() if var.X > 1e-9
+            }
+            cuts = separate_tk_cuts(x_sol, self.N, threshold=1e-3)
+            if not cuts:
+                if verbose:
+                    print(f"  [T_k LP] converged after {iteration} iteration(s)")
+                # Cache for get_objval_lp() case 1: avoids re-running the loop
+                # when get_model_stats() is called after solve(relaxed=True).
+                self.lp_objval: float | str = self._shoelace_from_x_vars(x_sol)
+                break
+            if verbose:
+                print(
+                    f"  [T_k LP] iter {iteration}: adding {len(cuts)} cut(s)  "
+                    f"(max violation {cuts[0].violation:.4f})"
+                )
+            for cut in cuts:
+                S_list = list(cut.S)
+                rhs = len(S_list)
+                lhs = gp.LinExpr()
+                for i in S_list:
+                    for j in S_list:
+                        if i != j and (i, j) in self.x:
+                            lhs.addTerms(1.0, self.x[i, j])
+                if (cut.p, cut.w) in self.x:
+                    lhs.addTerms(1.0, self.x[cut.p, cut.w])
+                if (cut.w, cut.q) in self.x:
+                    lhs.addTerms(1.0, self.x[cut.w, cut.q])
+                if (cut.p, cut.q) in self.x:
+                    lhs.addTerms(1.0, self.x[cut.p, cut.q])
+                self.model.addConstr(
+                    lhs <= rhs,
+                    name=f"tk_lp_{iteration}_{cut.p}_{cut.w}_{cut.q}",
+                )
+            self.model.update()
+            iteration += 1
+
+    # ------------------------------------------------------------------
     # T_k cut callback
     # ------------------------------------------------------------------
 
@@ -908,40 +997,6 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
         Las celdas se obtienen como las caras del arreglo de segmentos E",
         representadas por los puntos de muestreo izquierdo/derecho de cada
         sub-segmento de H_ij.
-        """
-        e_double_prime = [(i, j) for (i, j) in self.x.keys() if i < j and (i not in self.CH or j not in self.CH)]
-        hij_data = compute_hij_data(self.points, self.triangles, e_double_prime)
-
-        seen: set[frozenset[int]] = set()
-        n_added = 0
-        for sub_segs in hij_data.values():
-            for left_tris, right_tris in sub_segs:
-                for cell_tris in (left_tris, right_tris):
-                    key = frozenset(cell_tris)
-                    if not key or key in seen:
-                        continue
-                    seen.add(key)
-                    self.model.addConstr(
-                        gp.quicksum(self.y[t] + self.yp[t] for t in cell_tris) == 1,
-                        name=f"cell_cov_{n_added}",
-                    )
-                    n_added += 1
-
-        print(f"Añadidas {n_added} restricciones de cobertura de celdas.")
-
-    def _add_hybrid_eta_constraints(self) -> None:
-        """Formulación híbrida MT3D + η (Modelo A).
-
-        Introduce variables η_s ∈ [0,1] por celda s del arreglo de segmentos
-        candidatos E" y añade:
-
-          (i)  η_s = Σ_{t ⊇ s} y_t                     ∀s ∈ W   (enlace)
-          (ii) η_s − η_{s'} = x_ij − x_ji               ∀{s,s'}∈H_ij, {i,j}∈E"
-                                                                   (MSD constraint 28)
-
-        El bound LP resultante domina simultáneamente al de MT3D y al de MSD
-        (Teorema 4 del paper), sin eliminar variables — MT3D sigue siendo el
-        subconjunto de restricciones de partida.
         """
         e_double_prime = [(i, j) for (i, j) in self.x.keys() if i < j and (i not in self.CH or j not in self.CH)]
         hij_data = compute_hij_data(self.points, self.triangles, e_double_prime)

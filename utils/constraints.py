@@ -12,6 +12,7 @@ from typing import NamedTuple
 
 import gurobipy as gp
 import networkx as nx
+from networkx.algorithms.flow import preflow_push as _preflow_push
 import numpy as np
 from numpy.typing import NDArray
 
@@ -473,6 +474,28 @@ def separate_tk_cuts(
     D_all: float = sum(d[i] - 1.0 for i in range(N) if d[i] > 1.0)
 
     s_node, t_node = N, N + 1
+
+    # ------------------------------------------------------------------
+    # Fast-path: LP-feasible case (d_i ≈ 1 for every i)
+    #
+    # When d_i = 1 for all nodes the profit/penalty arcs for optional nodes
+    # all have capacity 0 (1 − d_i = 0) and can be omitted.  The base
+    # graph contains only the LP arcs.  Per triple we add/remove the three
+    # INF force arcs (s→w, p→t, q→t) without rebuilding from scratch.
+    #
+    # preflow_push is O(V²√E) vs Edmonds-Karp O(VE²) — faster on dense
+    # graphs like the ones that appear here.
+    # ------------------------------------------------------------------
+    all_lp_feasible: bool = all(abs(d[i] - 1.0) < 1e-9 for i in range(N))
+
+    G_base: nx.DiGraph | None = None
+    if all_lp_feasible:
+        G_base = nx.DiGraph()
+        G_base.add_nodes_from(range(N + 2))
+        for (i, j), val in x_sol.items():
+            if val > 1e-12:
+                G_base.add_edge(i, j, capacity=val)
+
     cuts: list[TkCut] = []
     seen: set[tuple[frozenset[int], int, int, int]] = set()
 
@@ -504,18 +527,40 @@ def separate_tk_cuts(
                     if d[node] > 1.0:
                         D -= d[node] - 1.0
 
-                G = _build_tk_network(x_sol, d, N, p, w, q, INF)
-                mc, (s_side, _t_side) = nx.minimum_cut(G, s_node, t_node, capacity="capacity")
+                if all_lp_feasible:
+                    # Fast path: mutate G_base in-place with the 3 force arcs,
+                    # run min-cut, then remove them.  networkx flow algorithms
+                    # operate on a separate residual copy so G_base is not
+                    # altered by the cut computation itself.
+                    assert G_base is not None
+                    G_base.add_edge(s_node, w, capacity=INF)
+                    G_base.add_edge(p, t_node, capacity=INF)
+                    G_base.add_edge(q, t_node, capacity=INF)
+                    mc, (s_side, _t_side) = nx.minimum_cut(
+                        G_base, s_node, t_node,
+                        capacity="capacity",
+                        flow_func=_preflow_push,
+                    )
+                    G_base.remove_edge(s_node, w)
+                    G_base.remove_edge(p, t_node)
+                    G_base.remove_edge(q, t_node)
+                else:
+                    # General path: rebuild per triple (handles d_i != 1).
+                    G = _build_tk_network(x_sol, d, N, p, w, q, INF)
+                    mc, (s_side, _t_side) = nx.minimum_cut(
+                        G, s_node, t_node,
+                        capacity="capacity",
+                        flow_func=_preflow_push,
+                    )
 
                 violation = D - mc + (d[w] - 1.0) + x_pw + x_wq + x_pq
 
                 if violation > threshold:
                     S = frozenset(v for v in s_side if v < N)
                     if w not in S:
-                        continue  # degenerate cut — skip
+                        continue  # degenerate cut -- skip
                     if len(S) < 2:
-                        continue  # T_k is invalid for |S| = 1: x_pw + x_wq + x_pq ≤ 1
-                                   # does not hold for all Hamiltonian cycles (e.g. p→w→q).
+                        continue  # T_k invalid for |S|=1
 
                     key = (S, p, w, q)
                     if key in seen:
