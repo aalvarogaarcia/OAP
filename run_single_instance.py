@@ -208,6 +208,11 @@ def _parse_args() -> argparse.Namespace:
         dest="root_only",
         help="Only consider the root node for cut generation (When using callbacks)",
     )
+    p.add_argument(
+        "--dump-vars",
+        action="store_true",
+        help="Dump variable values to CSV after solving (for debugging)",
+    )   
     return p.parse_args()
 
 
@@ -337,6 +342,7 @@ def _build_config_from_args(args: argparse.Namespace) -> dict[str, object]:
         "plot": args.plot if args.model_type == "Compacto" else False,
         "tk_cuts": args.tk_cuts if args.model_type == "Compacto" else False,
         "root_only": args.root_only if args.model_type == "Compacto" else False,
+        "dump_vars": args.dump_vars,
     }
 
 
@@ -440,8 +446,22 @@ def main() -> None:
         ruta_final = getattr(modelo, "log_path", f"outputs/Logs/benders_{instance_name}.json")
         print(f" 💾 Logs de cortes guardados en: {ruta_final}")
 
+    if config["model_type"] == "Compacto" and config["plot"]:
+        print(f" 📊 Plots generados para la instancia {instance_name}. Revisa la carpeta de outputs/LaTex/.")
     print("=" * 50 + "\n")
 
+    if config["dump_vars"] and config["model_type"] == "Compacto":
+        print("📋 Dumping variable values to CSV for debugging...")
+        
+        if config["relaxed"]:
+            output_dir = f"outputs/LP_vars/{instance_name}.csv"
+        else:
+            output_dir = f"outputs/Solutions/{instance_name}.csv"
+        
+        modelo.dump_vars_csv(output_dir)  # type: ignore[attr-defined]
+        print(f"✅ Variable values dumped successfully at {output_dir}.")
+
+        
     print("✅ Resumen de Resultados:")
     print(modelo)
 

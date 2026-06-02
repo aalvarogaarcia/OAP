@@ -37,6 +37,8 @@ _CSV_FIELDNAMES: list[str] = [
     "IP Value",
     "Time (s)",
     "Nodes",
+    "LP MCF",
+    "LP MCF+Tk",
 ]
 _CSV_KEY_MAP: dict[str, str] = {
     "Instance": "Instance",
@@ -49,6 +51,8 @@ _CSV_KEY_MAP: dict[str, str] = {
     "IP": "IP Value",
     "Time": "Time (s)",
     "Nodes": "Nodes",
+    "LP_MCF": "LP MCF",
+    "LP_MCF_Tk": "LP MCF+Tk",
 }
 
 
@@ -99,6 +103,54 @@ def build_and_solve(
     )
     model.solve(time_limit=time_limit)
     return model
+
+
+def solve_lp_mcf(
+    instance_path: str,
+    maximize: bool,
+    obj: int,
+    mode: int,
+    sum_constrain: bool,
+    strengthen: bool,
+    use_tk_cuts: bool = False,
+    max_tk_iterations: int | None = 5,
+    time_limit: int = 300,
+) -> float | str:
+    """Solve the LP relaxation with MCF subtour elimination.
+
+    Returns the LP objective value (Shoelace area).  A fresh model is
+    constructed so it does not interfere with the MIP solve.
+
+    Parameters
+    ----------
+    use_tk_cuts:
+        When *True*, T_k lifted-cycle inequalities are added via an iterative
+        cutting-plane loop limited to *max_tk_iterations* rounds.
+    max_tk_iterations:
+        Maximum number of cut-adding iterations in the T_k LP loop.
+        ``None`` means no limit (run until convergence).  Ignored when
+        *use_tk_cuts* is *False*.
+    """
+    instance_name = os.path.basename(instance_path).replace(".instance", "").replace(".txt", "")
+    tag = "_lp_tk" if use_tk_cuts else "_lp_mcf"
+    points = read_indexed_instance(instance_path)
+    triangles = compute_triangles(points)
+    model = OAPCompactModel(points, triangles, name=instance_name + tag)
+    model.build(
+        objective=_OBJECTIVE_MAP[obj],  # type: ignore[arg-type]
+        mode=mode,
+        maximize=maximize,
+        subtour="MCF",
+        sum_constrain=sum_constrain,
+        strengthen=strengthen,
+        use_tk_cuts=use_tk_cuts,
+    )
+    model.solve(
+        time_limit=time_limit,
+        relaxed=True,
+        max_tk_iterations=max_tk_iterations if use_tk_cuts else None,
+    )
+    return model.get_objval_lp()
 
 
 # ---------------------------------------------------------------------------
@@ -282,9 +334,9 @@ def main(
 \setlength{\tabcolsep}{1.5pt}
 \resizebox{\textwidth}{!}{%
 \tiny
-\begin{tabular}{lrrrrrrrrr}
+\begin{tabular}{lrrrrrrrrrr rr}
 \toprule
-\textbf{Instance} & \textbf{|N|} & \textbf{Conv.Hull} & \textbf{Cols} & \textbf{Rows} & \textbf{LP Val} & \textbf{Gap (\%)} & \textbf{IP Val} & \textbf{Time (s)} & \textbf{Nodes} \\
+\textbf{Instance} & \textbf{|N|} & \textbf{Conv.Hull} & \textbf{Cols} & \textbf{Rows} & \textbf{LP Val} & \textbf{Gap (\%)} & \textbf{IP Val} & \textbf{Time (s)} & \textbf{Nodes} & \textbf{LP MCF} & \textbf{LP MCF+$T_k$} \\
 \midrule
 """)
 
@@ -309,6 +361,16 @@ def main(
 
             lp, gap, ip, time_s, nodes = model.get_model_stats()
 
+            # LP-only solves for the two new columns (fresh models, no reuse)
+            lp_mcf: float | str = solve_lp_mcf(
+                file, maximize, obj, mode, sum_constrain, strengthen,
+                use_tk_cuts=False, time_limit=time_limit,
+            )
+            lp_mcf_tk: float | str = solve_lp_mcf(
+                file, maximize, obj, mode, sum_constrain, strengthen,
+                use_tk_cuts=True, max_tk_iterations=5, time_limit=time_limit,
+            )
+
             instance_name = filename.replace(".txt", "").replace("_", "-").replace(".instance", "")
             size_n: int = len(model.points)
             conv_hull_area_str: str = f"{model.convex_hull_area:.2f}"
@@ -329,12 +391,15 @@ def main(
                 "IP": ip,
                 "Time": time_s,
                 "Nodes": nodes,
+                "LP_MCF": lp_mcf,
+                "LP_MCF_Tk": lp_mcf_tk,
             }
             data_list.append(res_row)
 
             row_str = (
                 f"{instance_name} & {size_n} & {conv_hull_area_str} & {cols} & {rows} & "
-                f"{_fmt(lp)} & {_fmt(gap)} & {ip_str} & {time_str} & {nodes} \\\\"
+                f"{_fmt(lp)} & {_fmt(gap)} & {ip_str} & {time_str} & {nodes} & "
+                f"{_fmt(lp_mcf)} & {_fmt(lp_mcf_tk)} \\\\"
             )
             f.write(row_str + "\n")
 
