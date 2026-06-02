@@ -129,6 +129,12 @@ model     = OAPCompactModel(points, triangles, name="my_instance")
 model.build(objective="Fekete", maximize=True, subtour="SCF")
 model.solve(time_limit=300, verbose=True)
 lp, gap, ip, time_s, nodes = model.get_model_stats()
+
+# With T_k cuts (LP cutting-plane to measure tightened root bound):
+model2 = OAPCompactModel(points, triangles, name="my_instance_tk")
+model2.build(objective="Fekete", maximize=False, subtour="SCF", use_tk_cuts=True)
+model2.solve(relaxed=True, verbose=True)   # iterative LP + T_k loop
+lp_tk, *_ = model2.get_model_stats()      # lp_tk is the T_k-tightened LP bound
 ```
 
 Never reuse `points`/`triangles` computed for one model in a different model instance.
@@ -138,7 +144,7 @@ Never reuse `points`/`triangles` computed for one model in a different model ins
 | Module | Contents |
 |---|---|
 | `utils/geometry.py` | Pure geometry, I/O helpers, `Arc`, `PointLookup` |
-| `utils/constraints.py` | Gurobi constraint injectors, `ArcConstraintMap` |
+| `utils/constraints.py` | Gurobi constraint injectors, `ArcConstraintMap`, `TkCut`, `separate_tk_cuts()` |
 | `utils/benders_log.py` | Cut JSONL logging, `SerializedCoeffMap/Expr/RayData` |
 | `utils/visualization.py` | All plotting functions |
 | `utils/utils.py` | Re-export shim only — imports from the four above |
@@ -164,10 +170,24 @@ model.build(
     semiplane: Literal[0, 1, 2] = 0,       # 0=off, 1=V1, 2=V2
     use_knapsack: bool = False,
     use_cliques: bool = False,
+    use_tk_cuts: bool = False,             # T_k lifted-cycle ATSP cuts (see below)
 )
-model.solve(time_limit=7200, verbose=False, relaxed=False, plot=False)
+model.solve(
+    time_limit=7200, verbose=False, relaxed=False, plot=False, threads=0,
+    root_only=False,  # if True + use_tk_cuts: solve only root node (Presolve=0, NodeLimit=0)
+)
 model.log_facets(filepath, var_prefixes="x", verbose=False)  # call after solve()
 ```
+
+**T_k cut modes** (require `build(..., use_tk_cuts=True)`):
+
+| Call | Behaviour |
+|---|---|
+| `solve(relaxed=True)` | Iterative LP cutting-plane loop: solve LP → separate T_k → add constraints → repeat. Converged bound stored in `lp_objval`. |
+| `solve(root_only=True)` | Full MIP variables, but `Presolve=0` + `NodeLimit=0`: root LP solved with T_k user cuts injected via MIPNODE callback. No branching. |
+| `solve()` (default) | Full B&C: T_k cuts added as lazy constraints (MIPSOL) and user cuts (MIPNODE). |
+
+`get_objval_lp()` automatically uses `_compute_lp_tk_bound()` when `_use_tk_cuts=True` and the model is still a MIP, so `get_model_stats()` always reports the T_k-tightened LP bound.
 
 ### `OAPBendersModel`
 

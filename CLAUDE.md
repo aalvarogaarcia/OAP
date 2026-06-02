@@ -73,6 +73,15 @@ model.solve(time_limit=300, verbose=True)
 lp, gap, ip, time_s, nodes = model.get_model_stats()
 ```
 
+**With T_k cuts (LP-bound measurement):**
+
+```python
+model = OAPCompactModel(points, triangles, name="us-night-0000008")
+model.build(objective="Fekete", maximize=False, subtour="SCF", use_tk_cuts=True)
+model.solve(relaxed=True, verbose=True)   # iterative LP + T_k cutting-plane loop
+lp_tk, *_ = model.get_model_stats()       # T_k-tightened LP bound
+```
+
 Never reuse `points` / `triangles` across different model instances.
 
 ## Project principles (binding — see steering.md for the full list)
