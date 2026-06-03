@@ -353,6 +353,62 @@ def aplicar_semiplanos_por_capas(
 
 
 # ---------------------------------------------------------------------------
+# Non-crossing bipartition inequalities (§5.3 lifted, directed form)
+# ---------------------------------------------------------------------------
+
+
+def noncrossing_bipartition(
+    model: gp.Model,
+    p: int,
+    q: int,
+    U: list[int],
+    W: list[int],
+) -> tuple[gp.Model, list[gp.Constr]]:
+    """Inject directed non-crossing bipartition inequalities for separator (p, q).
+
+    Given a bipartition V = {p, q} ∪ U ∪ W, every arc (u, w) with u ∈ U,
+    w ∈ W crosses the undirected edge {p, q}.  Hence using arc (p, q) and
+    any arc (u, w) simultaneously is infeasible.  For each u ∈ U this yields:
+
+        x_{p,q}  +  Σ_{w ∈ W}  x_{u,w}  ≤  1
+
+    Only terms whose variables are present in ``model._x`` are included.
+    Constraints with an empty or singleton LHS are skipped.
+
+    Args:
+        model: Gurobi model carrying ``model._x`` arc-variable dict.
+        p, q:  Separator arc endpoints; only the directed arc (p→q) is used.
+        U:     Nodes on one side of the separator.
+        W:     Nodes on the other side.
+
+    Returns:
+        The same model (modified in-place) and the list of added constraints.
+    """
+    constraints: list[gp.Constr] = []
+
+    x_pq = model._x.get((p, q))
+    if x_pq is None:
+        return model, constraints
+
+    for u in U:
+        expr = gp.LinExpr()
+        expr.addTerms(1.0, x_pq)
+        for w in W:
+            x_uw = model._x.get((u, w))
+            if x_uw is not None:
+                expr.addTerms(1.0, x_uw)
+
+        # Skip trivial constraints (only x_{p,q} present, no crossing arcs)
+        if expr.size() < 2:
+            continue
+
+        c = model.addConstr(expr <= 1.0, name=f"noncross_pq_{p}_{q}_u_{u}")
+        constraints.append(c)
+
+    return model, constraints
+
+
+# ---------------------------------------------------------------------------
 # T_k (lifted cycle) inequality separation
 # ---------------------------------------------------------------------------
 

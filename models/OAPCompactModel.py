@@ -73,6 +73,7 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
         cell_coverage: bool = False,
         hybrid_eta: bool = False,
         use_tk_cuts: bool = False,
+        use_bipartition: bool = False,
     ) -> None:
         """
         Orquestador principal que construye el modelo paso a paso.
@@ -118,6 +119,9 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
 
         if hybrid_eta:
             self._add_hybrid_eta_constraints()
+        
+        if use_bipartition:
+            self._add_bipartition_constraints()
 
         self.model.update()
 
@@ -129,6 +133,7 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
         plot: bool = False,
         threads: int = 0,
         root_only: bool = False,
+        all_polygons: bool = False,
     ) -> None:
         """Ejecuta la optimización del modelo, aplica relajación si es necesario
         y procesa los resultados.
@@ -154,6 +159,11 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
         self.model.Params.SolutionLimit = GRB.MAXINT
         if threads > 0:
             self.model.setParam("Threads", threads)
+
+        # --- Enumeración de Polígonos (Solution Pool) ---
+        if all_polygons:
+            self.model.setParam("PoolSearchMode", 2)  # Find all feasible solutions
+            self.model.setParam("PoolSolutions", 10000)  # Max solutions to store
 
         self.model.update()
 
@@ -196,6 +206,20 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
             self.x_results = [arc for arc, var in self.x.items() if var.X > 0.5]
             if relaxed:
                 self.x_relaxed = {arc: var.X for arc, var in self.x.items() if var.X > 1e-6}
+
+            # --- Enumeración de Polígonos ---
+            if all_polygons:
+                from utils.polygon_enumeration import enumerate_all_polygons, save_polygons_to_json, display_polygons_in_terminal
+
+                polygons = enumerate_all_polygons(self.model, self.x, self.points)
+                if polygons:
+                    output_path = f"outputs/Polygons/{self.name}_all_polygons.json"
+                    save_polygons_to_json(polygons, output_path)
+                    display_polygons_in_terminal(polygons, self.points, max_display=50)
+                    if verbose:
+                        print(f"[OK] All {len(polygons)} polygons saved to: {output_path}")
+                elif verbose:
+                    print("[!] No feasible polygons found in solution pool.")
 
         # --- Visualización ---
         if plot:
@@ -923,6 +947,40 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
                 if (cut.p, cut.q) in self.x:
                     lhs.addTerms(1.0, self.x[cut.p, cut.q])
                 model.cbCut(lhs <= rhs)
+
+    # ------------------------------------------------------------------
+    # Non-crossing bipartition inequalities
+    # ------------------------------------------------------------------
+
+    def _add_bipartition_constraints(self) -> None:
+        """Non-crossing bipartition: x_{p,q} + Σ_{w: [u,w] crosses [p,q]} x_{u,w} ≤ 1.
+
+        For each directed arc (p,q) and each node u, collects all directed arcs
+        (u,w) present in the model whose geometric support properly crosses the
+        segment {p,q}, then adds the aggregated inequality.  Strictly stronger
+        than pairwise crossing constraints in LP when |W_u| ≥ 2.
+        """
+        n_added = 0
+        for (p, q), x_pq in self.x.items():
+            for u in range(self.N):
+                if u == p or u == q:
+                    continue
+                expr = gp.LinExpr()
+                expr.addTerms(1.0, x_pq)
+                for w in range(self.N):
+                    if w == p or w == q or w == u:
+                        continue
+                    x_uw = self.x.get((u, w))
+                    if x_uw is not None and segments_intersect(
+                        self.points[u], self.points[w],
+                        self.points[p], self.points[q],
+                    ):
+                        expr.addTerms(1.0, x_uw)
+                if expr.size() < 2:
+                    continue
+                self.model.addConstr(expr <= 1.0, name=f"noncross_{p}_{q}_u_{u}")
+                n_added += 1
+        print(f"Añadidas {n_added} restricciones de bipartición no-cruzante.")
 
     # ------------------------------------------------------------------
     # Nuevas familias de desigualdades sobre triángulos

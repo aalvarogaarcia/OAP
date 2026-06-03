@@ -5,25 +5,26 @@ from gurobipy import GRB
 
 from models import OAPCompactModel
 from utils.utils import compute_triangles, read_indexed_instance, write_prefile
+from utils.constraints import noncrossing_bipartition
 
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s - %(levelname)s - %(message)s", datefmt="%H:%M:%S")
 
 
 if __name__ == "__main__":
     # Aquí puedes cambiar el nombre de la instancia que quieres ejecutar
-    instance_name = "uniform-0000006-2"
+    instance_name = "euro-night-0000010"
 
     # 1. Preparar datos
     points = read_indexed_instance(f"instance/{instance_name}.instance")
     triangles = compute_triangles(points)
-    write_prefile(f"instance/{instance_name}.instance")
+    #write_prefile(f"instance/{instance_name}.instance")
     
     # 2. Instanciar el modelo
     compact = OAPCompactModel(points, triangles, name=instance_name)
     compact.build(
-        objective="External", maximize=False, subtour="SCF"
+        objective="Internal", maximize=True, subtour="MCF", use_bipartition=True, sum_constrain=True
     )
-
+    
     # Instanciar el modelo de Benders (si quieres probarlo también)
     # benders = OAPBendersModel(points, triangles, name=instance_name)
     # benders.build(objective="Fekete", maximize=True,

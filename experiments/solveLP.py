@@ -47,13 +47,13 @@ INSTANCE_DIR: Path = _REPO_ROOT / "instance"
 TSV_PATH: Path = _REPO_ROOT / "test" / "data" / "TablaResultadosA4.tsv"
 OUTPUT_PATH: Path = _REPO_ROOT / "outputs" / "CSV" / "lp_comparison.xlsx"
 
-OBJECTIVE: str = "Fekete"   # area objective (same IP optimum as "External")
+OBJECTIVE: str = "Internal"   # area objective (same IP optimum as "External")
 MODE: int = 0
 SUM_CONSTRAIN: bool = True
 STRENGTHEN: bool = False     # matches main.py interactive default
 
 MAX_TK_ITERATIONS: int = None  # LP cutting-plane iterations for T_k cuts
-TIME_LIMIT: int = 300       # seconds per LP solve
+TIME_LIMIT: int = 600       # seconds per LP solve
 
 # ---------------------------------------------------------------------------
 # Sentinel returned when solve fails / no solution

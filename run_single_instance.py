@@ -212,7 +212,13 @@ def _parse_args() -> argparse.Namespace:
         "--dump-vars",
         action="store_true",
         help="Dump variable values to CSV after solving (for debugging)",
-    )   
+    )
+    p.add_argument(
+        "--all-polygons",
+        action="store_true",
+        default=False,
+        help="Enumerate all feasible polygons in the constraint space (uses Gurobi solution pool)",
+    )
     return p.parse_args()
 
 
@@ -228,10 +234,11 @@ def _build_config_from_args(args: argparse.Namespace) -> dict[str, object]:
             or args.use_cliques
             or args.crossing_constrain
             or args.tk_cuts
+            or args.all_polygons
         ):
             print(
                 "ERROR: --objective, --subtour, --semiplane, --use-knapsack, "
-                "--use-cliques, --crossing-constrain are Compacto-only flags. "
+                "--use-cliques, --crossing-constrain, --all-polygons are Compacto-only flags. "
                 "Remove them when --model Benders is set.",
                 file=sys.stderr,
             )
@@ -343,6 +350,7 @@ def _build_config_from_args(args: argparse.Namespace) -> dict[str, object]:
         "tk_cuts": args.tk_cuts if args.model_type == "Compacto" else False,
         "root_only": args.root_only if args.model_type == "Compacto" else False,
         "dump_vars": args.dump_vars,
+        "all_polygons": args.all_polygons if args.model_type == "Compacto" else False,
     }
 
 
@@ -387,7 +395,7 @@ def main() -> None:
         )
 
         print("\n[!] Resolviendo...")
-        modelo.solve(relaxed=config["relaxed"], verbose=True, threads=config["Threads"], plot=config["plot"], root_only=config["root_only"],)  # type: ignore[arg-type]
+        modelo.solve(relaxed=config["relaxed"], verbose=True, threads=config["Threads"], plot=config["plot"], root_only=config["root_only"], all_polygons=config["all_polygons"])  # type: ignore[arg-type]
 
         # Bloque Polihedral corregido: Preguntamos primero, extraemos/guardamos después
         if config["polihedral"]:
