@@ -11,6 +11,7 @@ from models.mixin.benders_cgsp_mixin import BendersCGSPMixin
 from models.mixin.benders_ddma_mixin import BendersDDMAMixin
 from models.mixin.benders_farkas_mixin import BendersFarkasMixin
 from models.mixin.benders_master_mixin import BendersMasterMixin
+from models.mixin.benders_maxflow_mixin import BendersMaxFlowMixin
 from models.mixin.benders_mw_mixin import BendersMagnantiWongMixin
 from models.mixin.benders_optimize_mixin import BendersOptimizeMixin
 from models.mixin.benders_pi_mixin import BendersPiMixin
@@ -27,6 +28,7 @@ class OAPBendersModel(  # type: ignore[misc]
     BendersDDMAMixin,  # F3 — before CGSP; shares sub_y/sub_yp
     BendersCGSPMixin,
     BendersMagnantiWongMixin,  # after CGSP — shares dual variable structure
+    BendersMaxFlowMixin,       # FR-7 — after MW, before Farkas
     BendersFarkasMixin,
     BendersPiMixin,
     BendersOptimizeMixin,
@@ -85,6 +87,9 @@ class OAPBendersModel(  # type: ignore[misc]
         self._core_point: dict[str, Any] | None = None  # type: ignore[assignment]
         self._core_point_strategy: str = "lp_relaxation"
 
+        # FR-7 — combinatorial max-flow cuts — defaults to off for backward compat
+        self.use_maxflow: bool = False
+
         # Para el logger de Farkas/Pi si deseas guardar archivos JSON
         self.log_path = f"outputs/Others/Benders/{name}/log.json"
         print(f"Ruta por defecto para log de cortes: {self.log_path}")
@@ -117,6 +122,7 @@ class OAPBendersModel(  # type: ignore[misc]
         cgsp_norm: Literal["misd", "relaxed_l1"] = "relaxed_l1",
         use_ddma: bool = False,
         use_mipnode_cuts: bool = False,
+        use_maxflow: bool = False,
     ) -> None:
         """
         Orquesta la construcción del Problema Maestro y de los Subproblemas.
@@ -164,6 +170,11 @@ class OAPBendersModel(  # type: ignore[misc]
             DDMA / MW cuts are not used at MIPNODE (LP-validity not proven).
             r3/r3_p RHS are set to 1.0 at MIPNODE to prevent artificial
             infeasibility from fractional x and ensure LP-valid cuts.
+        use_maxflow : bool, default False
+            When True, replaces LP-based Farkas certificates with a
+            combinatorial max-flow oracle (FR-7 / M-4).  Mutually exclusive
+            with use_deepest_cuts, use_magnanti_wong, and use_ddma.
+            Requires Hito 2+ to be implemented before use in production.
 
         Notes
         -----
@@ -174,11 +185,11 @@ class OAPBendersModel(  # type: ignore[misc]
         logger.info(f"=== Construyendo OAPBendersModel ({benders_method.upper()}) ===")
 
         # Validate mutually exclusive options
-        n_methods = sum([use_deepest_cuts, use_magnanti_wong, use_ddma])
+        n_methods = sum([use_deepest_cuts, use_magnanti_wong, use_ddma, use_maxflow])
         if n_methods > 1:
             raise ValueError(
-                "use_deepest_cuts, use_magnanti_wong, and use_ddma are mutually "
-                "exclusive — only one may be True at a time."
+                "use_deepest_cuts, use_magnanti_wong, use_ddma, and use_maxflow are "
+                "mutually exclusive — only one may be True at a time."
             )
 
         # Guardamos el método elegido para que el callback sepa qué cortes generar
@@ -245,5 +256,10 @@ class OAPBendersModel(  # type: ignore[misc]
 
         # MIPNODE user cuts flag
         self.use_mipnode_cuts = use_mipnode_cuts
+
+        # FR-7 — max-flow structures (after master + subproblems are built)
+        self.use_maxflow = use_maxflow
+        if use_maxflow:
+            self.build_maxflow_structures()
 
         logger.info("Construcción completada con éxito.")

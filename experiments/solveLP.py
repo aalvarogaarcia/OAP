@@ -51,6 +51,7 @@ OBJECTIVE: str = "Internal"   # area objective (same IP optimum as "External")
 MODE: int = 0
 SUM_CONSTRAIN: bool = True
 STRENGTHEN: bool = False     # matches main.py interactive default
+BIPARTITION: bool = True      # matches main.py interactive default
 
 MAX_TK_ITERATIONS: int = None  # LP cutting-plane iterations for T_k cuts
 TIME_LIMIT: int = 600       # seconds per LP solve
@@ -91,6 +92,7 @@ def _solve_lp(
         sum_constrain=SUM_CONSTRAIN,
         strengthen=STRENGTHEN,
         use_tk_cuts=use_tk_cuts,
+        use_bipartition=BIPARTITION,
     )
     model.solve(
         time_limit=time_limit,

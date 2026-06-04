@@ -1,7 +1,7 @@
 # models/mixin/benders_optimize_mixin.py
 import logging
 import os
-from typing import Literal
+from typing import Any, Literal
 
 import gurobipy as gp
 from gurobipy import GRB
@@ -24,6 +24,12 @@ class BendersOptimizeMixin:
     sub_yp: gp.Model
     benders_method: str
     objective: Literal["Fekete", "Internal"]
+
+    # Sibling-mixin stubs (BendersMaxFlowMixin) — required by mypy per AGENTS.md §Type-checking policy
+    def check_feasibility_integer(self, x_sol: dict[Arc, float], TOL: float = 1e-6) -> tuple[bool, list[Arc]]: ...  # type: ignore[empty-body]
+    def check_feasibility_integer_yp(self, x_sol: dict[Arc, float], TOL: float = 1e-6) -> tuple[bool, list[Arc]]: ...  # type: ignore[empty-body]
+    def get_maxflow_cut_y(self, x_sol: dict[Arc, float], TOL: float = 1e-6) -> tuple[gp.LinExpr | None, float, dict[str, Any] | None]: ...  # type: ignore[empty-body]
+    def get_maxflow_cut_yp(self, x_sol: dict[Arc, float], TOL: float = 1e-6) -> tuple[gp.LinExpr | None, float, dict[str, Any] | None]: ...  # type: ignore[empty-body]
     
     def _update_subproblem_rhs(self, x_sol: dict[Arc, float], tighten_r3: bool = True) -> None:
         """
@@ -121,6 +127,23 @@ class BendersOptimizeMixin:
                     self._log_buffer = []
                     self._cut_buffer = []
                     return
+
+            # FR-7 — combinatorial max-flow path: skip LP subproblem entirely.
+            if getattr(self, "use_maxflow", False):
+                _TOL_mf = 1e-6
+                _feasible_y, _ = self.check_feasibility_integer(x_sol, _TOL_mf)
+                if not _feasible_y:
+                    _cut_y, _rhs_y, _ = self.get_maxflow_cut_y(x_sol, _TOL_mf)
+                    if _cut_y is not None:
+                        model.cbLazy(_cut_y <= _rhs_y)
+                _feasible_yp, _ = self.check_feasibility_integer_yp(x_sol, _TOL_mf)
+                if not _feasible_yp:
+                    _cut_yp, _rhs_yp, _ = self.get_maxflow_cut_yp(x_sol, _TOL_mf)
+                    if _cut_yp is not None:
+                        model.cbLazy(_cut_yp <= _rhs_yp)
+                self._log_buffer = []
+                self._cut_buffer = []
+                return  # LP subproblem not solved; DFJ/LP accounting not needed
 
             eta_sol = model.cbGetSolution(self.eta) if hasattr(self, 'objective') and self.objective == "Internal" else 0.0
 
@@ -312,9 +335,10 @@ class BendersOptimizeMixin:
 
             TOL = 1e-6
 
-            use_deepest = getattr(self, "use_deepest_cuts", False)
-            use_mw      = getattr(self, "use_magnanti_wong", False)
-            use_ddma    = getattr(self, "use_ddma", False)
+            use_deepest  = getattr(self, "use_deepest_cuts", False)
+            use_mw       = getattr(self, "use_magnanti_wong", False)
+            use_ddma     = getattr(self, "use_ddma", False)
+            use_maxflow  = getattr(self, "use_maxflow", False)
 
             # Deduplicate DDMA calls: Gurobi may re-enter MIPNODE after cbCut()
             # adds a cut.  Each re-entry resolves subproblems and would call DDMA
@@ -337,6 +361,13 @@ class BendersOptimizeMixin:
                         model.cbCut(cut_expr_y <= cut_rhs_y)
                 elif use_mw:
                     cut_expr_y, cut_rhs_y, _ = self.get_mw_cut_y(x_sol, TOL=TOL)
+                    if cut_expr_y is not None:
+                        model.cbCut(cut_expr_y <= cut_rhs_y)
+                elif use_maxflow:
+                    # Bipartite max-flow cut for fractional x̄ at MIPNODE.
+                    # OQ-A caveat: LP-validity unresolved — only fires when
+                    # _mf_use_bipartite_fractional=True (set after OQ-A resolved).
+                    cut_expr_y, cut_rhs_y, _ = self.get_maxflow_cut_y(x_sol, TOL)
                     if cut_expr_y is not None:
                         model.cbCut(cut_expr_y <= cut_rhs_y)
                 else:
@@ -366,6 +397,10 @@ class BendersOptimizeMixin:
                             model.cbCut(cut_expr <= 0)
                         elif cut_val < -TOL:
                             model.cbCut(cut_expr >= 0)
+                elif use_maxflow:
+                    cut_expr_yp, cut_rhs_yp, _ = self.get_maxflow_cut_yp(x_sol, TOL)
+                    if cut_expr_yp is not None:
+                        model.cbCut(cut_expr_yp <= cut_rhs_yp)
                 else:
                     cut_expr, cut_val = self.get_farkas_cut_yp(x_sol, TOL)
                     if cut_val > TOL:
@@ -536,11 +571,12 @@ class BendersOptimizeMixin:
         sub = self.sub_yp if which == "yp" else self.sub_y
         sub_status = sub.Status
         sfx = "yp" if which == "yp" else "y"
-        use_deepest = getattr(self, "use_deepest_cuts", False)
-        use_ddma    = getattr(self, "use_ddma", False)
-        use_mw      = getattr(self, "use_magnanti_wong", False)
+        use_deepest  = getattr(self, "use_deepest_cuts", False)
+        use_ddma     = getattr(self, "use_ddma", False)
+        use_mw       = getattr(self, "use_magnanti_wong", False)
+        use_maxflow  = getattr(self, "use_maxflow", False)
 
-        # --- Advanced cut generators (CGSP / DDMA / MW) ---
+        # --- Advanced cut generators (CGSP / DDMA / MW / max-flow) ---
         cut_expr_adv = cut_rhs_adv = None
         if use_deepest:
             cut_expr_adv, cut_rhs_adv, _ = (
@@ -557,9 +593,16 @@ class BendersOptimizeMixin:
                 self.get_mw_cut_yp(x_sol, TOL=TOL) if which == "yp"
                 else self.get_mw_cut_y(x_sol, TOL=TOL)
             )
+        elif use_maxflow:
+            # Bipartite max-flow cut for fractional x̄ in LP-relaxation loop.
+            # Returns (None, 0.0, None) unless _mf_use_bipartite_fractional=True.
+            cut_expr_adv, cut_rhs_adv, _ = (
+                self.get_maxflow_cut_yp(x_sol, TOL) if which == "yp"
+                else self.get_maxflow_cut_y(x_sol, TOL)
+            )
 
         if cut_expr_adv is not None:
-            tag = "cgsp" if use_deepest else ("ddma" if use_ddma else "mw")
+            tag = "cgsp" if use_deepest else ("ddma" if use_ddma else ("mw" if use_mw else "maxflow"))
             self.model.addConstr(cut_expr_adv <= cut_rhs_adv, name=f"lp_{tag}_{sfx}{iter_label}")
             return "injected"
 

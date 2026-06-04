@@ -167,10 +167,17 @@ model.build(
     maximize: bool = True,
     subtour: Literal["SCF", "MTZ", "MCF"] = "SCF",
     sum_constrain: bool = True,
+    strengthen: bool = False,              # R1/R2/R3 strengthening (§5.4): LP-tightening, redundant for IP
     semiplane: Literal[0, 1, 2] = 0,       # 0=off, 1=V1, 2=V2
     use_knapsack: bool = False,
     use_cliques: bool = False,
+    crossing_constrain: bool = False,      # pairwise crossing arc constraints
+    use_triangle_cliques: bool = False,    # incompatible-triangle clique constraints
+    arc_triangle_link: bool = False,       # arc–triangle linking constraints
+    cell_coverage: bool = False,           # arrangement cell coverage constraints
+    hybrid_eta: bool = False,              # hybrid MT3D+η cell variables
     use_tk_cuts: bool = False,             # T_k lifted-cycle ATSP cuts (see below)
+    use_bipartition: bool = False,         # non-crossing bipartition cuts (source-fixed + destination-fixed)
 )
 model.solve(
     time_limit=7200, verbose=False, relaxed=False, plot=False, threads=0,
@@ -213,10 +220,18 @@ model.build(
     cgsp_norm: Literal["misd", "relaxed_l1"] = "relaxed_l1",
     use_ddma: bool = False,               # DDMA Algorithm 3
     use_mipnode_cuts: bool = False,       # Farkas user cuts at MIPNODE (LP-valid, no r3 tightening)
+    use_maxflow: bool = False,            # FR-7: combinatorial max-flow cuts (replaces LP at MIPSOL)
 ) -> None
 ```
 
-**Mutual exclusivity:** `use_deepest_cuts`, `use_magnanti_wong`, and `use_ddma` are mutually exclusive — at most one may be `True` at a time.
+**Mutual exclusivity:** `use_deepest_cuts`, `use_magnanti_wong`, `use_ddma`, and `use_maxflow` are mutually exclusive — at most one may be `True` at a time.
+
+**`use_maxflow` behaviour (FR-7 / M-4):**
+- At MIPSOL: O(N) combinatorial oracle replaces LP subproblem entirely; infeasible arcs trigger a *blocking cut* `x[demand] + Σ x[blockers] ≤ |blockers|` (provably valid for integer x̄).
+- At MIPNODE: bipartite max-flow cut injected via `cbCut` (OQ-A caveat: LP-validity of fractional cuts is an open question — only fires when `model._mf_use_bipartite_fractional = True`, which defaults to `False`).
+- Static forbidden-arc constraints `x[i,j] == 0` are added at `build()` for all arcs with empty `triangles_adj_list[i][j]`.
+- Mixin: `BendersMaxFlowMixin` in `models/mixin/benders_maxflow_mixin.py`.
+- To enable bipartite fractional cuts after OQ-A is resolved: set `model._mf_use_bipartite_fractional = True` after `build()`.
 
 ```python
 model.solve(time_limit=7200, verbose=False, relaxed=False,

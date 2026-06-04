@@ -12,7 +12,7 @@ logging.basicConfig(level=logging.WARNING, format="%(asctime)s - %(levelname)s -
 
 if __name__ == "__main__":
     # Aquí puedes cambiar el nombre de la instancia que quieres ejecutar
-    instance_name = "euro-night-0000010"
+    instance_name = "euro-night-0000025"
 
     # 1. Preparar datos
     points = read_indexed_instance(f"instance/{instance_name}.instance")
@@ -33,7 +33,7 @@ if __name__ == "__main__":
 
     # 3. Resolver (Obligatorio save_cuts=True para el análisis)
     # El mixin se encargará de guardar el JSON en outputs/Logs/benders_{name}.json
-    compact.solve(time_limit=300, verbose=True)
+    compact.solve(time_limit=300, verbose=True, plot =  False)
 
     # Si el modelo acaba infactible, exporta el IIS para depuración.
     status = compact.model.Status

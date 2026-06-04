@@ -953,15 +953,23 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
     # ------------------------------------------------------------------
 
     def _add_bipartition_constraints(self) -> None:
-        """Non-crossing bipartition: x_{p,q} + Σ_{w: [u,w] crosses [p,q]} x_{u,w} ≤ 1.
+        """Non-crossing bipartition inequalities (source-fixed and destination-fixed).
 
-        For each directed arc (p,q) and each node u, collects all directed arcs
-        (u,w) present in the model whose geometric support properly crosses the
-        segment {p,q}, then adds the aggregated inequality.  Strictly stronger
-        than pairwise crossing constraints in LP when |W_u| ≥ 2.
+        For each directed arc (p,q) we add two symmetric families:
+
+        Source-fixed  (valid by outdegree(u) = 1):
+            x_{p,q} + Σ_{w: (u,w) crosses [p,q]} x_{u,w} ≤ 1   ∀ u ∉ {p,q}
+
+        Destination-fixed  (valid by indegree(w) = 1):
+            x_{p,q} + Σ_{u: (u,w) crosses [p,q]} x_{u,w} ≤ 1   ∀ w ∉ {p,q}
+
+        Each family is strictly stronger than pairwise crossing constraints in the
+        LP relaxation when the aggregated set has cardinality ≥ 2.
         """
-        n_added = 0
+        n_src = 0
+        n_dst = 0
         for (p, q), x_pq in self.x.items():
+            # --- source-fixed: fix u, collect destinations w ---
             for u in range(self.N):
                 if u == p or u == q:
                     continue
@@ -978,9 +986,33 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
                         expr.addTerms(1.0, x_uw)
                 if expr.size() < 2:
                     continue
-                self.model.addConstr(expr <= 1.0, name=f"noncross_{p}_{q}_u_{u}")
-                n_added += 1
-        print(f"Añadidas {n_added} restricciones de bipartición no-cruzante.")
+                self.model.addConstr(expr <= 1.0, name=f"noncross_src_{p}_{q}_u{u}")
+                n_src += 1
+
+            # --- destination-fixed: fix w, collect sources u ---
+            for w in range(self.N):
+                if w == p or w == q:
+                    continue
+                expr = gp.LinExpr()
+                expr.addTerms(1.0, x_pq)
+                for u in range(self.N):
+                    if u == p or u == q or u == w:
+                        continue
+                    x_uw = self.x.get((u, w))
+                    if x_uw is not None and segments_intersect(
+                        self.points[u], self.points[w],
+                        self.points[p], self.points[q],
+                    ):
+                        expr.addTerms(1.0, x_uw)
+                if expr.size() < 2:
+                    continue
+                self.model.addConstr(expr <= 1.0, name=f"noncross_dst_{p}_{q}_w{w}")
+                n_dst += 1
+
+        print(
+            f"Bipartición no-cruzante: {n_src} fuente-fija + {n_dst} destino-fija"
+            f" = {n_src + n_dst} restricciones."
+        )
 
     # ------------------------------------------------------------------
     # Nuevas familias de desigualdades sobre triángulos
