@@ -349,6 +349,7 @@ def main(
         sys.exit(1)
 
     tsv = pd.read_csv(TSV_PATH, sep="\t")
+    tsv = tsv.sort_values(by=["N", "instance"], ascending=[True, True], kind="stable")
     combos = _all_combos()
 
     if directions == "both":
