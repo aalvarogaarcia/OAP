@@ -434,6 +434,40 @@ def iter_directed_crossing_pairs(
         yield (b, a), (c, d)  # R/F
 
 
+def build_crossing_arc_index(
+    points: NDArray[np.int64],
+    arcs: Iterable[Arc],
+) -> dict[Arc, tuple[dict[int, list[Arc]], dict[int, list[Arc]]]]:
+    """Build reusable crossing groups for directed-arc constraints.
+
+    For each directed separator arc ``(p, q)``, the returned structure stores:
+
+    - source-fixed groups: ``src_groups[u] = [(u, w), ...]``
+    - destination-fixed groups: ``dst_groups[w] = [(u, w), ...]``
+
+    where each arc in the group properly intersects segment ``[p, q]``.
+    """
+    arc_list = list(arcs)
+    index: dict[Arc, tuple[dict[int, list[Arc]], dict[int, list[Arc]]]] = {}
+
+    for p, q in arc_list:
+        src_groups: dict[int, list[Arc]] = {}
+        dst_groups: dict[int, list[Arc]] = {}
+        seg_p = points[p]
+        seg_q = points[q]
+
+        for u, w in arc_list:
+            if u == w or u == p or u == q or w == p or w == q:
+                continue
+            if segments_intersect(points[u], points[w], seg_p, seg_q):
+                src_groups.setdefault(u, []).append((u, w))
+                dst_groups.setdefault(w, []).append((u, w))
+
+        index[(p, q)] = (src_groups, dst_groups)
+
+    return index
+
+
 # ---------------------------------------------------------------------------
 # Triangle metrics
 # ---------------------------------------------------------------------------

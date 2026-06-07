@@ -347,10 +347,10 @@ class OAPBuilderMixin:
         - v4: requires (u, v) and (w, z) in ``self.x``.
         """
         if version == 1:
-            if (u, v) not in self.x or (w, z) not in self.x:
+            if (u, v) not in self.x or (w, z) not in self.x or (v, u) not in self.x or (z, w) not in self.x:
                 return
             self.model.addConstr(
-                self.x[u, v] + self.x[w, z] <= 1,
+                self.x[u, v] + self.x[v, u] + self.x[w, z] + self.x[z, w] <= 1,
                 name=f"crossing_v{version}_{u}_{v}__{w}_{z}",
             )
             return

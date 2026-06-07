@@ -15,10 +15,10 @@ from models.mixin.oap_builder_mixin import OAPBuilderMixin
 from models.OAPBaseModel import OAPBaseModel
 from utils.constraints import separate_tk_cuts
 from utils.utils import (
+    build_crossing_arc_index,
     compute_convex_hull,
     compute_convex_hull_area,
     compute_hij_data,
-    cost_function_area,
     incompatible_triangles,
     point_in_triangle,
     segments_intersect,
@@ -28,6 +28,11 @@ Arc = tuple[int, int]
 ArcVarMap = dict[Arc, gp.Var]
 McfArc = tuple[int, int, int]
 McfVarMap = dict[McfArc, gp.Var]
+CrossingGroups = tuple[dict[int, list[Arc]], dict[int, list[Arc]]]
+
+_CROSS_MODE_SOURCE = 0
+_CROSS_MODE_DESTINATION = 1
+_CROSS_MODE_BOTH = 2
 
 
 class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
@@ -55,6 +60,7 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
         self.zp: ArcVarMap = {}
         # Variables η_s del híbrido MT3D+η (una por celda del arreglo)
         self.eta: dict[int, gp.Var] = {}
+        self._crossing_arc_index: dict[Arc, CrossingGroups] | None = None
 
     def build(
         self,
@@ -74,6 +80,7 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
         hybrid_eta: bool = False,
         use_tk_cuts: bool = False,
         use_bipartition: bool = False,
+        use_triangle_crossing: bool = False,
     ) -> None:
         """
         Orquestador principal que construye el modelo paso a paso.
@@ -84,6 +91,7 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
             pero cierran sustancialmente el gap LP.
         """
         self._use_tk_cuts = use_tk_cuts
+        self._crossing_arc_index = None
         self._create_variables(subtour, objective, mode)
         self._set_objective(objective, mode, maximize)
         self._add_degree_constraints()
@@ -106,7 +114,7 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
             self.inyectar_cliques_de_cruce()
 
         if crossing_constrain:
-            self._add_crossing_constraints()
+            self._add_crossing_constraints(version=1)
 
         if use_triangle_cliques:
             self._add_triangle_clique_constraints()
@@ -121,7 +129,10 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
             self._add_hybrid_eta_constraints()
         
         if use_bipartition:
-            self._add_bipartition_constraints()
+            self._add_bipartition_constraints(mode=_CROSS_MODE_BOTH)
+
+        if use_triangle_crossing:
+            self._add_triangle_crossing_constraints(mode=_CROSS_MODE_BOTH)
 
         self.model.update()
 
@@ -209,7 +220,11 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
 
             # --- Enumeración de Polígonos ---
             if all_polygons:
-                from utils.polygon_enumeration import enumerate_all_polygons, save_polygons_to_json, display_polygons_in_terminal
+                from utils.polygon_enumeration import (
+                    display_polygons_in_terminal,
+                    enumerate_all_polygons,
+                    save_polygons_to_json,
+                )
 
                 polygons = enumerate_all_polygons(self.model, self.x, self.points)
                 if polygons:
@@ -952,8 +967,17 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
     # Non-crossing bipartition inequalities
     # ------------------------------------------------------------------
 
-    def _add_bipartition_constraints(self) -> None:
-        """Non-crossing bipartition inequalities (source-fixed and destination-fixed).
+    def _validate_crossing_mode(self, mode: int) -> None:
+        if mode not in {_CROSS_MODE_SOURCE, _CROSS_MODE_DESTINATION, _CROSS_MODE_BOTH}:
+            raise ValueError(f"Invalid crossing mode {mode}. Valid values are 0, 1, 2.")
+
+    def _get_crossing_arc_index(self) -> dict[Arc, CrossingGroups]:
+        if self._crossing_arc_index is None:
+            self._crossing_arc_index = build_crossing_arc_index(self.points, self.x.keys())
+        return self._crossing_arc_index
+
+    def _add_bipartition_constraints(self, mode: int = _CROSS_MODE_BOTH) -> None:
+        """Non-crossing bipartition inequalities with source/destination modes.
 
         For each directed arc (p,q) we add two symmetric families:
 
@@ -966,51 +990,98 @@ class OAPCompactModel(OAPBaseModel, OAPBuilderMixin):
         Each family is strictly stronger than pairwise crossing constraints in the
         LP relaxation when the aggregated set has cardinality ≥ 2.
         """
+        self._validate_crossing_mode(mode)
+        crossing_index = self._get_crossing_arc_index()
+
         n_src = 0
         n_dst = 0
         for (p, q), x_pq in self.x.items():
-            # --- source-fixed: fix u, collect destinations w ---
-            for u in range(self.N):
-                if u == p or u == q:
-                    continue
-                expr = gp.LinExpr()
-                expr.addTerms(1.0, x_pq)
-                for w in range(self.N):
-                    if w == p or w == q or w == u:
-                        continue
-                    x_uw = self.x.get((u, w))
-                    if x_uw is not None and segments_intersect(
-                        self.points[u], self.points[w],
-                        self.points[p], self.points[q],
-                    ):
-                        expr.addTerms(1.0, x_uw)
-                if expr.size() < 2:
-                    continue
-                self.model.addConstr(expr <= 1.0, name=f"noncross_src_{p}_{q}_u{u}")
-                n_src += 1
+            src_groups, dst_groups = crossing_index.get((p, q), ({}, {}))
 
-            # --- destination-fixed: fix w, collect sources u ---
-            for w in range(self.N):
-                if w == p or w == q:
-                    continue
-                expr = gp.LinExpr()
-                expr.addTerms(1.0, x_pq)
-                for u in range(self.N):
-                    if u == p or u == q or u == w:
+            if mode in {_CROSS_MODE_SOURCE, _CROSS_MODE_BOTH}:
+                for u, arcs in src_groups.items():
+                    expr = gp.LinExpr()
+                    expr.addTerms(1.0, x_pq)
+                    for arc in arcs:
+                        expr.addTerms(1.0, self.x[arc])
+                    if expr.size() < 2:
                         continue
-                    x_uw = self.x.get((u, w))
-                    if x_uw is not None and segments_intersect(
-                        self.points[u], self.points[w],
-                        self.points[p], self.points[q],
-                    ):
-                        expr.addTerms(1.0, x_uw)
-                if expr.size() < 2:
-                    continue
-                self.model.addConstr(expr <= 1.0, name=f"noncross_dst_{p}_{q}_w{w}")
-                n_dst += 1
+                    self.model.addConstr(expr <= 1.0, name=f"noncross_src_{p}_{q}_u{u}")
+                    n_src += 1
+
+            if mode in {_CROSS_MODE_DESTINATION, _CROSS_MODE_BOTH}:
+                for w, arcs in dst_groups.items():
+                    expr = gp.LinExpr()
+                    expr.addTerms(1.0, x_pq)
+                    for arc in arcs:
+                        expr.addTerms(1.0, self.x[arc])
+                    if expr.size() < 2:
+                        continue
+                    self.model.addConstr(expr <= 1.0, name=f"noncross_dst_{p}_{q}_w{w}")
+                    n_dst += 1
 
         print(
             f"Bipartición no-cruzante: {n_src} fuente-fija + {n_dst} destino-fija"
+            f" = {n_src + n_dst} restricciones."
+        )
+
+    def _add_triangle_crossing_constraints(self, mode: int = _CROSS_MODE_BOTH) -> None:
+        """Triangle crossing family for every ordered triple (i, k, p).
+
+        For distinct i, k, p we add:
+
+            Σ x_{i,j}: [i,j] crosses [k,p]
+          + Σ x_{k,l}: [k,l] crosses [i,p]
+          + Σ x_{p,q}: [p,q] crosses [i,k]  <= 1
+
+        with a symmetric destination-fixed variant when mode is 1 or 2.
+        """
+        self._validate_crossing_mode(mode)
+        crossing_index = self._get_crossing_arc_index()
+
+        n_src = 0
+        n_dst = 0
+
+        for i in range(self.N):
+            for k in range(self.N):
+                if k == i:
+                    continue
+                for p in range(self.N):
+                    if p == i or p == k:
+                        continue
+
+                    seg_kp = crossing_index.get((k, p))
+                    seg_ip = crossing_index.get((i, p))
+                    seg_ik = crossing_index.get((i, k))
+                    if seg_kp is None or seg_ip is None or seg_ik is None:
+                        continue
+
+                    if mode in {_CROSS_MODE_SOURCE, _CROSS_MODE_BOTH}:
+                        expr_src = gp.LinExpr()
+                        for arc in seg_kp[0].get(i, []):
+                            expr_src.addTerms(1.0, self.x[arc])
+                        for arc in seg_ip[0].get(k, []):
+                            expr_src.addTerms(1.0, self.x[arc])
+                        for arc in seg_ik[0].get(p, []):
+                            expr_src.addTerms(1.0, self.x[arc])
+                        if expr_src.size() >= 2:
+                            self.model.addConstr(expr_src <= 1.0, name=f"tri_cross_src_{i}_{k}_{p}")
+                            n_src += 1
+
+                    if mode in {_CROSS_MODE_DESTINATION, _CROSS_MODE_BOTH}:
+                        expr_dst = gp.LinExpr()
+                        for arc in seg_kp[1].get(i, []):
+                            expr_dst.addTerms(1.0, self.x[arc])
+                        for arc in seg_ip[1].get(k, []):
+                            expr_dst.addTerms(1.0, self.x[arc])
+                        for arc in seg_ik[1].get(p, []):
+                            expr_dst.addTerms(1.0, self.x[arc])
+                        if expr_dst.size() >= 2:
+                            self.model.addConstr(expr_dst <= 1.0, name=f"tri_cross_dst_{i}_{k}_{p}")
+                            n_dst += 1
+
+        print(
+            f"Triángulo-cruce: {n_src} fuente-fija + {n_dst} destino-fija"
             f" = {n_src + n_dst} restricciones."
         )
 
